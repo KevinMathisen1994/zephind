@@ -1,10 +1,8 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import puppeteer from "puppeteer";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
 
-puppeteer.use(StealthPlugin());
 
 const CODE_TO_WARD: Record<string, string> = {
   "13101": "千代田区", "13102": "中央区", "13103": "港区",
@@ -41,11 +39,11 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         if (!text) return 0;
         var cleaned = text.replace(/[\\s,]/g, "");
         var firstPart = cleaned.split(/[~〜-]/)[0];
-        var okuMatch = firstPart.match(/(\\d+(?:\\.\\d+)?)億/);
-        var manMatch = firstPart.match(/(\\d+(?:\\.\\d+)?)万/);
+        var okuMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)億/);
+        var manMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)万/);
         if (okuMatch || manMatch) {
-          var oku = okuMatch ? parseFloat(okuMatch[1]) * 10000 : 0;
-          var man = manMatch ? parseFloat(manMatch[1]) : 0;
+          var oku = okuMatch ? parseFloat(okuMatch[1].replace(/,/g, "")) * 10000 : 0;
+          var man = manMatch ? parseFloat(manMatch[1].replace(/,/g, "")) : 0;
           return oku + man;
         }
         var simpleMatch = firstPart.match(/(\\d+(?:\\.\\d+)?)/);
@@ -77,10 +75,25 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       var layout = getVal("間取り");
 
       var ward = "";
-      var wm = address.match(/(.{2,4}区)/);
+      // Strip the prefecture first: /(.{2,4}[区市])/ scanned over
+      // "東京都杉並区…" matches "京都杉並区" — it is greedy from the left and
+      // the 東 lands outside the capture. This is the source of the corrupt
+      // ward values ("京都町田市") seen in the listings table.
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").match(/^(.{1,4}?[区市])/);
       if (wm) ward = wm[1];
 
       if (!address) return;
+
+      // The detail link is NOT inside .dottable--cassette (it has no anchors at
+      // all) — it lives on the enclosing .property_unit card. Walk up to find
+      // it, otherwise every listing comes back with no URL.
+      var url = "";
+      var card = el.closest(".property_unit");
+      var link = card ? card.querySelector('a[href*="/nc_"]') : null;
+      if (link) {
+        var href = link.getAttribute("href") || "";
+        url = href.indexOf("http") === 0 ? href : "https://suumo.jp" + href;
+      }
 
       results.push({
         address: address,
@@ -88,6 +101,7 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         price: price || 0,
         area: area || 0,
         landSize: area || 0,
+        url: url || undefined,
         source: "suumo",
         station: station || undefined,
         walkMinutes: walkMinutes != null ? walkMinutes : undefined,

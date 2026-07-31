@@ -1,10 +1,8 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import puppeteer from "puppeteer";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
 
-puppeteer.use(StealthPlugin());
 
 const CODE_TO_WARD: Record<string, string> = {
   "13101": "千代田区", "13102": "中央区", "13103": "港区",
@@ -82,7 +80,11 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
 
       // Determine ward from address
       let ward = "";
-      const wm = address.match(/(.{2,4}区)/);
+      // Strip the prefecture first: /(.{2,4}[区市])/ scanned over
+      // "東京都杉並区…" matches "京都杉並区" — it is greedy from the left and
+      // the 東 lands outside the capture. This is the source of the corrupt
+      // ward values ("京都町田市") seen in the listings table.
+      const wm = address.replace(/^東京都|^北海道|^[^\s]{2,3}[府県]/, "").match(/^(.{1,4}?[区市])/);
       if (wm) ward = wm[1];
 
       // Detail URL
@@ -100,10 +102,19 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       const iconEl = el.querySelector(".photo .icon") as HTMLImageElement | null;
       if (iconEl) {
         const src = iconEl.src || "";
-        if (src.includes("cate_APT")) propertyType = "マンション";
-        else if (src.includes("cate_MAN")) propertyType = "マンション";
+        if (src.includes("cate_APT") || src.includes("cate_MAN")) propertyType = "マンション";
         else if (src.includes("cate_BUL")) propertyType = "ビル";
         else if (src.includes("cate_LND")) propertyType = "土地";
+        else if (src.includes("cate_HOU") || src.includes("cate_KOD") || src.includes("cate_HSE") || src.includes("house")) propertyType = "一戸建て";
+      }
+      // Fallback based on title/description text keywords
+      const fullText = (title + " " + address).toLowerCase();
+      if (propertyType === "土地") {
+        if (fullText.includes("戸建") || fullText.includes("テラスハウス") || fullText.includes("一戸建")) {
+          propertyType = "一戸建て";
+        } else if (fullText.includes("マンション") || fullText.includes("アパート")) {
+          propertyType = "マンション";
+        }
       }
 
       results.push({
@@ -150,14 +161,18 @@ export async function scrapeKenbiya(areaCode: string, filterTypes?: string[]): P
     const maxPages = 5;
 
     for (let p = 0; p < maxPages && hasMore; p++) {
-      const baseUrl = `https://www.kenbiya.com/pp5/s/tokyo/${wardSlug}/`;
-      logger.info(`[Kenbiya Scraper] Loading page for ${wardName} (batch ${p + 1})...`);
+      if (p === 0) {
+        const baseUrl = `https://www.kenbiya.com/s/tokyo/${wardSlug}/`;
+        logger.info(`[Kenbiya Scraper] Loading page for ${wardName} (batch ${p + 1})...`);
 
-      try {
-        await page.goto(baseUrl, { waitUntil: "networkidle2", timeout: 60000 });
-      } catch {
-        logger.warn(`[Kenbiya Scraper] Failed to load ${baseUrl}`);
-        break;
+        try {
+          await page.goto(baseUrl, { waitUntil: "networkidle2", timeout: 60000 });
+        } catch {
+          logger.warn(`[Kenbiya Scraper] Failed to load ${baseUrl}`);
+          break;
+        }
+      } else {
+        logger.info(`[Kenbiya Scraper] Processing next page for ${wardName} (batch ${p + 1})...`);
       }
 
       try {

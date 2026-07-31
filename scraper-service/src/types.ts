@@ -4,7 +4,9 @@ export interface PropertyListing {
   price: number;
   area: number;
   landSize?: number;
+  floorArea?: number;
   buildYear?: number;
+  age?: string;
   source: string;
   url?: string;
   description?: string;
@@ -32,6 +34,16 @@ export interface ScrapeResult {
   areaCode: string;
   scrapedAt: number;
   count: number;
+  /**
+   * Errors caught during scraping, recorded rather than only logged.
+   *
+   * Several scrapers catch their own failures, log them, and return an empty
+   * listing array — so a connection refusal or navigation timeout was
+   * indistinguishable from "this ward genuinely has no inventory". The health
+   * check then reported "selectors changed" for what was actually
+   * ERR_CONNECTION_REFUSED, pointing at the wrong fix. Surface the real cause.
+   */
+  errors?: string[];
 }
 
 export interface OrderCriteria {

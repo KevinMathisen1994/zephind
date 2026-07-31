@@ -4,6 +4,7 @@ export const config = {
   convexSiteUrl: process.env.CONVEX_SITE_URL || "",
   scraperSource: process.env.SCRAPER_SOURCE || "athome",
   maxConcurrent: parseInt(process.env.MAX_CONCURRENT || "3"),
+  maxPagesPerSite: parseInt(process.env.MAX_PAGES_PER_SITE || "5"),
   requestDelay: parseInt(process.env.REQUEST_DELAY || "2000"),
   userAgent:
     process.env.USER_AGENT ||

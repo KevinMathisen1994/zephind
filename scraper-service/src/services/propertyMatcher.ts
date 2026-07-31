@@ -5,9 +5,13 @@ export interface MatchedListing extends PropertyListing {
   matchedOrderIndices: number[];
 }
 
+export interface FailedListing extends PropertyListing {
+  rejectionReason?: string;
+}
+
 export interface HardFilterResult {
   passed: MatchedListing[];
-  failed: PropertyListing[];
+  failed: FailedListing[];
   stats: { total: number; passed: number; failed: number; reasons: Record<string, number> };
 }
 
@@ -21,19 +25,23 @@ export function hardFilter(
 ): HardFilterResult {
   const reasons: Record<string, number> = {};
   const passed: MatchedListing[] = [];
-  const failed: PropertyListing[] = [];
+  const failed: FailedListing[] = [];
 
   for (const listing of listings) {
     const matchedIndices: number[] = [];
+    const failedReasons: string[] = [];
     for (let i = 0; i < criteria.length; i++) {
-      if (matchesOrder(listing, criteria[i], reasons)) {
+      const [matches, reason] = matchesOrder(listing, criteria[i], reasons);
+      if (matches) {
         matchedIndices.push(i);
+      } else if (reason) {
+        failedReasons.push(reason);
       }
     }
     if (matchedIndices.length > 0 || criteria.length === 0) {
       passed.push({ ...listing, matchedOrderIndices: matchedIndices });
     } else {
-      failed.push(listing);
+      failed.push({ ...listing, rejectionReason: failedReasons.join(", ") });
     }
   }
 
@@ -48,26 +56,45 @@ function matchesOrder(
   listing: PropertyListing,
   criteria: OrderCriteria,
   reasons: Record<string, number>
-): boolean {
-  // Ward filter — supports both single ward and multiple wards
-  if (criteria.wards && criteria.wards.length > 0) {
-    if (!listing.ward || !criteria.wards.includes(listing.ward)) {
-      incrementReason(reasons, "区不一致");
+): [boolean, string | null] {
+  // Location filter — supports both 23 Wards (区) and Cities/Towns/Villages (市/町/村)
+  const targetLocations =
+    criteria.wards && criteria.wards.length > 0
+      ? criteria.wards
+      : criteria.ward
+        ? [criteria.ward]
+        : [];
+
+  if (targetLocations.length > 0) {
+    const isMatched = targetLocations.some((target) => {
+      if (
+        listing.ward &&
+        (listing.ward === target ||
+          target.includes(listing.ward) ||
+          listing.ward.includes(target))
+      ) {
+        return true;
+      }
+      if (listing.address && listing.address.includes(target)) {
+        return true;
+      }
       return false;
+    });
+
+    if (!isMatched) {
+      incrementReason(reasons, "エリア不一致");
+      return [false, "エリア不一致"];
     }
-  } else if (criteria.ward && listing.ward !== criteria.ward) {
-    incrementReason(reasons, "区不一致");
-    return false;
   }
 
   // Price range
   if (criteria.priceMin && listing.price < criteria.priceMin) {
     incrementReason(reasons, "価格下限未満");
-    return false;
+    return [false, "価格下限未満"];
   }
   if (criteria.priceMax && listing.price > criteria.priceMax) {
     incrementReason(reasons, "価格上限超過");
-    return false;
+    return [false, "価格上限超過"];
   }
 
   // Walk minutes
@@ -75,7 +102,7 @@ function matchesOrder(
     const walk = listing.walkMinutes ?? 99;
     if (walk > criteria.walkMinutes) {
       incrementReason(reasons, "徒歩分数超過");
-      return false;
+      return [false, "徒歩分数超過"];
     }
   }
 
@@ -83,7 +110,7 @@ function matchesOrder(
   if (criteria.minBuildingCoverageRatio && listing.buildingCoverageRatio != null) {
     if (listing.buildingCoverageRatio < criteria.minBuildingCoverageRatio) {
       incrementReason(reasons, "建ぺい率未満");
-      return false;
+      return [false, "建ぺい率未満"];
     }
   }
 
@@ -91,7 +118,7 @@ function matchesOrder(
   if (criteria.minFloorAreaRatio && listing.floorAreaRatio != null) {
     if (listing.floorAreaRatio < criteria.minFloorAreaRatio) {
       incrementReason(reasons, "容積率未満");
-      return false;
+      return [false, "容積率未満"];
     }
   }
 
@@ -99,28 +126,28 @@ function matchesOrder(
   if (criteria.propertyTypes && criteria.propertyTypes.length > 0) {
     if (!listing.propertyType || !criteria.propertyTypes.includes(listing.propertyType)) {
       incrementReason(reasons, "物件種別不一致");
-      return false;
+      return [false, "物件種別不一致"];
     }
   }
 
   // Land size range
   if (criteria.landSizeMin && listing.landSize != null && listing.landSize < criteria.landSizeMin) {
     incrementReason(reasons, "土地面積下限未満");
-    return false;
+    return [false, "土地面積下限未満"];
   }
   if (criteria.landSizeMax && listing.landSize != null && listing.landSize > criteria.landSizeMax) {
     incrementReason(reasons, "土地面積上限超過");
-    return false;
+    return [false, "土地面積上限超過"];
   }
 
   // Building size range (using area field as proxy for building size)
   if (criteria.buildingSizeMin && listing.area != null && listing.area < criteria.buildingSizeMin) {
     incrementReason(reasons, "建物面積下限未満");
-    return false;
+    return [false, "建物面積下限未満"];
   }
   if (criteria.buildingSizeMax && listing.area != null && listing.area > criteria.buildingSizeMax) {
     incrementReason(reasons, "建物面積上限超過");
-    return false;
+    return [false, "建物面積上限超過"];
   }
 
   // --- NEW FILTERS ---
@@ -131,13 +158,13 @@ function matchesOrder(
     const buildAge = currentYear - listing.buildYear;
     if (buildAge > criteria.maxBuildAge) {
       incrementReason(reasons, "築年数超過");
-      return false;
+      return [false, "築年数超過"];
     }
   }
   if (criteria.minBuildYear != null && listing.buildYear != null) {
     if (listing.buildYear < criteria.minBuildYear) {
       incrementReason(reasons, "築年下限未満");
-      return false;
+      return [false, "築年下限未満"];
     }
   }
 
@@ -145,13 +172,13 @@ function matchesOrder(
   if (criteria.minYield != null && listing.yield != null) {
     if (listing.yield < criteria.minYield) {
       incrementReason(reasons, "利回り未満");
-      return false;
+      return [false, "利回り未満"];
     }
   }
   if (criteria.maxYield != null && listing.yield != null) {
     if (listing.yield > criteria.maxYield) {
       incrementReason(reasons, "利回り超過");
-      return false;
+      return [false, "利回り超過"];
     }
   }
 
@@ -159,7 +186,7 @@ function matchesOrder(
   if (criteria.minRoadWidth != null && listing.roadWidth != null) {
     if (listing.roadWidth < criteria.minRoadWidth) {
       incrementReason(reasons, "道路幅員未満");
-      return false;
+      return [false, "道路幅員未満"];
     }
   }
 
@@ -167,7 +194,7 @@ function matchesOrder(
   if (criteria.minTotalUnits != null && listing.totalUnits != null) {
     if (listing.totalUnits < criteria.minTotalUnits) {
       incrementReason(reasons, "総戸数未満");
-      return false;
+      return [false, "総戸数未満"];
     }
   }
 
@@ -175,7 +202,7 @@ function matchesOrder(
   if (criteria.maxFloor != null && listing.floor != null) {
     if (listing.floor > criteria.maxFloor) {
       incrementReason(reasons, "階数超過");
-      return false;
+      return [false, "階数超過"];
     }
   }
 
@@ -183,7 +210,7 @@ function matchesOrder(
   if (criteria.excludeFirstFloor && listing.floor != null) {
     if (listing.floor <= 1) {
       incrementReason(reasons, "一階");
-      return false;
+      return [false, "一階"];
     }
   }
 
@@ -191,7 +218,7 @@ function matchesOrder(
   if (criteria.minElevators != null && listing.elevators != null) {
     if (listing.elevators < criteria.minElevators) {
       incrementReason(reasons, "エレベーター数未満");
-      return false;
+      return [false, "エレベーター数未満"];
     }
   }
 
@@ -199,13 +226,15 @@ function matchesOrder(
   if (criteria.structureTypes && criteria.structureTypes.length > 0) {
     if (!listing.structureType || !criteria.structureTypes.includes(listing.structureType)) {
       incrementReason(reasons, "構造種別不一致");
-      return false;
+      return [false, "構造種別不一致"];
     }
   }
 
   // Layout types (間取りタイプ)
   if (criteria.layoutTypes && criteria.layoutTypes.length > 0) {
-    const layout = listing.layout ? listing.layout.toUpperCase().replace(/\s+/g, "") : "";
+    let layout = listing.layout ? toHalfWidth(listing.layout).toUpperCase().replace(/\s+/g, "") : "";
+    layout = layout.replace(/\+\d*[A-Z]$/, ""); // normalize 2LDK+S -> 2LDK
+    layout = layout.replace(/S(L?D?K)$/, "$1"); // normalize 2SLDK -> 2LDK
     let matchesLayout = false;
 
     // Check fallback listing.layoutType first
@@ -233,11 +262,17 @@ function matchesOrder(
 
     if (!matchesLayout) {
       incrementReason(reasons, "間取りタイプ不一致");
-      return false;
+      return [false, "間取りタイプ不一致"];
     }
   }
 
-  return true;
+  return [true, null];
+}
+
+function toHalfWidth(str: string): string {
+  return str.replace(/[\uFF01-\uFF5E]/g, (ch) => {
+    return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+  }).replace(/\u3000/g, " ");
 }
 
 function incrementReason(reasons: Record<string, number>, key: string) {

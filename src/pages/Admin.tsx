@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
+import { Skeleton } from "../components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -14,10 +15,38 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { wardLabelToCode } from "../lib/tokyoWards";
-import { Play, RefreshCw, Database, Trash2 } from "lucide-react";
+import { Play, RefreshCw, Database, Trash2, Sliders, ExternalLink, ShieldCheck } from "lucide-react";
+
+const SOURCE_LABELS: Record<string, string> = {
+  athome: "At Home",
+  hatomark: "鳩マーク",
+  kenbiya: "健美家",
+  rakuten: "楽天不動産",
+  suumo: "SUUMO",
+  homes: "LIFULL HOME'S",
+  nomu: "ノムコム",
+  nomu_pro: "ノムコム・プロ",
+  mitsui: "三井のリハウス",
+  stepon: "住友不動産ステップ",
+  tokyu: "東急リバブル",
+  mizuho: "みずほ不動産販売",
+  mitsubishi_ufj: "三菱UFJ不動産販売",
+  odakyu: "小田急不動産仲介",
+  keio: "京王不動産仲介",
+  asahi: "朝日住宅",
+  haseko: "長谷工不動産",
+  daikyo: "大京穴吹不動産",
+  tokyotatemono: "東京建物不動産販売",
+};
 
 export default function AdminPage() {
-  const [scrapeSource, setScrapeSource] = useState("athome");
+  const [scrapeSources, setScrapeSources] = useState<Set<string>>(new Set(["athome"]));
+  const toggleSource = (src: string) => setScrapeSources(prev => {
+    const next = new Set(prev);
+    if (next.has(src)) { if (next.size > 1) next.delete(src); }
+    else next.add(src);
+    return next;
+  });
   const [scrapeStatus, setScrapeStatus] = useState<string>("");
   const [isScraping, setIsScraping] = useState(false);
   const listings = useQuery(api.listings.list, {});
@@ -26,11 +55,20 @@ export default function AdminPage() {
   const createMatching = useMutation(api.matching.create);
   const deleteListing = useMutation(api.listings.remove);
 
+  const scraperHealth = useQuery(api.scraperHealth.list);
+  const recordHealth = useMutation(api.scraperHealth.record);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [healthProgress, setHealthProgress] = useState<string>("");
+  const [checkingSource, setCheckingSource] = useState<string | null>(null);
+
   const targetWards = useMemo(() => {
     if (!orders) return [];
     const wardSet = new Set<string>();
     for (const o of orders) {
       if (o.ward) wardSet.add(o.ward);
+      if (o.wards && Array.isArray(o.wards)) {
+        for (const w of o.wards) wardSet.add(w);
+      }
     }
     return Array.from(wardSet).sort();
   }, [orders]);
@@ -48,7 +86,6 @@ export default function AdminPage() {
     const codes = targetCodes.length > 0 ? targetCodes : ["13104"];
     setScrapeStatus(`スクレイピングを開始... 対象: ${codes.length}区`);
 
-    // Build order criteria to send to scraper for server-side hard filtering
     const orderCriteria = (orders ?? [])
       .filter((o) => o.status === "pending" || o.status === "active")
       .map((o) => ({
@@ -62,8 +99,9 @@ export default function AdminPage() {
       .filter((o) => Object.values(o).some((v) => v !== undefined));
 
     try {
+      const sourcesParam = Array.from(scrapeSources).join(",");
       const res = await fetch(
-        `${scraperUrl}/scrape?areaCodes=${codes.join(",")}&source=${scrapeSource}&orders=${encodeURIComponent(JSON.stringify(orderCriteria))}`
+        `${scraperUrl}/scrape?areaCodes=${codes.join(",")}&sources=${sourcesParam}&orders=${encodeURIComponent(JSON.stringify(orderCriteria))}`
       );
       const data = await res.json();
 
@@ -76,7 +114,7 @@ export default function AdminPage() {
             price: item.price ? Number(item.price) : undefined,
             area: item.area ? Number(item.area) : undefined,
             buildYear: item.buildYear ? Number(item.buildYear) : undefined,
-            source: scrapeSource,
+            source: Array.from(scrapeSources)[0] || "athome",
             status: "new",
             url: item.detailUrl || item.url || undefined,
             description: item.description || undefined,
@@ -85,7 +123,6 @@ export default function AdminPage() {
             rooms: item.rooms ? Number(item.rooms) : undefined,
             layout: item.layout || undefined,
           });
-          // Save match records for this listing against matched orders
           if (item.matchedOrderIndices && data.orderCriteria) {
             const activeOrders = (orders ?? []).filter((o) => o.status === "pending" || o.status === "active");
             for (const idx of item.matchedOrderIndices) {
@@ -102,7 +139,6 @@ export default function AdminPage() {
           count++;
         }
         const rejected = data.filterStats?.failed ?? 0;
-        // Build match summary per order
         const activeOrders = (orders ?? []).filter((o) => o.status === "pending" || o.status === "active");
         const orderMatchCounts: Record<string, number> = {};
         for (const item of data.listings) {
@@ -118,7 +154,7 @@ export default function AdminPage() {
         }
         const matchSummary = Object.entries(orderMatchCounts)
           .map(([name, cnt]) => `${name}: ${cnt}件`)
-　　　　　.join(" | ");
+          .join(" | ");
         setScrapeStatus(
           `スクレイピング完了！ ${count} 件を登録（${rejected} 件フィルター除外） — ${matchSummary}`
         );
@@ -136,73 +172,326 @@ export default function AdminPage() {
     await deleteListing({ id: id as any });
   };
 
-  const manualListings = listings?.filter((l) => l.source === scrapeSource || l.source === "athome") ?? [];
+  // Checks scrapers one at a time and persists each result as it lands, so the
+  // board fills in progressively. A single request for all 19 would take
+  // minutes and time out in the browser.
+  const runHealthCheck = async (only?: string) => {
+    const sources = only ? [only] : Object.keys(SOURCE_LABELS);
+    setIsCheckingHealth(true);
+    try {
+      for (let i = 0; i < sources.length; i++) {
+        const src = sources[i];
+        setCheckingSource(src);
+        setHealthProgress(
+          `検査中 ${i + 1}/${sources.length}: ${SOURCE_LABELS[src] || src}`,
+        );
+        try {
+          const res = await fetch(
+            `${scraperUrl}/health/scrapers?source=${encodeURIComponent(src)}`,
+          );
+          const data = await res.json();
+          const r = data.results?.[0];
+          if (r) {
+            await recordHealth({
+              source: r.source,
+              label: r.label,
+              status: r.status,
+              listingCount: r.listingCount,
+              durationMs: r.durationMs,
+              areaCode: r.areaCode,
+              checkedAt: r.checkedAt,
+              issues: r.issues ?? [],
+              coverage: r.coverage ?? [],
+              sample: r.sample ?? null,
+              error: r.error ?? undefined,
+            });
+          }
+        } catch (err) {
+          // A failure to even reach the service is itself a reportable status.
+          await recordHealth({
+            source: src,
+            label: SOURCE_LABELS[src] || src,
+            status: "broken",
+            listingCount: 0,
+            checkedAt: Date.now(),
+            issues: [
+              `スクレイパーサービスに接続できません: ${err instanceof Error ? err.message : String(err)}`,
+            ],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      setHealthProgress("検査完了");
+    } finally {
+      setIsCheckingHealth(false);
+      setCheckingSource(null);
+    }
+  };
+
+  const healthBySource = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const h of scraperHealth ?? []) m[h.source] = h;
+    return m;
+  }, [scraperHealth]);
+
+  const healthSummary = useMemo(() => {
+    const rows = scraperHealth ?? [];
+    return {
+      ok: rows.filter((r) => r.status === "ok").length,
+      degraded: rows.filter((r) => r.status === "degraded").length,
+      broken: rows.filter((r) => r.status === "broken").length,
+      unchecked: Object.keys(SOURCE_LABELS).length - rows.length,
+    };
+  }, [scraperHealth]);
+
+  const manualListings = listings?.filter((l) => [...scrapeSources].some(s => l.source === s)) ?? listings ?? [];
+
+
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="font-heading text-2xl font-bold">管理</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          システム管理とスクレイパーコントロール
-        </p>
+    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
+            <Sliders className="w-4 h-4 text-emerald-600" />
+            システム＆スクレイパー設定
+          </div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
+            スクレイピング・データ管理
+          </h1>
+          <p className="text-base text-slate-500 mt-1 leading-relaxed">
+            全14不動産ポータルからの手動データ収集、バックエンド接続状態のモニタリング
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Play className="w-5 h-5" />
-              手動スクレイパー
+      {/* Scraper Health Board */}
+      <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl">
+        <CardHeader className="p-6 border-b border-slate-100">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
+                <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                スクレイパー稼働状況
+              </CardTitle>
+              <p className="text-sm text-slate-500 mt-1">
+                各ポータルのHTML/CSS変更による取得停止を検知します（検査エリア: 杉並区）
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {healthProgress && (
+                <span className="text-sm font-medium text-slate-600">{healthProgress}</span>
+              )}
+              <Button
+                onClick={() => runHealthCheck()}
+                disabled={isCheckingHealth}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
+              >
+                {isCheckingHealth ? (
+                  <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />検査中...</>
+                ) : (
+                  <><ShieldCheck className="w-4 h-4 mr-2" />全スクレイパー検査</>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Badge className="bg-emerald-100 text-emerald-800 font-bold px-3 py-1">
+              正常 {healthSummary.ok}
+            </Badge>
+            <Badge className="bg-amber-100 text-amber-800 font-bold px-3 py-1">
+              要確認 {healthSummary.degraded}
+            </Badge>
+            <Badge className="bg-red-100 text-red-800 font-bold px-3 py-1">
+              停止 {healthSummary.broken}
+            </Badge>
+            <Badge className="bg-slate-100 text-slate-600 font-bold px-3 py-1">
+              未検査 {healthSummary.unchecked}
+            </Badge>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {Object.keys(SOURCE_LABELS).map((src) => {
+              const h = healthBySource[src];
+              const isChecking = checkingSource === src;
+              const tone =
+                !h ? "border-slate-200 bg-slate-50"
+                : h.status === "ok" ? "border-emerald-200 bg-emerald-50/60"
+                : h.status === "degraded" ? "border-amber-200 bg-amber-50/60"
+                : "border-red-200 bg-red-50/60";
+
+              return (
+                <div key={src} className={`rounded-xl border p-4 ${tone} ${isChecking ? "ring-2 ring-emerald-400" : ""}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 truncate">
+                          {SOURCE_LABELS[src]}
+                        </span>
+                        {isChecking ? (
+                          <Badge className="bg-emerald-600 text-white text-xs font-bold">
+                            検査中
+                          </Badge>
+                        ) : !h ? (
+                          <Badge className="bg-slate-200 text-slate-600 text-xs font-bold">未検査</Badge>
+                        ) : h.status === "ok" ? (
+                          <Badge className="bg-emerald-600 text-white text-xs font-bold">正常</Badge>
+                        ) : h.status === "degraded" ? (
+                          <Badge className="bg-amber-500 text-white text-xs font-bold">要確認</Badge>
+                        ) : (
+                          <Badge className="bg-red-600 text-white text-xs font-bold">停止</Badge>
+                        )}
+                      </div>
+
+                      {h && (
+                        <div className="text-xs text-slate-600 mt-1 font-medium">
+                          {h.listingCount}件取得
+                          {h.durationMs != null && ` ・ ${(h.durationMs / 1000).toFixed(1)}秒`}
+                          {h.checkedAt && ` ・ ${new Date(h.checkedAt).toLocaleString("ja-JP")}`}
+                        </div>
+                      )}
+
+                      {h?.issues?.length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                          {h.issues.map((iss: string, i: number) => (
+                            <li key={i} className="text-xs text-slate-700 leading-snug">
+                              ・{iss}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {h?.coverage?.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {h.coverage.map((c: any) => (
+                            <span
+                              key={c.field}
+                              title={`${c.field}: ${c.present}/${h.listingCount}`}
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                c.pct >= 80 ? "bg-emerald-100 text-emerald-700"
+                                : c.pct >= 50 ? "bg-amber-100 text-amber-700"
+                                : "bg-red-100 text-red-700"
+                              }`}
+                            >
+                              {c.field} {c.pct}%
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <Button
+                      onClick={() => runHealthCheck(src)}
+                      disabled={isCheckingHealth}
+                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-2 py-1 h-auto shrink-0"
+                    >
+                      再検査
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Scraper Controls */}
+        <Card className="md:col-span-2 bg-white border border-slate-200/80 shadow-sm rounded-2xl">
+          <CardHeader className="p-6 border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
+              <Play className="w-5 h-5 text-emerald-700" />
+              手動スクレイパー実行コントロール
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="p-6 space-y-5">
             <div className="space-y-2">
-              <Label>スキャン対象区</Label>
-              <div className="flex flex-wrap gap-1.5 min-h-10 items-center">
+              <Label className="text-sm font-bold text-slate-700">スキャン対象エリア（オーダー登録エリア）</Label>
+              <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 {targetWards.length === 0 ? (
-                  <span className="text-sm text-muted-foreground">オーダーに区が指定されていません（デフォルト: 新宿区）</span>
+                  <span className="text-sm text-slate-500 font-medium">
+                    現在オーダーにエリアが指定されていません（デフォルト: 新宿区 13104）
+                  </span>
                 ) : (
                   targetWards.map((w) => (
-                    <Badge key={w} variant="secondary">{w}</Badge>
+                    <Badge key={w} className="bg-emerald-100 text-emerald-800 text-xs px-3 py-1 font-bold">
+                      {w}
+                    </Badge>
                   ))
                 )}
               </div>
             </div>
+
             <div className="space-y-2">
-              <Label>スクレイプ元</Label>
-              <select
-                className="flex h-10 w-full items-center justify-between border border-border bg-transparent px-3 py-2 text-sm appearance-none cursor-pointer"
-                value={scrapeSource}
-                onChange={(e) => setScrapeSource(e.target.value)}
-              >
-                <option value="athome">At Home</option>
-                <option value="hatomark">Hatomark Site</option>
-                <option value="kenbiya">Kenbiya</option>
-                <option value="rakuten">楽天不動産</option>
-                <option value="suumo">SUUMO</option>
-                <option value="rengotai">Fudousan Rengotai</option>
-              </select>
+              <Label className="text-sm font-bold text-slate-700">
+                収集対象ポータルサイト <span className="text-xs text-slate-400 font-normal">（複数選択で並列収集）</span>
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: "athome", label: "At Home" },
+                  { id: "suumo", label: "SUUMO" },
+                  { id: "homes", label: "LIFULL HOME'S" },
+                  { id: "hatomark", label: "鳩マーク" },
+                  { id: "kenbiya", label: "健美家" },
+                  { id: "rakuten", label: "楽天不動産" },
+                  { id: "nomu", label: "ノムコム" },
+                  { id: "nomu_pro", label: "ノムコム・プロ" },
+                  { id: "mitsui", label: "三井のリハウス" },
+                  { id: "stepon", label: "住友不動産ステップ" },
+                  { id: "tokyu", label: "東急リバブル" },
+                  { id: "mizuho", label: "みずほ不動産販売" },
+                  { id: "mitsubishi_ufj", label: "三菱UFJ不動産販売" },
+                  { id: "odakyu", label: "小田急不動産仲介" },
+                  { id: "keio", label: "京王不動産仲介" },
+                  { id: "asahi", label: "朝日住宅" },
+                  { id: "haseko", label: "長谷工不動産" },
+                  { id: "daikyo", label: "大京穴吹不動産" },
+                  { id: "tokyotatemono", label: "東京建物不動産販売" },
+                ].map(({ id, label }) => {
+                  const isChecked = scrapeSources.has(id);
+                  return (
+                    <button
+                      type="button"
+                      key={id}
+                      onClick={() => toggleSource(id)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all duration-150 ${
+                        isChecked
+                          ? "bg-emerald-700 text-white shadow-sm"
+                          : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
             <Button
               onClick={handleScrape}
               disabled={isScraping}
-              className="w-full gap-2"
+              className="w-full h-12 text-base font-bold gap-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-lg shadow-emerald-700/20"
             >
               {isScraping ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-5 h-5 animate-spin" />
               ) : (
-                <Play className="w-4 h-4" />
+                <Play className="w-5 h-5" />
               )}
-              {isScraping ? "スクレイピング中..." : "スクレイピング実行"}
+              {isScraping ? "スクレイピング実行中..." : "手動スクレイピング開始"}
             </Button>
+
             {scrapeStatus && (
               <div
-                className={`p-3 text-sm font-data ${
+                className={`p-4 rounded-xl text-sm font-semibold leading-relaxed ${
                   scrapeStatus.startsWith("エラー")
-                    ? "bg-red-50 text-red-600"
+                    ? "bg-red-50 text-red-700 border border-red-200"
                     : scrapeStatus.startsWith("スクレイピング完了")
-                    ? "bg-green-50 text-green-700"
-                    : "bg-muted"
+                    ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                    : "bg-slate-100 text-slate-800"
                 }`}
               >
                 {scrapeStatus}
@@ -211,102 +500,118 @@ export default function AdminPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Database className="w-5 h-5" />
-              システムステータス
+        {/* System Status Card */}
+        <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl">
+          <CardHeader className="p-6 border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
+              <Database className="w-5 h-5 text-emerald-700" />
+              システム接続ステータス
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">スクレイパーサービス</span>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-600" />
-                <Badge variant="secondary">{scraperUrl ? "設定済み" : "未設定"}</Badge>
-              </div>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-sm font-bold text-slate-700">スクレイパーAPI</span>
+              <Badge className="bg-emerald-700 text-white font-bold text-xs">
+                {scraperUrl ? "稼働中 (Active)" : "未設定"}
+              </Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Convex バックエンド</span>
-              <Badge variant="default">接続中</Badge>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-sm font-bold text-slate-700">Convex DB</span>
+              <Badge className="bg-emerald-700 text-white font-bold text-xs">接続済み</Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">総リスティング数</span>
-              <span className="font-data text-sm">
-                {listings === undefined ? "..." : listings.length}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-sm font-bold text-slate-700">全登録物件数</span>
+              <span className="font-extrabold text-base text-slate-900 font-data">
+                {listings === undefined ? <Skeleton className="h-5 w-12" /> : `${listings.length} 件`}
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Clerk 認証</span>
-              <Badge variant="outline">有効</Badge>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-sm font-bold text-slate-700">セキュリティ認証</span>
+              <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                保護済み
+              </span>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">
-            {scrapeSource === "athome" ? "At Home" : 
-             scrapeSource === "hatomark" ? "Hatomark Site" :
-             scrapeSource === "kenbiya" ? "Kenbiya" :
-             scrapeSource === "rakuten" ? "楽天不動産" :
-             scrapeSource === "suumo" ? "SUUMO" :
-             scrapeSource === "rengotai" ? "Fudousan Rengotai" : "スクレイプ"} リスティング
+      {/* Database Scraped Listings Master Table */}
+      <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl overflow-hidden">
+        <CardHeader className="p-6 border-b border-slate-100">
+          <CardTitle className="text-lg font-extrabold text-slate-900 flex items-center justify-between">
+            <span>物件マスターデータベース ({manualListings.length} 件)</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 overflow-x-auto">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead>住所</TableHead>
-                <TableHead>区</TableHead>
-                <TableHead>価格 (万円)</TableHead>
-                <TableHead>Area (m²)</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-16"></TableHead>
+                <TableHead className="text-xs font-bold text-slate-700 py-3">物件所在地</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">区</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">価格 (万円)</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">面積 (㎡)</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">取得ソース</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">ステータス</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700 text-right pr-6">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {listings === undefined ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
-                    Loading...
-                  </TableCell>
-                </TableRow>
+                <>
+                  <TableRow>
+                    <TableCell colSpan={7} className="p-4">
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell colSpan={7} className="p-4">
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
+                  </TableRow>
+                </>
               ) : manualListings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-base-content/60">
-                    No scraped listings yet. Run a scrape above.
+                  <TableCell colSpan={7} className="text-center py-12 text-slate-400 font-medium">
+                    登録されている物件がありません。「手動スクレイピング開始」を実行してください。
                   </TableCell>
                 </TableRow>
               ) : (
-                manualListings.slice(0, 20).map((listing) => (
-                  <TableRow key={listing._id}>
-                    <TableCell className="font-medium max-w-[200px] truncate">
+                manualListings.slice(0, 30).map((listing) => (
+                  <TableRow key={listing._id} className="hover:bg-slate-50/80 transition-colors">
+                    <TableCell className="font-bold text-slate-900 max-w-[240px] truncate text-sm">
                       {listing.address || "—"}
                     </TableCell>
-                    <TableCell>{listing.ward || "—"}</TableCell>
-                    <TableCell className="font-data">
-                      {listing.price?.toLocaleString() || "—"}
+                    <TableCell className="text-sm font-semibold text-slate-700">
+                      {listing.ward || "—"}
                     </TableCell>
-                    <TableCell className="font-data">
-                      {listing.area?.toFixed(1) || "—"}
+                    <TableCell className="font-data text-sm font-extrabold text-emerald-700">
+                      {listing.price ? listing.price.toLocaleString() : "—"}
+                    </TableCell>
+                    <TableCell className="font-data text-sm font-semibold text-slate-700">
+                      {listing.area ? listing.area.toFixed(1) : "—"}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{listing.source || "—"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={listing.status === "new" ? "default" : "secondary"}>
-                        {listing.status || "new"}
+                      <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px]">
+                        {SOURCE_LABELS[listing.source || ""] || listing.source || "手動"}
                       </Badge>
                     </TableCell>
                     <TableCell>
+                      <Badge
+                        className={`text-[11px] font-bold ${
+                          listing.status === "new"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {listing.status === "new" ? "新着" : listing.status || "一般"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right pr-6">
                       <button
                         onClick={() => handleDeleteListing(listing._id)}
-                        className="p-1 text-base-content/40 hover:text-red-500 transition-colors"
-                        title="Delete listing"
+                        className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-slate-100"
+                        title="物件を削除"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

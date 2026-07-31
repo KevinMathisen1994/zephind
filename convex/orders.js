@@ -44,6 +44,9 @@ export const create = mutation({
         minElevators: v.optional(v.number()),
         structureTypes: v.optional(v.array(v.string())),
         layoutTypes: v.optional(v.array(v.string())),
+        customerId: v.optional(v.string()),
+        isScraping: v.optional(v.boolean()),
+        scrapingStatus: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         return await ctx.db.insert("orders", {
@@ -58,3 +61,46 @@ export const remove = mutation({
         await ctx.db.delete(args.id);
     },
 });
+
+export const update = mutation({
+    args: {
+        id: v.id("orders"),
+        name: v.optional(v.string()),
+        ward: v.optional(v.string()),
+        wards: v.optional(v.array(v.string())),
+        priceMin: v.optional(v.number()),
+        priceMax: v.optional(v.number()),
+        areaMin: v.optional(v.number()),
+        areaMax: v.optional(v.number()),
+        status: v.optional(v.string()),
+        userId: v.optional(v.string()),
+        criteria: v.optional(v.any()),
+        walkMinutes: v.optional(v.number()),
+        minBuildingCoverageRatio: v.optional(v.number()),
+        minFloorAreaRatio: v.optional(v.number()),
+        propertyTypes: v.optional(v.array(v.string())),
+        landSizeMin: v.optional(v.number()),
+        landSizeMax: v.optional(v.number()),
+        buildingSizeMin: v.optional(v.number()),
+        buildingSizeMax: v.optional(v.number()),
+        maxBuildAge: v.optional(v.number()),
+        minBuildYear: v.optional(v.number()),
+        minYield: v.optional(v.number()),
+        maxYield: v.optional(v.number()),
+        minRoadWidth: v.optional(v.number()),
+        minTotalUnits: v.optional(v.number()),
+        maxFloor: v.optional(v.number()),
+        excludeFirstFloor: v.optional(v.boolean()),
+        minElevators: v.optional(v.number()),
+        structureTypes: v.optional(v.array(v.string())),
+        layoutTypes: v.optional(v.array(v.string())),
+        customerId: v.optional(v.string()),
+        isScraping: v.optional(v.boolean()),
+        scrapingStatus: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const { id, ...fields } = args;
+        await ctx.db.patch(id, fields);
+    },
+});
+

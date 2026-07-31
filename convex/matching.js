@@ -43,7 +43,7 @@ export const getByOrder = query({
   },
 });
 
-export const saveEvaluation = internalMutation({
+export const saveEvaluation = mutation({
   args: {
     matchId: v.id("matching"),
     evaluation: v.string(),

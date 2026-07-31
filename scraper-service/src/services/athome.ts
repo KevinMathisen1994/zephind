@@ -1,10 +1,8 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import puppeteer from "puppeteer";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
 
-puppeteer.use(StealthPlugin());
 
 const TOKYO_WARD_MAP: Record<string, string> = {
   "13101": "千代田区", "13102": "中央区", "13103": "港区", "13104": "新宿区",
@@ -13,6 +11,13 @@ const TOKYO_WARD_MAP: Record<string, string> = {
   "13113": "渋谷区", "13114": "中野区", "13115": "杉並区", "13116": "豊島区",
   "13117": "北区", "13118": "荒川区", "13119": "板橋区", "13120": "練馬区",
   "13121": "足立区", "13122": "葛飾区", "13123": "江戸川区",
+  "13201": "八王子市", "13202": "立川市", "13203": "武蔵野市", "13204": "三鷹市",
+  "13205": "青梅市", "13206": "府中市", "13207": "昭島市", "13208": "調布市",
+  "13209": "町田市", "13210": "小金井市", "13211": "小平市", "13212": "日野市",
+  "13213": "東村山市", "13214": "国分寺市", "13215": "国立市", "13218": "福生市",
+  "13219": "狛江市", "13220": "東大和市", "13221": "清瀬市", "13222": "東久留米市",
+  "13223": "武蔵村山市", "13224": "多摩市", "13225": "稲城市", "13227": "羽村市",
+  "13228": "あきる野市", "13229": "西東京市",
 };
 
 const CODE_TO_CITY: Record<string, string> = {
@@ -22,99 +27,118 @@ const CODE_TO_CITY: Record<string, string> = {
   "13113": "shibuya", "13114": "nakano", "13115": "suginami", "13116": "toshima",
   "13117": "kita", "13118": "arakawa", "13119": "itabashi", "13120": "nerima",
   "13121": "adachi", "13122": "katsushika", "13123": "edogawa",
+  "13201": "hachioji", "13202": "tachikawa", "13203": "musashino", "13204": "mitaka",
+  "13205": "oume", "13206": "fuchu", "13207": "akishima", "13208": "chofu",
+  "13209": "machida", "13210": "koganei", "13211": "kodaira", "13212": "hino",
+  "13213": "higashimurayama", "13214": "kokubunji", "13215": "kunitachi", "13218": "fussa",
+  "13219": "komae", "13220": "higashiyamato", "13221": "kiyose", "13222": "higashikurume",
+  "13223": "musashimurayama", "13224": "tama", "13225": "inagi", "13227": "hamura",
+  "13228": "akiruno", "13229": "nishitokyo",
 };
 
 async function extractListingsFromPage(page: any, wardName: string, pType?: string): Promise<{ listings: any[], detailUrls: string[] }> {
-  return await page.evaluate((ward: string, pt: string) => {
-    const parsePrice = (text: string) => {
-      if (!text) return 0;
-      const cleaned = text.replace(/[\s,]/g, "");
-      const firstPart = cleaned.split(/[~〜-]/)[0];
-      const okuMatch = firstPart.match(/(\d+(?:\.\d+)?)億/);
-      const manMatch = firstPart.match(/(\d+(?:\.\d+)?)万/);
-      if (okuMatch || manMatch) {
-        const oku = okuMatch ? parseFloat(okuMatch[1]) * 10000 : 0;
-        const man = manMatch ? parseFloat(manMatch[1]) : 0;
-        return oku + man;
+  const raw = await page.evaluate(new Function("ward", "pt", `
+    var results = [];
+    var urls = [];
+    document.querySelectorAll(".card-box-inner").forEach(function(card) {
+      var cardText = card.textContent || "";
+
+      var titleEl = card.querySelector(".title-wrap__title-text");
+      var address = titleEl ? titleEl.textContent?.trim() || "" : "";
+      if (!address) { var m = cardText.match(/(東京都[^\\s]{1,40}?[区市])/); if (m) address = m[1]; }
+
+      var price = null;
+      var priceEl = card.querySelector(".property-price");
+      var priceText = priceEl ? priceEl.textContent?.trim() || "" : "";
+      if (!priceText) {
+        var m = cardText.match(/([\\d,億万〜~]+万円)/);
+        if (m) priceText = m[1];
       }
-      const simpleMatch = firstPart.match(/(\d+(?:\.\d+)?)/);
-      return simpleMatch ? parseFloat(simpleMatch[1]) : 0;
-    };
-
-    const results: any[] = [];
-    const urls: string[] = [];
-    document.querySelectorAll(".card-box-inner").forEach((card) => {
-      const cardText = card.textContent || "";
-
-      const titleEl = card.querySelector(".title-wrap__title-text");
-      let address = titleEl ? titleEl.textContent?.trim() || "" : "";
-      if (!address) { const m = cardText.match(/(東京都[^\s]{1,40}?[区市])/); if (m) address = m[1]; }
-
-      let price: number | null = null;
-      const priceEl = card.querySelector(".property-price");
-      if (priceEl) {
-        price = parsePrice(priceEl.textContent?.trim() || "");
+      if (priceText) {
+        var cleaned = priceText.replace(/[\\s,]/g, "");
+        var firstPart = cleaned.split(/[~〜-]/)[0];
+        var okuMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)億/);
+        var manMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)万/);
+        if (okuMatch || manMatch) {
+          var oku = okuMatch ? parseFloat(okuMatch[1].replace(/,/g, "")) * 10000 : 0;
+          var man = manMatch ? parseFloat(manMatch[1].replace(/,/g, "")) : 0;
+          price = oku + man;
+        } else {
+          var simpleMatch = firstPart.match(/(\\d+(?:\\.\\d+)?)/);
+          if (simpleMatch) price = parseFloat(simpleMatch[1]);
+        }
       }
-      if (!price) { const m = cardText.match(/([\d,億万〜~]+万円)/); if (m) price = parsePrice(m[1]); }
       if (!address || !price) return;
 
-      const table = card.querySelector(".property-detail-table");
-      const text = table ? table.textContent || "" : cardText;
+      var table = card.querySelector(".property-detail-table");
+      var text = table ? table.textContent || "" : cardText;
 
-      let area: number | null = null;
-      const am2 = text.match(/土地面積[：:]*\s*([\d,.]+)\s*m²/);
+      var area = null;
+      var am2 = text.match(/土地面積[：:]*\\s*([\\d,.]+)\\s*m²/);
       if (am2) area = parseFloat(am2[1].replace(/,/g, ""));
-      if (!area) { const ts = text.match(/([\d,.]+)\s*坪/); if (ts) area = parseFloat(ts[1].replace(/,/g, "")) * 3.30578; }
+      if (!area) { var ts = text.match(/([\\d,.]+)\\s*坪/); if (ts) area = parseFloat(ts[1].replace(/,/g, "")) * 3.30578; }
 
-      let station = "";
-      let walkMinutes: number | null = null;
-      const stM = cardText.match(/「([^」]+)」\s*駅/);
+      var station = "";
+      var walkMinutes = null;
+      var stM = cardText.match(/「([^」]+)」\\s*駅/);
       if (stM) station = stM[1] + "駅";
-      else { const sm = cardText.match(/([^\s]+駅)/); if (sm) station = sm[1]; }
-      const wkM = cardText.match(/徒歩\s*(\d+)\s*分/);
+      else { var sm = cardText.match(/([^\\s]+駅)/); if (sm) station = sm[1]; }
+      var wkM = cardText.match(/徒歩\\s*(\\d+)\\s*分/);
       if (wkM) walkMinutes = parseInt(wkM[1]);
 
-      let bcr: number | null = null;
-      let far: number | null = null;
-      const bf = text.match(/建ぺい率[／/]容積率[：:]*\s*([\d.]+)%[／/]\s*([\d.]+)%/);
+      var bcr = null;
+      var far = null;
+      var bf = text.match(/建ぺい率[／/]容積率[：:]*\\s*([\\d.]+)%[／/]\\s*([\\d.]+)%/);
       if (bf) { bcr = parseFloat(bf[1]); far = parseFloat(bf[2]); }
       else {
-        const bm = text.match(/建ぺい率[：:]?\s*([\d.]+)\s*%/); if (bm) bcr = parseFloat(bm[1]);
-        const fm2 = text.match(/容積率[：:]?\s*([\d.]+)\s*%/); if (fm2) far = parseFloat(fm2[1]);
+        var bm = text.match(/建ぺい率[：:]?\\s*([\\d.]+)\\s*%/); if (bm) bcr = parseFloat(bm[1]);
+        var fm2 = text.match(/容積率[：:]?\\s*([\\d.]+)\\s*%/); if (fm2) far = parseFloat(fm2[1]);
       }
 
-      let layout = "";
-      const lM = cardText.match(/間取り\s*([a-zA-Z\d\+]+)/);
-      if (lM) layout = lM[1];
+      var layout = "";
+      var lM = cardText.match(/間取り\\s*([^\\s\\u3000,，|｜（(]+)/);
+      if (lM) {
+        layout = lM[1].replace(/[\\uFF01-\\uFF5E]/g, function(ch) {
+          return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+        }).replace(/\\u3000/g, " ");
+      }
 
-      let detailUrl = "";
-      const linkEl = card.closest("a") || card.querySelector("a[href*='/tochi/']");
+      var detailUrl = "";
+      var linkEl = card.closest("a") || card.querySelector("a[href*='/tochi/'], a[href*='/kodate/'], a[href*='/mansion/'], a");
       if (linkEl) {
-        const href = linkEl.getAttribute("href") || "";
-        detailUrl = href.startsWith("http") ? href : `https://www.athome.co.jp${href}`;
+        var href = linkEl.getAttribute("href") || "";
+        detailUrl = href.startsWith("http") ? href : "https://www.athome.co.jp" + href;
       }
 
-      results.push({ address, ward, price, area: area || 0, landSize: area || 0, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined });
+      results.push({ address: address, ward: ward, price: price, area: area || 0, landSize: area || 0, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined });
       if (detailUrl) urls.push(detailUrl);
     });
-    return { listings: results, detailUrls: urls };
-  }, wardName, pType || "");
+    return JSON.stringify({ listings: results, detailUrls: urls });
+  `), wardName, pType || "");
+  return JSON.parse(raw);
 }
 
 async function scrapeDetailPage(page: any, url: string): Promise<{ roadWidth?: number; frontage?: number }> {
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     await new Promise(r => setTimeout(r, 1000));
-    return await page.evaluate(() => {
-      const text = document.body?.textContent || "";
-      let roadWidth: number | undefined;
-      let frontage: number | undefined;
-      const rp = [/道路幅[：:]\s*([\d.]+)\s*m/, /前面道路[：:]\s*([\d.]+)\s*m/, /幅員[：:]\s*([\d.]+)\s*m/];
-      for (const p of rp) { const m = text.match(p); if (m) { roadWidth = parseFloat(m[1]); break; } }
-      const fp = [/間口[：:]\s*([\d.]+)\s*m/, /間口[：:]\s*約?\s*([\d.]+)/];
-      for (const p of fp) { const m = text.match(p); if (m) { frontage = parseFloat(m[1]); break; } }
-      return { roadWidth, frontage };
-    });
+    const raw = await page.evaluate(new Function(`
+      var text = document.body ? document.body.textContent || "" : "";
+      var roadWidth;
+      var frontage;
+      var rp = [/道路幅[：:]\\s*([\\d.]+)\\s*m/, /前面道路[：:]\\s*([\\d.]+)\\s*m/, /幅員[：:]\\s*([\\d.]+)\\s*m/];
+      for (var i = 0; i < rp.length; i++) { 
+        var m = text.match(rp[i]); 
+        if (m) { roadWidth = parseFloat(m[1]); break; } 
+      }
+      var fp = [/間口[：:]\\s*([\\d.]+)\\s*m/, /間口[：:]\\s*約?\\s*([\\d.]+)/];
+      for (var j = 0; j < fp.length; j++) { 
+        var m2 = text.match(fp[j]); 
+        if (m2) { frontage = parseFloat(m2[1]); break; } 
+      }
+      return JSON.stringify({ roadWidth: roadWidth, frontage: frontage });
+    `));
+    return JSON.parse(raw);
   } catch {
     return {};
   }
@@ -134,7 +158,7 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[]): Pr
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    const allCategories: Record<string, string> = { tochi: "土地", kodate: "一戸建て" };
+    const allCategories: Record<string, string> = { tochi: "土地", kodate: "一戸建て", mansion: "マンション" };
     const categories = filterTypes && filterTypes.length > 0
       ? Object.entries(allCategories).filter(([, label]) => filterTypes.includes(label)).map(([key]) => key)
       : Object.keys(allCategories);
@@ -168,7 +192,7 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[]): Pr
       }
       await new Promise(r => setTimeout(r, 2000));
 
-      const { listings, detailUrls } = await extractListingsFromPage(page, wardName, cat === "tochi" ? "土地" : "一戸建て");
+      const { listings, detailUrls } = await extractListingsFromPage(page, wardName, allCategories[cat]);
       if (listings.length === 0) { logger.info(`[At Home Scraper] Page ${p}: empty, stopping`); break; }
 
       logger.info(`[At Home Scraper] Page ${p}: ${listings.length} listings (total: ${allListings.length + listings.length})`);

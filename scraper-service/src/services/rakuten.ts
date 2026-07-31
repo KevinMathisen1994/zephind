@@ -1,10 +1,8 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import puppeteer from "puppeteer";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
 
-puppeteer.use(StealthPlugin());
 
 const TOKYO_WARD_MAP: Record<string, string> = {
   "13101": "千代田区", "13102": "中央区", "13103": "港区",
@@ -75,64 +73,69 @@ export async function scrapeRakuten(areaCode: string, filterTypes?: string[]): P
           } catch { break; }
         }
 
-        const pageListings = await page.evaluate((ward: string, pt: string) => {
-          const items = document.querySelectorAll(".bukken_item");
-          return Array.from(items).map((item) => {
-            const titleEl = item.querySelector("a.title");
-            const titleText = titleEl?.textContent?.trim() || "";
-            const link = titleEl?.getAttribute("href") || "";
+        const rawListings = await page.evaluate(new Function("ward", "pt", `
+          var items = document.querySelectorAll(".bukken_item");
+          var results = Array.from(items).map(function(item) {
+            var titleEl = item.querySelector("a.title");
+            var titleText = titleEl ? titleEl.textContent?.trim() || "" : "";
+            var link = titleEl ? titleEl.getAttribute("href") || "" : "";
 
-            const address = titleText.replace(/\s+[\d,]+\s*万円.*$/, "").trim();
+            var address = titleText.replace(/\\s+[\\d,]+\\s*万円.*$/, "").trim();
 
-            const parseJapanesePrice = (text: string) => {
+            var parsePrice = function(text) {
               if (!text) return 0;
-              const cleaned = text.replace(/[\s,]/g, "");
-              const firstPart = cleaned.split(/[~〜-]/)[0];
-              const okuMatch = firstPart.match(/(\d+(?:\.\d+)?)億/);
-              const manMatch = firstPart.match(/(\d+(?:\.\d+)?)万/);
+              var cleaned = text.replace(/[\\s,]/g, "");
+              var firstPart = cleaned.split(/[~〜-]/)[0];
+              var okuMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)億/);
+              var manMatch = firstPart.match(/([\\d,]+(?:\\.\\d+)?)万/);
               if (okuMatch || manMatch) {
-                const oku = okuMatch ? parseFloat(okuMatch[1]) * 10000 : 0;
-                const man = manMatch ? parseFloat(manMatch[1]) : 0;
+                var oku = okuMatch ? parseFloat(okuMatch[1].replace(/,/g, "")) * 10000 : 0;
+                var man = manMatch ? parseFloat(manMatch[1].replace(/,/g, "")) : 0;
                 return oku + man;
               }
-              const simpleMatch = firstPart.match(/(\d+(?:\.\d+)?)/);
+              var simpleMatch = firstPart.match(/(\\d+(?:\\.\\d+)?)/);
               return simpleMatch ? parseFloat(simpleMatch[1]) : 0;
             };
 
-            const priceMatch = titleText.match(/([\d,億万円〜~]+万円)/) || titleText.match(/([\d,]+)\s*万円/);
-            const price = priceMatch ? parseJapanesePrice(priceMatch[1]) : null;
+            var priceMatch = titleText.match(/([\\d,億万円〜~]+万円)/) || titleText.match(/([\\d,]+)\\s*万円/);
+            var price = priceMatch ? parsePrice(priceMatch[1]) : null;
 
-            const allText = item.textContent?.trim().replace(/\s+/g, " ") || "";
+            var allText = item.textContent?.trim().replace(/\\s+/g, " ") || "";
 
-            const areaMatch = allText.match(/([\d.]+)\s*m[2²]/);
-            const landSize = areaMatch ? parseFloat(areaMatch[1]) : null;
+            var areaMatch = allText.match(/([\\d.]+)\\s*m[2²]/);
+            var landSize = areaMatch ? parseFloat(areaMatch[1]) : null;
 
-            const bcrMatch = allText.match(/(\d+)\s*%\s+\d+\s*%/);
-            const bcr = bcrMatch ? parseInt(bcrMatch[1]) : null;
-            const farMatch = allText.match(/\d+\s*%\s+(\d+)\s*%/);
-            const far = farMatch ? parseInt(farMatch[1]) : null;
+            var bcrMatch = allText.match(/(\\d+)\\s*%\\s+\\d+\\s*%/);
+            var bcr = bcrMatch ? parseInt(bcrMatch[1]) : null;
+            var farMatch = allText.match(/\\d+\\s*%\\s+(\\d+)\\s*%/);
+            var far = farMatch ? parseInt(farMatch[1]) : null;
 
-            let layout = "";
-            const lM = allText.match(/間取り\s*([a-zA-Z\d\+]+)/);
-            if (lM) layout = lM[1];
+            var layout = "";
+            var lM = allText.match(/間取り\\s*([^\\s\\u3000,，|｜（(]+)/);
+            if (lM) {
+              layout = lM[1].replace(/[\\uFF01-\\uFF5E]/g, function(ch) {
+                return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+              }).replace(/\\u3000/g, " ");
+            }
 
-            const details = Array.from(item.querySelectorAll(".gaiyo_item")).map(
-              (g) => g.textContent?.trim().replace(/\s+/g, " ") || ""
-            );
-            let station = "";
-            let walkMinutes = null;
-            for (const d of details) {
-              const stM = d.match(/交通\s+(.+?)\s+徒歩(\d+)分/);
+            var details = Array.from(item.querySelectorAll(".gaiyo_item")).map(function(g) {
+              return g.textContent?.trim().replace(/\\s+/g, " ") || "";
+            });
+            var station = "";
+            var walkMinutes = null;
+            for (var i = 0; i < details.length; i++) {
+              var d = details[i];
+              var stM = d.match(/交通\\s+(.+?)\\s+徒歩(\\d+)分/);
               if (stM) {
                 station = stM[1].trim();
                 walkMinutes = parseInt(stM[2]);
               }
             }
 
-            const fullUrl = link.startsWith("http") ? link : `https://realestate.rakuten.co.jp${link}`;
+            var fullUrl = link.startsWith("http") ? link : "https://realestate.rakuten.co.jp" + link;
 
             return {
-              address: address || ward, ward,
+              address: address || ward, ward: ward,
               price: price || 0, landSize: landSize || 0, area: landSize || 0,
               buildingCoverageRatio: bcr, floorAreaRatio: far,
               station: station || undefined, walkMinutes: walkMinutes ?? undefined,
@@ -141,7 +144,9 @@ export async function scrapeRakuten(areaCode: string, filterTypes?: string[]): P
               layout: layout || undefined,
             };
           });
-        }, wardName, label);
+          return JSON.stringify(results);
+        `) as any, wardName, label) as string;
+        const pageListings = JSON.parse(rawListings);
 
       allListings.push(...pageListings);
 

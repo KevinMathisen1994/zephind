@@ -1,17 +1,39 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../logger";
-import { scrapeAtHome } from "./athome";
-import { scrapeRakuten } from "./rakuten";
-import { scrapeHatomark } from "./hatomark";
-import { scrapeKenbiya } from "./kenbiya";
-import { scrapeSuumo } from "./suumo";
 import { hardFilter } from "./propertyMatcher";
-import type { OrderCriteria } from "../types";
+import { KNOWN_SOURCES, runScraper } from "./scraperRegistry";
+import { checkAllScrapers, checkScraper } from "./healthCheck";
+import type { OrderCriteria, ScrapeResult } from "../types";
 
 export const scrapeRoutes = Router();
 
+// Concurrency limiter — prevents more than N browsers running simultaneously
+function makeSemaphore(limit: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  const release = () => {
+    active--;
+    if (queue.length > 0) {
+      active++;
+      const next = queue.shift()!;
+      next();
+    }
+  };
+  return function acquire<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const run = () => fn().then(resolve, reject).finally(release);
+      if (active < limit) {
+        active++;
+        run();
+      } else {
+        queue.push(run);
+      }
+    });
+  };
+}
+
 scrapeRoutes.get("/", async (req: Request, res: Response) => {
-  const { areaCodes, source = "athome", orders: ordersJson } = req.query;
+  const { areaCodes, source, sources: sourcesParam, orders: ordersJson } = req.query;
 
   if (!areaCodes) {
     res.status(400).json({ error: "areaCodes parameter required" });
@@ -19,6 +41,21 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
   }
 
   const codes = (areaCodes as string).split(",").map((s) => s.trim());
+
+  // Support both ?source=athome (legacy) and ?sources=athome,suumo,homes (multi)
+  let selectedSources: string[];
+  if (sourcesParam) {
+    selectedSources = (sourcesParam as string).split(",").map((s) => s.trim()).filter((s) => KNOWN_SOURCES.includes(s));
+  } else if (source) {
+    selectedSources = [(source as string).trim()];
+  } else {
+    selectedSources = ["athome"];
+  }
+
+  if (selectedSources.length === 0) {
+    res.status(400).json({ error: "No valid sources specified" });
+    return;
+  }
 
   // Parse order criteria from query param
   let criteria: OrderCriteria[] = [];
@@ -31,7 +68,7 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
   }
 
   logger.info("Scrape request received", {
-    source,
+    sources: selectedSources,
     areas: codes,
     orderCount: criteria.length,
     orders: criteria.map((c) => ({
@@ -39,56 +76,58 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
       wards: c.wards,
       priceRange: c.priceMin != null || c.priceMax != null ? `${c.priceMin ?? ""}~${c.priceMax ?? ""}` : null,
       walkMinutes: c.walkMinutes,
-      bcr: c.minBuildingCoverageRatio,
-      far: c.minFloorAreaRatio,
       maxBuildAge: c.maxBuildAge,
-      minBuildYear: c.minBuildYear,
-      minYield: c.minYield,
-      maxYield: c.maxYield,
-      minRoadWidth: c.minRoadWidth,
-      minTotalUnits: c.minTotalUnits,
-      maxFloor: c.maxFloor,
-      excludeFirstFloor: c.excludeFirstFloor,
-      minElevators: c.minElevators,
-      structureTypes: c.structureTypes,
       layoutTypes: c.layoutTypes,
     })),
   });
 
   try {
     const allListings: any[] = [];
-    const areaResults: { areaCode: string; total: number }[] = [];
+    const areaResults: { areaCode: string; source: string; total: number }[] = [];
 
-    for (const code of codes) {
-      logger.info(`Starting scrape for area code ${code}...`);
-      // Determine which property types to scrape from order criteria
-      const requestedTypes = criteria.length > 0 ? criteria[0].propertyTypes : undefined;
-      let result;
-      if (source === "athome") {
-        result = await scrapeAtHome(code, requestedTypes);
-      } else if (source === "rakuten") {
-        result = await scrapeRakuten(code, requestedTypes);
-      } else if (source === "hatomark") {
-        result = await scrapeHatomark(code, requestedTypes);
-      } else if (source === "kenbiya") {
-        result = await scrapeKenbiya(code, requestedTypes);
-      } else if (source === "suumo") {
-        result = await scrapeSuumo(code, requestedTypes);
-      } else {
-        res.status(400).json({ error: `Unknown source: ${source}` });
-        return;
+    // Determine requested property types from first order
+    const requestedTypes = criteria.length > 0 ? criteria[0].propertyTypes : undefined;
+
+    // Build all (source, areaCode) job pairs
+    const jobs: Array<{ source: string; code: string }> = [];
+    for (const src of selectedSources) {
+      for (const code of codes) {
+        jobs.push({ source: src, code });
       }
+    }
 
-      logger.info(`Area ${code} raw result: ${result.listings.length} listings found`);
-      areaResults.push({ areaCode: code, total: result.listings.length });
-      allListings.push(...result.listings);
+    logger.info(`Running ${jobs.length} scrape job(s) in parallel (max 3 concurrent browsers)...`);
+
+    // Max 3 concurrent browsers to stay within RAM limits
+    const acquire = makeSemaphore(3);
+
+    const results = await Promise.all(
+      jobs.map(({ source: src, code }) =>
+        acquire(async () => {
+          logger.info(`Starting scrape: source=${src} areaCode=${code}`);
+          try {
+            const result = await runScraper(src, code, requestedTypes);
+            logger.info(`Area ${code} (${src}) raw result: ${result.listings.length} listings found`);
+            areaResults.push({ areaCode: code, source: src, total: result.listings.length });
+            return result.listings;
+          } catch (err) {
+            logger.error(`Scrape job failed source=${src} areaCode=${code}: ${(err as Error).message}`);
+            areaResults.push({ areaCode: code, source: src, total: 0 });
+            return [];
+          }
+        })
+      )
+    );
+
+    for (const listings of results) {
+      allListings.push(...listings);
     }
 
     // Apply hard filters against order criteria
     logger.info(`Applying hard filters against ${criteria.length} order(s)...`);
     const { passed, failed, stats } = hardFilter(allListings, criteria);
 
-    // Log each listing with match/fail status
+    // Log match results
     const logPassed = passed.slice(0, 10);
     for (const l of logPassed) {
       const orderLabels = (l.matchedOrderIndices as number[])
@@ -98,14 +137,14 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
         `[MATCH ✓] ${l.ward} ${l.address || ""} | price=${l.price}万 | area=${l.landSize ?? l.area ?? "?"}㎡ | walk=${l.walkMinutes ?? "?"}min | station=${l.station ?? "?"} | matches=${orderLabels || "all"}`
       );
     }
-    const logFailed = failed.slice(0, 5);
+    const logFailed = failed.slice(0, 10);
     for (const l of logFailed) {
       logger.info(
-        `[MATCH ✗] ${l.ward} ${l.address || ""} | price=${l.price}万 | area=${l.landSize ?? l.area ?? "?"}㎡ | FAILED filters`
+        `[MATCH ✗] ${l.ward} ${l.address || ""} | price=${l.price}万 | area=${l.landSize ?? l.area ?? "?"}㎡ | walk=${l.walkMinutes ?? "?"}min | FAILED filters: ${(l as any).rejectionReason}`
       );
     }
     if (passed.length > 10) logger.info(`  ... and ${passed.length - 10} more passed listings`);
-    if (failed.length > 5) logger.info(`  ... and ${failed.length - 5} more failed listings`);
+    if (failed.length > 10) logger.info(`  ... and ${failed.length - 10} more failed listings`);
 
     logger.info("Scrape complete", {
       rawTotal: allListings.length,
@@ -114,7 +153,6 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
       rejectionBreakdown: stats.reasons,
     });
 
-    // Attach matched order indices for frontend to save match records
     const listingsWithMatches = passed.map((l: any) => ({
       ...l,
       matchedOrderIndices: l.matchedOrderIndices,
@@ -122,7 +160,8 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
 
     res.json({
       ok: true,
-      source,
+      sources: selectedSources,
+      source: selectedSources[0], // legacy compat
       areas: codes,
       rawTotal: allListings.length,
       listings: listingsWithMatches,
@@ -131,7 +170,7 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
       areaResults,
     });
   } catch (error) {
-    logger.error("Scrape error", { error });
-    res.status(500).json({ error: String(error) });
+    logger.error("Scrape error: " + ((error as Error).stack || error));
+    res.status(500).json({ error: (error as Error).stack || String(error) });
   }
 });

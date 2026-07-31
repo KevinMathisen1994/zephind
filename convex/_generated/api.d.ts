@@ -8,16 +8,20 @@
  * @module
  */
 
+import type * as customers from "../customers.js";
+import type * as deals from "../deals.js";
 import type * as evaluate from "../evaluate.js";
 import type * as evaluateGH from "../evaluateGH.js";
 import type * as evaluateGemini from "../evaluateGemini.js";
 import type * as evaluateGroq from "../evaluateGroq.js";
 import type * as http from "../http.js";
+import type * as lib_scoring from "../lib/scoring.js";
 import type * as listings from "../listings.js";
 import type * as matching from "../matching.js";
 import type * as orders from "../orders.js";
 import type * as properties from "../properties.js";
 import type * as proposals from "../proposals.js";
+import type * as scraperHealth from "../scraperHealth.js";
 
 import type {
   ApiFromModules,
@@ -26,16 +30,20 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  customers: typeof customers;
+  deals: typeof deals;
   evaluate: typeof evaluate;
   evaluateGH: typeof evaluateGH;
   evaluateGemini: typeof evaluateGemini;
   evaluateGroq: typeof evaluateGroq;
   http: typeof http;
+  "lib/scoring": typeof lib_scoring;
   listings: typeof listings;
   matching: typeof matching;
   orders: typeof orders;
   properties: typeof properties;
   proposals: typeof proposals;
+  scraperHealth: typeof scraperHealth;
 }>;
 
 /**

@@ -5,64 +5,36 @@
 @import "tw-animate-css";
 
 :root {
-  --font-dm-sans: "DM Sans", sans-serif;
-  --font-dm-serif: "DM Serif Display", serif;
+  --font-jp-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", sans-serif;
   --font-ibm-plex-mono: "IBM Plex Mono", monospace;
-  --radius: 0;
+  --radius: 12px;
 
-  /* White background, green accent (#1A7100), black text */
-  --background: #ffffff;
-  --foreground: #000000;
+  /* Japanese Professional Green Theme (#1A7100 / Forest Emerald) */
+  --background: #f8fafc;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #000000;
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: #000000;
+  --popover-foreground: #0f172a;
 
   --primary: #1A7100;
   --primary-foreground: #ffffff;
 
-  --secondary: #f5f5f5;
-  --secondary-foreground: #000000;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1e293b;
 
-  --muted: #fafafa;
-  --muted-foreground: #666666;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
 
-  --accent: #f0f7ee;
-  --accent-foreground: #000000;
+  --accent: #f0fdf4;
+  --accent-foreground: #14532d;
 
-  --destructive: #dc2626;
+  --destructive: #ef4444;
   --destructive-foreground: #ffffff;
 
-  --border: #e5e5e5;
-  --input: #e5e5e5;
+  --border: #e2e8f0;
+  --input: #cbd5e1;
   --ring: #1A7100;
-
-  --chart-1: #1A7100;
-  --chart-2: #2d9a00;
-  --chart-3: #40bf00;
-  --chart-4: #1a5c00;
-  --chart-5: #55d600;
-
-  --sidebar: #ffffff;
-  --sidebar-foreground: #000000;
-  --sidebar-primary: #1A7100;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f7ee;
-  --sidebar-accent-foreground: #000000;
-  --sidebar-border: #e5e5e5;
-  --sidebar-ring: #1A7100;
-
-  /* daisyUI — pure white base, green primary */
-  --p: #1A7100;
-  --pc: #ffffff;
-  --s: #e5e5e5;
-  --sc: #000000;
-  --a: #f0f7ee;
-  --ac: #000000;
-  --b1: #ffffff;
-  --b2: #fafafa;
-  --b3: #f5f5f5;
-  --bc: #000000;
 }
 
 @theme inline {
@@ -85,36 +57,78 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
-  --font-sans: var(--font-dm-sans);
-  --font-mono: var(--font-ibm-plex-mono);
-  --font-heading: var(--font-dm-serif);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
 }
 
 @layer base {
+  html {
+    font-size: 17px;
+  }
   * {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground font-sans;
-    font-family: var(--font-dm-sans), sans-serif;
+    @apply bg-background text-foreground font-sans antialiased text-base leading-relaxed;
+    font-family: var(--font-jp-sans);
+    font-feature-settings: "palt" 1;
+    font-size: 1.05rem;
   }
-}
 
-.font-heading {
-  font-family: var(--font-dm-serif), serif;
+  /* Utility Font Size Scaling for Enhanced Readability */
+  .text-xs { font-size: 0.875rem !important; line-height: 1.35rem !important; } /* 14px */
+  .text-sm { font-size: 1rem !important; line-height: 1.5rem !important; } /* 16px */
+  .text-base { font-size: 1.125rem !important; line-height: 1.75rem !important; } /* 18px */
+  .text-lg { font-size: 1.3rem !important; line-height: 1.85rem !important; } /* 20px */
+  .text-xl { font-size: 1.6rem !important; line-height: 2.1rem !important; } /* 25px */
+  .text-2xl { font-size: 2rem !important; line-height: 2.4rem !important; } /* 32px */
+  .text-3xl { font-size: 2.4rem !important; line-height: 2.8rem !important; } /* 38px */
 }
 
 .font-data {
   font-family: var(--font-ibm-plex-mono), monospace;
+}
+
+/* Skeleton Loading Shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f1f5f9 25%,
+    #e2e8f0 37%,
+    #f1f5f9 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite ease-in-out;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 html {

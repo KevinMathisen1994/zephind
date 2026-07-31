@@ -66,6 +66,9 @@ export default defineSchema({
         minElevators: v.optional(v.number()),
         structureTypes: v.optional(v.array(v.string())),
         layoutTypes: v.optional(v.array(v.string())),
+        customerId: v.optional(v.string()),
+        isScraping: v.optional(v.boolean()),
+        scrapingStatus: v.optional(v.string()),
     })
         .index("by_status", ["status"])
         .index("by_user", ["userId"]),
@@ -218,4 +221,45 @@ export default defineSchema({
         data: v.optional(v.any()),
         processedAt: v.optional(v.number()),
     }),
+    customers: defineTable({
+        name: v.string(),
+        email: v.optional(v.string()),
+        phone: v.optional(v.string()),
+        company: v.optional(v.string()),
+        address: v.optional(v.string()),
+        notes: v.optional(v.string()),
+        createdAt: v.optional(v.number()),
+    }).index("by_name", ["name"]),
+    deals: defineTable({
+        title: v.string(),
+        customerId: v.optional(v.string()),
+        customerName: v.optional(v.string()),
+        customerEmail: v.optional(v.string()),
+        customerPhone: v.optional(v.string()),
+        orderId: v.optional(v.string()),
+        orderName: v.optional(v.string()),
+        listings: v.optional(v.any()),
+        customMessage: v.optional(v.string()),
+        status: v.optional(v.string()),
+        createdAt: v.optional(v.number()),
+        updatedAt: v.optional(v.number()),
+    })
+        .index("by_status", ["status"])
+        .index("by_customer", ["customerId"]),
+    // One row per scraper, upserted on each health check, so the admin board
+    // shows last-known status immediately on page load instead of needing a
+    // multi-minute re-run of all 19 scrapers.
+    scraperHealth: defineTable({
+        source: v.string(),
+        label: v.optional(v.string()),
+        status: v.string(), // "ok" | "degraded" | "broken"
+        listingCount: v.optional(v.number()),
+        durationMs: v.optional(v.number()),
+        areaCode: v.optional(v.string()),
+        checkedAt: v.number(),
+        issues: v.optional(v.array(v.string())),
+        coverage: v.optional(v.any()),
+        sample: v.optional(v.any()),
+        error: v.optional(v.string()),
+    }).index("by_source", ["source"]),
 });
