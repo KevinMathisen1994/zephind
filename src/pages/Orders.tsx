@@ -94,7 +94,6 @@ export default function OrdersPage() {
   const createListing = useMutation(api.listings.create);
   const createMatching = useMutation(api.matching.create);
   const saveScore = useMutation(api.matching.saveScore);
-  const updateListing = useMutation(api.listings.update);
   const updateOrder = useMutation(api.orders.update);
   const matches = useQuery(api.matching.list);
   const evaluateListing = useAction(api.evaluate.evaluateListing);
@@ -106,9 +105,6 @@ export default function OrdersPage() {
 
   const [scrapingOrderId, setScrapingOrderId] = useState<string | null>(null);
   const [evaluatingOrderId, setEvaluatingOrderId] = useState<string | null>(
-    null,
-  );
-  const [evaluatingMatchId, setEvaluatingMatchId] = useState<string | null>(
     null,
   );
   const [scrapeSource, setScrapeSource] = useState<Record<string, string>>({});
@@ -1206,7 +1202,7 @@ export default function OrdersPage() {
                         <CardTitle className="text-xl font-extrabold text-slate-900 tracking-tight break-words">
                           {order.name || `オーダー #${order._id.slice(0, 6)}`}
                         </CardTitle>
-                        <Badge
+                        <button
                           onClick={async (e) => {
                             e.stopPropagation();
                             const nextStatus =
@@ -1218,20 +1214,15 @@ export default function OrdersPage() {
                               status: nextStatus,
                             });
                           }}
-                          variant={
+                          className={`text-xs px-3 py-1 font-bold shrink-0 transition-all select-none rounded-xl border ${
                             order.status === "completed"
-                              ? "default"
-                              : "secondary"
-                          }
-                          className={`text-xs px-3 py-1 font-bold shrink-0 cursor-pointer hover:opacity-85 transition-all select-none ${
-                            order.status === "completed"
-                              ? "bg-emerald-700 text-white shadow-xs hover:bg-emerald-800"
-                              : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                              ? "bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 shadow-xs"
+                              : "bg-slate-200 text-slate-700 border-slate-200 hover:bg-slate-300"
                           }`}
                           title="クリックでステータス変更 (進行中 ⇄ 完了)"
                         >
                           {order.status === "completed" ? "✓ 完了" : "進行中"}
-                        </Badge>
+                        </button>
                         {matchCount > 0 && (
                           <Badge className="bg-emerald-700 text-white text-xs px-3 py-1 font-bold shadow-sm shrink-0">
                             {matchCount} 件抽出一致

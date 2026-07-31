@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { wardLabelToCode } from "../lib/tokyoWards";
-import { Play, RefreshCw, Database, Trash2, Sliders, ExternalLink, ShieldCheck } from "lucide-react";
+import { Play, RefreshCw, Database, Trash2, Sliders, ShieldCheck } from "lucide-react";
 
 const SOURCE_LABELS: Record<string, string> = {
   athome: "At Home",

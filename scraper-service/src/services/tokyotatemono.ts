@@ -135,7 +135,15 @@ async function extractListings(
       // Strip the prefecture before matching the ward: a left-anchored
       // /(.{2,4}[区市])/ over "東京都杉並区..." yields "京都杉並区".
       var ward = "";
-      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").match(/^(.{1,4}?[区市])/);
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        // Drop a 郡 (county) prefix — the municipality follows it,
+        // e.g. 西多摩郡瑞穂町 -> 瑞穂町.
+        .replace(/^[^\\s]{1,4}郡/, "")
+        // 市/区 BEFORE 町/村: one combined [区市町村] class matches 武蔵村
+        // inside 武蔵村山市. The 町/村 fallback covers 島嶼部 (大島町, 八丈町,
+        // 檜原村, 小笠原村) and 郡部, which previously extracted no ward at all.
+        .match(/^(.{1,6}?[市区])/)
+        || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
       var area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);

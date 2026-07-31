@@ -134,8 +134,21 @@ export async function scrapeRakuten(areaCode: string, filterTypes?: string[]): P
 
             var fullUrl = link.startsWith("http") ? link : "https://realestate.rakuten.co.jp" + link;
 
+            // Derive the ward from the scraped address, not from the injected
+            // ward label. TOKYO_WARD_MAP only covers the 23 wards, so for
+            // 市部/郡部/島嶼部 that label is the RAW AREA CODE ("13209") — this is
+            // where the "13212"/"13208" ward values in the listings table came
+            // from. Fall back to the label only when the address yields nothing.
+            // (No backticks in this comment: it lives inside a template literal.)
+            var derivedWard = "";
+            var dwm = (address || "").replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+              .replace(/^[^\\s]{1,4}郡/, "")
+              .match(/^(.{1,6}?[市区])/)
+              || (address || "").replace(/^東京都/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+            if (dwm) derivedWard = dwm[1];
+
             return {
-              address: address || ward, ward: ward,
+              address: address || ward, ward: derivedWard || ward,
               price: price || 0, landSize: landSize || 0, area: landSize || 0,
               buildingCoverageRatio: bcr, floorAreaRatio: far,
               station: station || undefined, walkMinutes: walkMinutes ?? undefined,

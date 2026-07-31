@@ -17,10 +17,8 @@ import {
   Trash2,
   Edit,
   X,
-  CheckCircle2,
   FileCheck2,
   ArrowRight,
-  ExternalLink,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 

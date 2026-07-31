@@ -65,6 +65,23 @@ export const WARD_CODE_MAP = {
   羽村市: "13227",
   あきる野市: "13228",
   西東京市: "13229",
+  // 郡部（西多摩郡）— the frontend's ward picker offers these, so an order can
+  // target them; without the codes here the MLIT comps lookup silently returns
+  // null and those listings lose their market-quality signal entirely.
+  瑞穂町: "13303",
+  日の出町: "13305",
+  檜原村: "13307",
+  奥多摩町: "13308",
+  // 島嶼部（伊豆諸島・小笠原諸島）
+  大島町: "13361",
+  利島村: "13362",
+  新島村: "13363",
+  神津島村: "13364",
+  三宅村: "13381",
+  御蔵島村: "13382",
+  八丈町: "13401",
+  青ヶ島村: "13402",
+  小笠原村: "13421",
 };
 
 const CODE_TO_WARD = Object.fromEntries(

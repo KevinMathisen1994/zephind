@@ -45,7 +45,15 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       // "東京都杉並区…" matches "京都杉並区" — it is greedy from the left and
       // the 東 lands outside the capture. This is the source of the corrupt
       // ward values ("京都町田市") seen in the listings table.
-      var wm = title.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").match(/^(.{1,4}?[区市])/);
+      var wm = title.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        // Drop a 郡 (county) prefix — the municipality follows it,
+        // e.g. 西多摩郡瑞穂町 -> 瑞穂町.
+        .replace(/^[^\\s]{1,4}郡/, "")
+        // 市/区 BEFORE 町/村: one combined [区市町村] class matches 武蔵村
+        // inside 武蔵村山市. The 町/村 fallback covers 島嶼部 (大島町, 八丈町,
+        // 檜原村, 小笠原村) and 郡部, which previously extracted no ward at all.
+        .match(/^(.{1,6}?[市区])/)
+        || title.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
       // Price: usually a span inside a p tag or div, looking for "万円"

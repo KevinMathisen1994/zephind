@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/button";
@@ -11,16 +11,13 @@ import {
   Search,
   CheckCircle2,
   Clock,
-  XCircle,
   TrendingUp,
-  Building,
   MapPin,
   ExternalLink,
   ChevronDown,
   ChevronUp,
   Trash2,
   FileText,
-  Sparkles,
   Phone,
   Mail,
   Award,
@@ -240,8 +237,6 @@ export default function DealsPage() {
             const isExpanded = expandedDealId === deal._id;
             const listings = deal.listings || [];
             const isWon = deal.status === "closed_won";
-            const isNegotiating = deal.status === "negotiating";
-
             return (
               <Card
                 key={deal._id}
