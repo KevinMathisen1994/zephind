@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -197,6 +197,41 @@ export default function OrdersPage() {
   const handleDelete = async (id: Id<"orders">) => {
     await deleteOrder({ id });
   };
+
+  // Auto-evaluate after a scrape.
+  //
+  // This cannot be done by awaiting the scrape and calling handleBatchEvaluate
+  // directly (the old code did that after a 600ms sleep): handleBatchEvaluate
+  // reads `matches` from useQuery, so it closes over the value from the render
+  // it was created in. The freshly-created matches are not in that snapshot no
+  // matter how long you sleep, so it evaluated nothing. Instead, flag the order
+  // and let an effect fire once the reactive query actually contains its matches.
+  const [autoEvaluate, setAutoEvaluate] = useState(true);
+  const [pendingAutoEvalOrderId, setPendingAutoEvalOrderId] = useState<string | null>(null);
+  const autoEvalFired = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!pendingAutoEvalOrderId || !matches || !listings || !orders) return;
+    if (scrapingOrderId === pendingAutoEvalOrderId) return; // scrape still running
+    if (evaluatingOrderId) return; // another evaluation in flight
+
+    const orderId = pendingAutoEvalOrderId;
+    const pending = matches.filter((m) => {
+      if (m.orderId !== orderId) return false;
+      const listing = listings.find((l) => l._id === m.listingId);
+      return listing && !m.evaluation && !evaluations[m._id];
+    });
+    if (pending.length === 0) return; // matches not propagated yet — wait for the next update
+
+    const key = `${orderId}:${pending.length}`;
+    if (autoEvalFired.current.has(key)) return;
+    autoEvalFired.current.add(key);
+
+    const order = orders.find((o) => o._id === orderId);
+    setPendingAutoEvalOrderId(null);
+    if (order) void handleBatchEvaluate(order);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoEvalOrderId, matches, listings, orders, scrapingOrderId, evaluatingOrderId]);
 
   const handleBatchEvaluate = async (order: Doc<"orders">) => {
     setEvaluatingOrderId(order._id);
@@ -463,6 +498,10 @@ export default function OrdersPage() {
         });
         setScrapingOrderId(null);
         scrapeAbortControllers.current.delete(order._id);
+        // Single-source scrape had no auto-evaluate at all; only 全14サイト一括取得
+        // attempted it. Guarded by customController so the bulk path (which
+        // drives this function per source) doesn't fire once per site.
+        if (autoEvaluate) setPendingAutoEvalOrderId(order._id);
       }
     }
   };
@@ -503,9 +542,9 @@ export default function OrdersPage() {
         if (controller.signal.aborted) break;
         await handleScrapeOrder(order, src, true, controller);
       }
-      if (!controller.signal.aborted) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        await handleBatchEvaluate(order);
+      if (!controller.signal.aborted && autoEvaluate) {
+        // Hand off to the effect above rather than calling directly — see note there.
+        setPendingAutoEvalOrderId(order._id);
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -1380,7 +1419,19 @@ export default function OrdersPage() {
 
                           {matchCount > 0 && (
                             <>
-                              <Button
+                              <label
+                                    className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 select-none cursor-pointer px-2"
+                                    title="スクレイピング完了後、抽出された物件を自動で評価します"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={autoEvaluate}
+                                      onChange={(e) => setAutoEvaluate(e.target.checked)}
+                                      className="w-3.5 h-3.5 accent-emerald-700"
+                                    />
+                                    取得後に自動評価
+                                  </label>
+                                  <Button
                                 variant="outline"
                                 size="sm"
                                 className="h-10 text-xs font-bold gap-1.5 border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
@@ -1417,20 +1468,28 @@ export default function OrdersPage() {
                         </>
                       )}
 
-                      <button
-                        onClick={() => handleEditClick(order)}
-                        className="p-2 text-slate-400 hover:text-emerald-700 transition-colors rounded-lg hover:bg-slate-100"
-                        title="編集"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(order._id)}
-                        className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-slate-100"
-                        title="削除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2 ml-auto shrink-0">
+                        {/* Were bare 16px slate-400 glyphs with no labels, easy to
+                            miss and easy to mis-click. Now labelled, bordered, and
+                            pushed to their own group away from the primary actions
+                            so 削除 in particular is deliberate rather than adjacent. */}
+                        <button
+                          onClick={() => handleEditClick(order)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold cursor-pointer hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                          title="このオーダーを編集"
+                        >
+                          <Edit className="w-4 h-4" />
+                          編集
+                        </button>
+                        <button
+                          onClick={() => handleDelete(order._id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold cursor-pointer hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors"
+                          title="このオーダーを削除"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          削除
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </CardHeader>

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { useClerk } from "@clerk/clerk-react";
+import { useClerk, useUser } from "@clerk/clerk-react";
 import {
   FileCheck2,
   Sliders,
@@ -40,6 +40,7 @@ const navItems = [
 
 export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }) {
   const { signOut } = useClerk();
+  const { user, isLoaded } = useUser();
   return (
     // h-full (not min-h-screen) so the sidebar exactly fills the viewport-height
     // shell and stays put while <main> scrolls. min-h-screen let it scroll out of
@@ -125,11 +126,46 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
         </p>
       </div>
 
+      {/* Signed-in account — there was no way to tell which account a session
+          belonged to, which matters now that data is per-user. */}
+      <div className="px-4 pt-4">
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          {isLoaded && user?.imageUrl ? (
+            <img
+              src={user.imageUrl}
+              alt=""
+              className="w-8 h-8 rounded-full shrink-0 object-cover"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full shrink-0 bg-emerald-700 text-white flex items-center justify-center text-xs font-bold">
+              {(user?.primaryEmailAddress?.emailAddress || user?.fullName || "?")
+                .charAt(0)
+                .toUpperCase()}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-slate-900 truncate">
+              {!isLoaded
+                ? "読み込み中..."
+                : user?.fullName || user?.username || "ログイン中"}
+            </div>
+            {/* The email is the identity people actually recognise, so never
+                hide it — truncate instead, full value on hover. */}
+            <div
+              className="text-[11px] text-slate-500 truncate font-medium"
+              title={user?.primaryEmailAddress?.emailAddress || ""}
+            >
+              {user?.primaryEmailAddress?.emailAddress || "—"}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Logout */}
-      <div className="p-4 pt-0">
+      <div className="p-4 pt-2">
         <button
           onClick={() => signOut({ redirectUrl: "/" })}
-          className="flex items-center gap-3 w-full p-3.5 rounded-xl text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 transition-all duration-200"
+          className="flex items-center gap-3 w-full p-3.5 rounded-xl text-sm font-semibold text-slate-600 cursor-pointer hover:text-red-600 hover:bg-red-50 transition-all duration-200"
         >
           <div className="p-2 rounded-lg bg-slate-100 text-slate-500 group-hover:bg-red-100 group-hover:text-red-600">
             <LogOut className="w-5 h-5" />
