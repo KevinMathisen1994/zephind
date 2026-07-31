@@ -162,7 +162,8 @@ export default defineSchema({
         userId: v.optional(v.string()),
         criteria: v.optional(v.any()),
     })
-        .index("by_order", ["orderId"]),
+        .index("by_order", ["orderId"])
+        .index("by_user", ["userId"]),
     evaluations: defineTable({
         propertyId: v.optional(v.string()),
         orderId: v.optional(v.string()),
@@ -190,13 +191,17 @@ export default defineSchema({
     })
         .index("by_ward", ["ward"]),
     matching: defineTable({
+        // Owner (Clerk JWT subject). Required for per-user data isolation;
+        // optional in the validator only so pre-existing rows still parse.
+        userId: v.optional(v.string()),
         orderId: v.optional(v.string()),
         listingId: v.optional(v.string()),
         score: v.optional(v.number()),
         status: v.optional(v.string()),
         evaluation: v.optional(v.string()),
     })
-        .index("by_order", ["orderId"]),
+        .index("by_order", ["orderId"])
+        .index("by_user", ["userId"]),
     propertySources: defineTable({
         name: v.optional(v.string()),
         url: v.optional(v.string()),
@@ -222,6 +227,9 @@ export default defineSchema({
         processedAt: v.optional(v.number()),
     }),
     customers: defineTable({
+        // Owner (Clerk JWT subject). Required for per-user data isolation;
+        // optional in the validator only so pre-existing rows still parse.
+        userId: v.optional(v.string()),
         name: v.string(),
         email: v.optional(v.string()),
         phone: v.optional(v.string()),
@@ -229,8 +237,13 @@ export default defineSchema({
         address: v.optional(v.string()),
         notes: v.optional(v.string()),
         createdAt: v.optional(v.number()),
-    }).index("by_name", ["name"]),
+    })
+        .index("by_name", ["name"])
+        .index("by_user", ["userId"]),
     deals: defineTable({
+        // Owner (Clerk JWT subject). Required for per-user data isolation;
+        // optional in the validator only so pre-existing rows still parse.
+        userId: v.optional(v.string()),
         title: v.string(),
         customerId: v.optional(v.string()),
         customerName: v.optional(v.string()),
@@ -245,7 +258,8 @@ export default defineSchema({
         updatedAt: v.optional(v.number()),
     })
         .index("by_status", ["status"])
-        .index("by_customer", ["customerId"]),
+        .index("by_customer", ["customerId"])
+        .index("by_user", ["userId"]),
     // One row per scraper, upserted on each health check, so the admin board
     // shows last-known status immediately on page load instead of needing a
     // multi-minute re-run of all 19 scrapers.

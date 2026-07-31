@@ -22,6 +22,7 @@ import {
   Mail,
   Award,
 } from "lucide-react";
+import type { Id } from "../../convex/_generated/dataModel";
 
 export default function DealsPage() {
   const deals = useQuery(api.deals.list);
@@ -36,13 +37,13 @@ export default function DealsPage() {
     setExpandedDealId(expandedDealId === id ? null : id);
   };
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
-    await updateDealStatus({ id: id as any, status: newStatus });
+  const handleStatusChange = async (id: Id<"deals">, newStatus: string) => {
+    await updateDealStatus({ id, status: newStatus });
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: Id<"deals">) => {
     if (confirm("この提案案件を削除してもよろしいですか？")) {
-      await removeDeal({ id: id as any });
+      await removeDeal({ id });
     }
   };
 
@@ -73,7 +74,7 @@ export default function DealsPage() {
     .reduce((sum, d) => {
       const listings = d.listings || [];
       const dealVolume = listings.reduce(
-        (lSum: number, l: any) => lSum + (l.price || 0),
+        (lSum: number, l: { price?: number }) => lSum + (l.price || 0),
         0,
       );
       return sum + dealVolume;
@@ -98,18 +99,18 @@ export default function DealsPage() {
       </div>
 
       {/* KPI Overview Metrics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
-            <Handshake className="w-6 h-6" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
+            <Handshake className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               総提案案件数
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {deals === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 totalDeals
               )}
@@ -117,17 +118,17 @@ export default function DealsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-amber-50 text-amber-600 shrink-0">
-            <Clock className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-amber-50 text-amber-600 shrink-0">
+            <Clock className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               交渉中案件数
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {deals === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 negotiatingCount
               )}
@@ -135,17 +136,17 @@ export default function DealsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-emerald-300 shadow-md bg-emerald-50/30 flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-700 text-white shrink-0 shadow-md shadow-emerald-700/20">
-            <Award className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-emerald-300 shadow-md bg-emerald-50/30 flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-700 text-white shrink-0 shadow-md shadow-emerald-700/20">
+            <Award className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-extrabold text-emerald-900 uppercase">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-extrabold text-emerald-900 uppercase truncate">
               成約完了数
             </div>
-            <div className="text-2xl font-black text-emerald-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-emerald-900 font-data tracking-tight truncate">
               {deals === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 closedWonCount
               )}
@@ -153,17 +154,17 @@ export default function DealsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-purple-50 text-purple-600 shrink-0">
-            <TrendingUp className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-purple-50 text-purple-600 shrink-0">
+            <TrendingUp className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               成約案件 取引金額
             </div>
-            <div className="text-xl font-black text-slate-900 font-data tracking-tight truncate">
+            <div className="text-sm md:text-xl font-black text-slate-900 font-data tracking-tight truncate">
               {deals === undefined ? (
-                <Skeleton className="h-7 w-16" />
+                <Skeleton className="h-6 md:h-7 w-14 md:w-16" />
               ) : (
                 `${closedWonVolume.toLocaleString()} 万円`
               )}
@@ -276,7 +277,7 @@ export default function DealsPage() {
                         )}
 
                         <span className="text-xs font-semibold text-slate-400">
-                          {new Date(deal.createdAt || Date.now()).toLocaleDateString("ja-JP")} 提案
+                          {deal.createdAt ? new Date(deal.createdAt).toLocaleDateString("ja-JP") : "日付不明"} 提案
                         </span>
                       </div>
 
@@ -383,7 +384,7 @@ export default function DealsPage() {
 
                     {isExpanded && (
                       <div className="pt-3 space-y-2.5 animate-in fade-in duration-200">
-                        {listings.map((l: any, idx: number) => (
+                        {listings.map((l: { address?: string; price?: number; landSize?: number; walkMinutes?: number; propertyType?: string; score?: number; url?: string }, idx: number) => (
                           <div
                             key={idx}
                             className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"

@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useClerk } from "@clerk/clerk-react";
 import {
   FileCheck2,
   Sliders,
@@ -7,6 +8,7 @@ import {
   ChevronRight,
   Users,
   Handshake,
+  LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -36,9 +38,13 @@ const navItems = [
   },
 ];
 
-export default function DashboardNav() {
+export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }) {
+  const { signOut } = useClerk();
   return (
-    <aside className="w-72 min-h-screen bg-white text-slate-900 border-r border-slate-200 flex flex-col shadow-sm select-none z-20">
+    // h-full (not min-h-screen) so the sidebar exactly fills the viewport-height
+    // shell and stays put while <main> scrolls. min-h-screen let it scroll out of
+    // view on long pages. overflow-y-auto keeps the nav usable on short screens.
+    <aside className="w-72 h-full shrink-0 overflow-y-auto bg-white text-slate-900 border-r border-slate-200 flex flex-col shadow-sm select-none z-20">
       {/* Brand Header */}
       <div className="p-6 border-b border-slate-100 bg-slate-50/50">
         <div className="flex items-center gap-3">
@@ -61,6 +67,7 @@ export default function DashboardNav() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={onNavClick}
             className={({ isActive }) =>
               `group relative flex items-center justify-between p-3.5 rounded-xl text-base font-semibold transition-all duration-200 ${
                 isActive
@@ -108,7 +115,7 @@ export default function DashboardNav() {
       </nav>
 
       {/* Footer Info */}
-      <div className="p-4 m-4 rounded-xl bg-emerald-50/60 border border-emerald-100">
+      <div className="p-4 mx-4 rounded-xl bg-emerald-50/60 border border-emerald-100">
         <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 mb-1">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
           全14サイト 自動収集対応
@@ -116,6 +123,19 @@ export default function DashboardNav() {
         <p className="text-[11px] text-emerald-800/80 leading-relaxed font-medium">
           住友・三井・東急・野村・みずほ・三菱UFJ・小田急・京王・朝日・長谷工・大京・東京建物・LIFULL
         </p>
+      </div>
+
+      {/* Logout */}
+      <div className="p-4 pt-0">
+        <button
+          onClick={() => signOut({ redirectUrl: "/" })}
+          className="flex items-center gap-3 w-full p-3.5 rounded-xl text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 transition-all duration-200"
+        >
+          <div className="p-2 rounded-lg bg-slate-100 text-slate-500 group-hover:bg-red-100 group-hover:text-red-600">
+            <LogOut className="w-5 h-5" />
+          </div>
+          <span>ログアウト</span>
+        </button>
       </div>
     </aside>
   );

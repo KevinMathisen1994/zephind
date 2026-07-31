@@ -18,11 +18,12 @@ import {
   Settings,
   Search,
 } from "lucide-react";
+import type { Doc } from "../../convex/_generated/dataModel";
 
 interface ProposalModalProps {
-  order: any;
-  orderMatchList: any[];
-  matchedListing: (id: string) => any;
+  order: Doc<"orders">;
+  orderMatchList: Doc<"matching">[];
+  matchedListing: (id: string) => Doc<"listings"> | undefined;
   evaluations: Record<string, string>;
   onClose: () => void;
 }
@@ -105,9 +106,9 @@ export default function ProposalModal({
     .filter((m) => selectedMatchIds.has(m._id))
     .map((m) => {
       const listing = matchedListing(m.listingId ?? "");
-      const hasEvaluation = (m as any).evaluation || evaluations[m._id];
+      const hasEvaluation = m.evaluation || evaluations[m._id];
       const score =
-        (m as any).score ??
+        m.score ??
         (hasEvaluation
           ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
             ? Number(hasEvaluation.match(/評価[：:\s]*(\d+)/)[1])
@@ -239,13 +240,15 @@ export default function ProposalModal({
 
       // Auto save deal
       await handleSaveDeal();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("EmailJS Send Failed:", err);
-      setEmailJSError(
-        err?.text ||
-          err?.message ||
-          "メール送信に失敗しました。設定をご確認ください。",
-      );
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err !== null && "text" in err
+            ? (err as { text: string }).text
+            : "メール送信に失敗しました。設定をご確認ください。";
+      setEmailJSError(errorMessage);
     } finally {
       setSendingEmailJS(false);
     }
@@ -403,9 +406,9 @@ export default function ProposalModal({
                 .map((m) => {
                   const listing = matchedListing(m.listingId ?? "");
                   const isSelected = selectedMatchIds.has(m._id);
-                  const hasEval = (m as any).evaluation || evaluations[m._id];
+                  const hasEval = m.evaluation || evaluations[m._id];
                   const score =
-                    (m as any).score ??
+                    m.score ??
                     (hasEval
                       ? hasEval.match(/評価[：:\s]*(\d+)/)?.[1]
                         ? Number(hasEval.match(/評価[：:\s]*(\d+)/)[1])
@@ -624,7 +627,7 @@ export default function ProposalModal({
                 >
                   EmailJS Dashboard
                 </a>
-                の <strong>Email Templates &gt; Settings</strong> にて、「<strong>To Email (宛先)</strong>」を
+                の <strong>Email Templates {">"} Settings</strong> にて、「<strong>To Email (宛先)</strong>」を
                 <code className="bg-amber-100 px-1 rounded mx-1 text-amber-950">{"{{to_email}}"}</code>
                 または
                 <code className="bg-amber-100 px-1 rounded mx-1 text-amber-950">{"{{email}}"}</code>

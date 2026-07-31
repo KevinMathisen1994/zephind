@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/button";
@@ -21,6 +21,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 export default function CustomersPage() {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function CustomersPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [editingCustomer, setEditingCustomer] = useState<Doc<"customers"> | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -58,7 +59,7 @@ export default function CustomersPage() {
     setShowModal(true);
   };
 
-  const handleEditClick = (c: any) => {
+  const handleEditClick = (c: Doc<"customers">) => {
     setEditingCustomer(c);
     setName(c.name || "");
     setCompany(c.company || "");
@@ -77,7 +78,7 @@ export default function CustomersPage() {
     try {
       if (editingCustomer) {
         await updateCustomer({
-          id: editingCustomer._id as any,
+          id: editingCustomer._id,
           name: name.trim(),
           company: company.trim() || undefined,
           phone: phone.trim() || undefined,
@@ -104,9 +105,9 @@ export default function CustomersPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: Id<"customers">) => {
     if (confirm("この顧客情報を削除してもよろしいですか？")) {
-      await removeCustomer({ id: id as any });
+      await removeCustomer({ id });
     }
   };
 
@@ -123,8 +124,7 @@ export default function CustomersPage() {
   });
 
   const getCustomerOrdersCount = (customerId: string) => {
-    return (orders || []).filter((o) => (o as any).customerId === customerId)
-      .length;
+    return (orders || []).filter((o) => o.customerId === customerId).length;
   };
 
   return (
@@ -184,7 +184,7 @@ export default function CustomersPage() {
               {orders === undefined ? (
                 <Skeleton className="h-7 w-12" />
               ) : (
-                orders.filter((o) => !!(o as any).customerId).length
+                orders.filter((o) => !!o.customerId).length
               )}
             </div>
           </div>

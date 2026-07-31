@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as adminMaintenance from "../adminMaintenance.js";
 import type * as customers from "../customers.js";
 import type * as deals from "../deals.js";
 import type * as evaluate from "../evaluate.js";
@@ -15,6 +16,7 @@ import type * as evaluateGH from "../evaluateGH.js";
 import type * as evaluateGemini from "../evaluateGemini.js";
 import type * as evaluateGroq from "../evaluateGroq.js";
 import type * as http from "../http.js";
+import type * as lib_authz from "../lib/authz.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as listings from "../listings.js";
 import type * as matching from "../matching.js";
@@ -30,6 +32,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  adminMaintenance: typeof adminMaintenance;
   customers: typeof customers;
   deals: typeof deals;
   evaluate: typeof evaluate;
@@ -37,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   evaluateGemini: typeof evaluateGemini;
   evaluateGroq: typeof evaluateGroq;
   http: typeof http;
+  "lib/authz": typeof lib_authz;
   "lib/scoring": typeof lib_scoring;
   listings: typeof listings;
   matching: typeof matching;

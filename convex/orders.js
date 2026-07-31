@@ -1,15 +1,18 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUserId, requireOwned, listOwned } from "./lib/authz.js";
 export const list = query({
     args: {},
     handler: async (ctx) => {
-        return await ctx.db.query("orders").collect();
+        // Was an unscoped .collect(), so every account saw every account's orders.
+        return await listOwned(ctx, "orders");
     },
 });
 export const get = query({
     args: { id: v.id("orders") },
     handler: async (ctx, args) => {
-        return await ctx.db.get(args.id);
+        const { doc } = await requireOwned(ctx, "オーダー", args.id);
+        return doc;
     },
 });
 export const create = mutation({
@@ -49,8 +52,13 @@ export const create = mutation({
         scrapingStatus: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        // userId is taken from the verified JWT and any client-supplied value is
+        // discarded — otherwise a caller could create rows owned by someone else.
+        const userId = await requireUserId(ctx);
+        const { userId: _ignored, ...fields } = args;
         return await ctx.db.insert("orders", {
-            ...args,
+            ...fields,
+            userId,
             status: args.status || "pending",
         });
     },
@@ -58,6 +66,7 @@ export const create = mutation({
 export const remove = mutation({
     args: { id: v.id("orders") },
     handler: async (ctx, args) => {
+        await requireOwned(ctx, "オーダー", args.id);
         await ctx.db.delete(args.id);
     },
 });
@@ -99,7 +108,10 @@ export const update = mutation({
         scrapingStatus: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const { id, ...fields } = args;
+        // Ownership check first: without it any signed-in user could patch any
+        // order by guessing its id.
+        await requireOwned(ctx, "オーダー", args.id);
+        const { id, userId: _ignored, ...fields } = args;
         await ctx.db.patch(id, fields);
     },
 });

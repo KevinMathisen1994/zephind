@@ -16,6 +16,7 @@ import {
 } from "../components/ui/table";
 import { wardLabelToCode } from "../lib/tokyoWards";
 import { Play, RefreshCw, Database, Trash2, Sliders, ShieldCheck } from "lucide-react";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 const SOURCE_LABELS: Record<string, string> = {
   athome: "At Home",
@@ -168,8 +169,8 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteListing = async (id: string) => {
-    await deleteListing({ id: id as any });
+  const handleDeleteListing = async (id: Id<"listings">) => {
+    await deleteListing({ id });
   };
 
   // Checks scrapers one at a time and persists each result as it lands, so the
@@ -229,7 +230,7 @@ export default function AdminPage() {
   };
 
   const healthBySource = useMemo(() => {
-    const m: Record<string, any> = {};
+    const m: Record<string, Doc<"scraperHealth">> = {};
     for (const h of scraperHealth ?? []) m[h.source] = h;
     return m;
   }, [scraperHealth]);
@@ -367,7 +368,7 @@ export default function AdminPage() {
 
                       {h?.coverage?.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {h.coverage.map((c: any) => (
+                          {h.coverage.map((c: { field: string; present: number; pct: number }) => (
                             <span
                               key={c.field}
                               title={`${c.field}: ${c.present}/${h.listingCount}`}

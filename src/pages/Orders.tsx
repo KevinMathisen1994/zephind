@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import ProposalModal from "../components/ProposalModal";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 const GMAPS_KEY = import.meta.env
   .VITE_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string;
@@ -49,19 +50,19 @@ const SCRAPER_URL = import.meta.env.VITE_SCRAPER_URL as string;
 // top-level columns (e.g. { criteria: { walkMinutes: 15 } }). Reading only the
 // top level silently dropped those requirements before they ever reached the
 // scorer, so the buyer's stated limit was never applied. Check both.
-function buildOrderCriteria(order: Record<string, unknown> | null | undefined) {
+function buildOrderCriteria(order: Doc<"orders"> | null | undefined) {
   if (!order) return undefined;
   const nested = (order.criteria ?? {}) as Record<string, unknown>;
   const num = (name: string) =>
-    (order[name] ?? nested[name]) as number | undefined;
+    (order[name as keyof typeof order] ?? nested[name]) as number | undefined;
   const strs = (name: string) =>
-    (order[name] ?? nested[name]) as string[] | undefined;
+    (order[name as keyof typeof order] ?? nested[name]) as string[] | undefined;
 
   return {
     orderName: order.name as string | undefined,
     wards:
       strs("wards") ??
-      (order.ward ? [order.ward as string] : undefined),
+      (order.ward ? [order.ward] : undefined),
     priceMin: num("priceMin"),
     priceMax: num("priceMax"),
     areaMin: num("areaMin"),
@@ -116,20 +117,20 @@ export default function OrdersPage() {
   >({});
   const [orderStatus, setOrderStatus] = useState<string>("pending");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
-  const [proposalOrder, setProposalOrder] = useState<any | null>(null);
+  const [proposalOrder, setProposalOrder] = useState<Doc<"orders"> | null>(null);
 
   const scrapeAbortControllers = useRef<Map<string, AbortController>>(
     new Map(),
   );
 
-  const handleCancelScrape = async (order: any) => {
+  const handleCancelScrape = async (order: Doc<"orders">) => {
     const controller = scrapeAbortControllers.current.get(order._id);
     if (controller) {
       controller.abort();
       scrapeAbortControllers.current.delete(order._id);
     }
     await updateOrder({
-      id: order._id as any,
+      id: order._id,
       isScraping: false,
       scrapingStatus: "cancelled",
     });
@@ -140,7 +141,7 @@ export default function OrdersPage() {
     setExpandedMatch(expandedMatch === id ? null : id);
   };
 
-  const handleEvaluate = async (matchId: string, listing: any, order?: any) => {
+  const handleEvaluate = async (matchId: string, listing: Doc<"listings">, order?: Doc<"orders">) => {
     setEvaluatingId(matchId);
     setExpandedMatch(matchId);
 
@@ -193,11 +194,11 @@ export default function OrdersPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    await deleteOrder({ id: id as any });
+  const handleDelete = async (id: Id<"orders">) => {
+    await deleteOrder({ id });
   };
 
-  const handleBatchEvaluate = async (order: any) => {
+  const handleBatchEvaluate = async (order: Doc<"orders">) => {
     setEvaluatingOrderId(order._id);
     const orderMatchList =
       matches?.filter((m) => m.orderId === order._id) ?? [];
@@ -208,7 +209,7 @@ export default function OrdersPage() {
 
     const unevaluatedMatches = orderMatchList.filter((m) => {
       const listing = listings?.find((l) => l._id === m.listingId);
-      return listing && !evaluations[m._id] && !(m as any).evaluation;
+      return listing && !evaluations[m._id] && !m.evaluation;
     });
 
     setEvalProgress((prev) => ({
@@ -278,7 +279,7 @@ export default function OrdersPage() {
   };
 
   const handleScrapeOrder = async (
-    order: any,
+    order: Doc<"orders">,
     source?: string,
     skipAutoEval = false,
     customController?: AbortController,
@@ -289,7 +290,7 @@ export default function OrdersPage() {
     }
     setScrapingOrderId(order._id);
     await updateOrder({
-      id: order._id as any,
+      id: order._id,
       isScraping: true,
       scrapingStatus: "scraping",
     });
@@ -377,8 +378,8 @@ export default function OrdersPage() {
 
       if (data.listings && Array.isArray(data.listings)) {
         const seen = new Set<string>();
-        const urlToListingId = new Map<string, any>();
-        const addrToListingId = new Map<string, any>();
+        const urlToListingId = new Map<string, string>();
+        const addrToListingId = new Map<string, string>();
         if (listings) {
           for (const l of listings) {
             if (l.url) urlToListingId.set(l.url, l._id);
@@ -390,7 +391,7 @@ export default function OrdersPage() {
         if (matches && order._id) {
           for (const m of matches) {
             if (m.orderId === order._id) {
-              existingMatchKeys.add(m.listingId);
+              existingMatchKeys.add(m.listingId ?? "");
             }
           }
         }
@@ -402,10 +403,10 @@ export default function OrdersPage() {
           if (!itemUrl && seen.has(addrKey)) continue;
           seen.add(addrKey);
 
-          let listingId = itemUrl ? urlToListingId.get(itemUrl) : null;
+          let listingId = itemUrl ? urlToListingId.get(itemUrl) : undefined;
           if (!listingId) listingId = addrToListingId.get(addrKey);
           if (!listingId) {
-            listingId = await createListing({
+            const newId = await createListing({
               address: item.address || undefined,
               ward: item.ward || undefined,
               price: item.price ? Number(item.price) : undefined,
@@ -431,8 +432,9 @@ export default function OrdersPage() {
                   : undefined,
               propertyType: item.propertyType || undefined,
             });
+            listingId = newId;
           }
-          if (existingMatchKeys.has(listingId)) continue;
+          if (!listingId || existingMatchKeys.has(listingId)) continue;
           await createMatching({
             orderId: order._id,
             listingId: listingId,
@@ -446,8 +448,8 @@ export default function OrdersPage() {
         await new Promise((resolve) => setTimeout(resolve, 600));
         await handleBatchEvaluate(order);
       }
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
         console.log("Scrape request aborted by user");
       } else {
         console.error("Scrape error:", err);
@@ -455,7 +457,7 @@ export default function OrdersPage() {
     } finally {
       if (!customController) {
         await updateOrder({
-          id: order._id as any,
+          id: order._id,
           isScraping: false,
           scrapingStatus: "completed",
         });
@@ -465,13 +467,13 @@ export default function OrdersPage() {
     }
   };
 
-  const handleScrapeAll = async (order: any) => {
+  const handleScrapeAll = async (order: Doc<"orders">) => {
     const controller = new AbortController();
     scrapeAbortControllers.current.set(order._id, controller);
 
     setScrapingOrderId(order._id);
     await updateOrder({
-      id: order._id as any,
+      id: order._id,
       isScraping: true,
       scrapingStatus: "scraping",
     });
@@ -505,13 +507,13 @@ export default function OrdersPage() {
         await new Promise((resolve) => setTimeout(resolve, 600));
         await handleBatchEvaluate(order);
       }
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
         console.log("Scrape all cancelled by user");
       }
     } finally {
       await updateOrder({
-        id: order._id as any,
+        id: order._id,
         isScraping: false,
         scrapingStatus: "completed",
       });
@@ -577,7 +579,7 @@ export default function OrdersPage() {
     setSelectedCustomerId("");
   };
 
-  const handleEditClick = (order: any) => {
+  const handleEditClick = (order: Doc<"orders">) => {
     setEditingOrderId(order._id);
     setOrderName(order.name || "");
     setWards(
@@ -691,7 +693,7 @@ export default function OrdersPage() {
 
       if (editingOrderId) {
         await updateOrder({
-          id: editingOrderId as any,
+          id: editingOrderId as Id<"orders">,
           ...orderParams,
         });
       } else {
@@ -756,18 +758,18 @@ export default function OrdersPage() {
       </div>
 
       {/* KPI Overview Metrics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
-            <FileCheck2 className="w-6 h-6" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
+            <FileCheck2 className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               登録オーダー数
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {orders === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 totalOrdersCount
               )}
@@ -775,17 +777,17 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-100 text-emerald-800 shrink-0">
-            <CheckCircle2 className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-100 text-emerald-800 shrink-0">
+            <CheckCircle2 className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               進行中オーダー
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {orders === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 activeOrdersCount
               )}
@@ -793,17 +795,17 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-amber-50 text-amber-600 shrink-0">
-            <Building2 className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-amber-50 text-amber-600 shrink-0">
+            <Building2 className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               抽出一致物件数
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {matches === undefined ? (
-                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
               ) : (
                 totalMatchesCount
               )}
@@ -811,15 +813,15 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-purple-50 text-purple-600 shrink-0">
-            <FileText className="w-6 h-6" />
+        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
+          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-purple-50 text-purple-600 shrink-0">
+            <FileText className="w-4 h-4 md:w-6 md:h-6" />
           </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
+          <div className="min-w-0">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
               評価完了数
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
+            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {totalEvaluatedCount}
             </div>
           </div>
@@ -1210,7 +1212,7 @@ export default function OrdersPage() {
                                 ? "pending"
                                 : "completed";
                             await updateOrder({
-                              id: order._id as any,
+                              id: order._id,
                               status: nextStatus,
                             });
                           }}
@@ -1231,7 +1233,7 @@ export default function OrdersPage() {
 
                         {(() => {
                           const customer = customers?.find(
-                            (c) => c._id === (order as any).customerId,
+                            (c) => c._id === order.customerId,
                           );
                           if (!customer) return null;
                           return (
@@ -1443,20 +1445,18 @@ export default function OrdersPage() {
                     {(() => {
                       const pageSize = showLimit[order._id] || 10;
                       const page = currentPage[order._id] || 1;
-                      const sortedMatches = [...(orderMatchList || [])].sort((a, b) => {
-                        const aEval =
-                          (a as any).evaluation || evaluations[a._id];
-                        const bEval =
-                          (b as any).evaluation || evaluations[b._id];
+                      const sortedMatches = [...orderMatchList].sort((a, b) => {
+                        const aEval = a.evaluation || evaluations[a._id];
+                        const bEval = b.evaluation || evaluations[b._id];
                         const aScore =
-                          (a as any).score ??
+                          a.score ??
                           (aEval
                             ? aEval.match(/評価[：:\s]*(\d+)/)?.[1]
                               ? Number(aEval.match(/評価[：:\s]*(\d+)/)[1])
                               : 0
                             : 0);
                         const bScore =
-                          (b as any).score ??
+                          b.score ??
                           (bEval
                             ? bEval.match(/評価[：:\s]*(\d+)/)?.[1]
                               ? Number(bEval.match(/評価[：:\s]*(\d+)/)[1])
@@ -1479,11 +1479,11 @@ export default function OrdersPage() {
                             const hasEvaluation =
                                evaluations[m._id] !== undefined
                                  ? evaluations[m._id]
-                                 : (m as any).evaluation;
+                                 : m.evaluation;
 
                         // Extract score from DB score or from evaluation text string
                         const extractedScore =
-                          (m as any).score ??
+                          m.score ??
                           (hasEvaluation
                             ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
                               ? Number(
@@ -1569,7 +1569,7 @@ export default function OrdersPage() {
                                           ? 0
                                           : (current || 0) + 10;
                                       saveScore({
-                                        matchId: m._id as any,
+                                        matchId: m._id,
                                         score: next,
                                       });
                                     }}

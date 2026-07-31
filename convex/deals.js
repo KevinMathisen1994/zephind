@@ -1,17 +1,29 @@
 import { query, mutation } from "./_generated/server.js";
 import { v } from "convex/values";
+import { requireUserId, requireOwned } from "./lib/authz.js";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("deals").order("desc").collect();
+    // Was an unscoped .collect(), so every account saw every account's deals.
+    // Not listOwned() because this list is newest-first and the by_user index
+    // reads ascending by _creationTime, so .order("desc") is kept explicitly.
+    const userId = await requireUserId(ctx);
+    return await ctx.db
+      .query("deals")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
   },
 });
 
 export const get = query({
   args: { id: v.id("deals") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    // Was a bare ctx.db.get(), so any signed-in user could read any deal —
+    // including the customer contact details embedded in it — by id.
+    const { doc } = await requireOwned(ctx, "案件", args.id);
+    return doc;
   },
 });
 
@@ -29,13 +41,21 @@ export const create = mutation({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // userId comes from the verified JWT; the validator deliberately has no
+    // userId field so a caller cannot create a deal owned by someone else.
+    const userId = await requireUserId(ctx);
     const now = Date.now();
 
-    // Deduplication check: check for recent duplicate deal in proposed status
+    // Deduplication check: check for recent duplicate deal in proposed status.
+    // This scanned the by_status index across the WHOLE table, so a matching
+    // title from another account was treated as "our" duplicate and got patched
+    // with this caller's data — a cross-account write, not just a read leak.
+    // Scoped to the caller's own deals via by_user.
     if (args.orderId || args.customerId || args.title) {
       const recentDeals = await ctx.db
         .query("deals")
-        .withIndex("by_status", (q) => q.eq("status", "proposed"))
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .filter((q) => q.eq(q.field("status"), "proposed"))
         .collect();
 
       const existingDuplicate = recentDeals.find((d) => {
@@ -60,6 +80,7 @@ export const create = mutation({
 
     return await ctx.db.insert("deals", {
       ...args,
+      userId,
       status: args.status || "proposed",
       createdAt: now,
       updatedAt: now,
@@ -73,6 +94,9 @@ export const updateStatus = mutation({
     status: v.string(),
   },
   handler: async (ctx, args) => {
+    // Ownership check first: without it any signed-in user could move any
+    // account's deal through the pipeline by guessing its id.
+    await requireOwned(ctx, "案件", args.id);
     await ctx.db.patch(args.id, {
       status: args.status,
       updatedAt: Date.now(),
@@ -83,6 +107,8 @@ export const updateStatus = mutation({
 export const remove = mutation({
   args: { id: v.id("deals") },
   handler: async (ctx, args) => {
+    // Was an unguarded delete — any id from any account could be destroyed.
+    await requireOwned(ctx, "案件", args.id);
     await ctx.db.delete(args.id);
   },
 });
