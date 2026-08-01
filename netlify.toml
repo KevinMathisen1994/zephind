@@ -1,0 +1,18 @@
+# Netlify build + SPA routing.
+#
+# Without the redirect below, only "/" works: React Router handles /orders,
+# /admin etc. client-side, so a direct visit or a refresh on those paths asks
+# Netlify for a file that does not exist and gets a 404. Verified: a direct GET
+# of /orders returned 404 while navigating from "/" worked, which is exactly
+# this symptom.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Serve index.html for any path the build did not emit, letting the client
+# router resolve it. Status 200 (not 302) so the URL is preserved.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
