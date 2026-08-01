@@ -24,6 +24,7 @@ import type * as matching from "../matching.js";
 import type * as orders from "../orders.js";
 import type * as properties from "../properties.js";
 import type * as proposals from "../proposals.js";
+import type * as scrapeTrigger from "../scrapeTrigger.js";
 import type * as scraperHealth from "../scraperHealth.js";
 
 import type {
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   orders: typeof orders;
   properties: typeof properties;
   proposals: typeof proposals;
+  scrapeTrigger: typeof scrapeTrigger;
   scraperHealth: typeof scraperHealth;
 }>;
 

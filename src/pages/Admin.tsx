@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -40,6 +40,35 @@ const SOURCE_LABELS: Record<string, string> = {
   tokyotatemono: "東京建物不動産販売",
 };
 
+type WorkflowRun = {
+  id: number;
+  status: string | null;
+  conclusion: string | null;
+  created_at: string | null;
+  html_url: string | null;
+};
+
+const SCRAPE_STARTED_MESSAGE =
+  "スクレイピングを開始しました。完了まで数分かかります。結果は自動で表示されます。";
+
+const RUN_STATUS_LABELS: Record<string, string> = {
+  queued: "待機中",
+  in_progress: "実行中",
+  completed: "完了",
+  waiting: "待機中",
+  requested: "リクエスト済み",
+  pending: "保留中",
+};
+
+const RUN_CONCLUSION_LABELS: Record<string, string> = {
+  success: "成功",
+  failure: "失敗",
+  cancelled: "キャンセル",
+  skipped: "スキップ",
+  timed_out: "タイムアウト",
+  action_required: "要対応",
+};
+
 export default function AdminPage() {
   const [scrapeSources, setScrapeSources] = useState<Set<string>>(new Set(["athome"]));
   const toggleSource = (src: string) => setScrapeSources(prev => {
@@ -50,11 +79,15 @@ export default function AdminPage() {
   });
   const [scrapeStatus, setScrapeStatus] = useState<string>("");
   const [isScraping, setIsScraping] = useState(false);
+  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [runsError, setRunsError] = useState<string>("");
+  const [isLoadingRuns, setIsLoadingRuns] = useState(false);
   const listings = useQuery(api.listings.list, {});
   const orders = useQuery(api.orders.list);
-  const createListing = useMutation(api.listings.create);
-  const createMatching = useMutation(api.matching.create);
   const deleteListing = useMutation(api.listings.remove);
+  // Scraping runs on GitHub Actions now — see convex/scrapeTrigger.js.
+  const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
+  const getRecentRuns = useAction(api.scrapeTrigger.getRecentRuns);
 
   const scraperHealth = useQuery(api.scraperHealth.list);
   const recordHealth = useMutation(api.scraperHealth.record);
@@ -80,92 +113,79 @@ export default function AdminPage() {
       .filter(Boolean) as string[];
   }, [targetWards]);
 
-  const scraperUrl = import.meta.env.VITE_SCRAPER_URL as string;
+  // The scraper health probe below talks to scraper-service over HTTP, which only
+  // exists on a developer's own machine (VITE_SCRAPER_URL is baked in at build
+  // time as http://localhost:3001). Gating on DEV keeps that URL — and the
+  // buttons that would silently fail on it — out of the deployed app entirely.
+  const isDev = import.meta.env.DEV;
+  const scraperUrl = isDev ? (import.meta.env.VITE_SCRAPER_URL as string) : "";
 
+  /**
+   * Manual scrape.
+   *
+   * WAS: fetch(scraperUrl + "/scrape"), then this component wrote every returned
+   * listing and match into Convex. Unreachable from anything but the dev laptop.
+   *
+   * NOW: dispatches .github/workflows/scrape.yml through convex/scrapeTrigger.js.
+   * The runner scrapes AND persists (scraper-service/src/cli.ts ->
+   * convex/ingest.js), including matching against every order, so the order
+   * criteria this function used to assemble and forward are no longer needed —
+   * cli.ts reads them from Convex itself.
+   *
+   * This is asynchronous: a successful return means GitHub queued the run, not
+   * that data exists. The table below fills in on its own via useQuery.
+   */
   const handleScrape = async () => {
     setIsScraping(true);
     const codes = targetCodes.length > 0 ? targetCodes : ["13104"];
-    setScrapeStatus(`スクレイピングを開始... 対象: ${codes.length}区`);
-
-    const orderCriteria = (orders ?? [])
-      .filter((o) => o.status === "pending" || o.status === "active")
-      .map((o) => ({
-        ward: o.ward || undefined,
-        priceMin: o.priceMin || undefined,
-        priceMax: o.priceMax || undefined,
-        walkMinutes: o.walkMinutes ?? o.criteria?.walkMinutes ?? undefined,
-        minBuildingCoverageRatio: o.minBuildingCoverageRatio ?? o.criteria?.minBuildingCoverageRatio ?? undefined,
-        minFloorAreaRatio: o.minFloorAreaRatio ?? o.criteria?.minFloorAreaRatio ?? undefined,
-      }))
-      .filter((o) => Object.values(o).some((v) => v !== undefined));
+    const sourcesParam = Array.from(scrapeSources).join(",");
+    setScrapeStatus(`スクレイピングをリクエスト中... 対象: ${codes.length}区`);
 
     try {
-      const sourcesParam = Array.from(scrapeSources).join(",");
-      const res = await fetch(
-        `${scraperUrl}/scrape?areaCodes=${codes.join(",")}&sources=${sourcesParam}&orders=${encodeURIComponent(JSON.stringify(orderCriteria))}`
-      );
-      const data = await res.json();
+      const result = (await triggerScrape({
+        areas: codes.join(","),
+        sources: sourcesParam,
+      })) as { ok?: boolean; error?: string } | undefined;
 
-      if (data.listings && Array.isArray(data.listings)) {
-        let count = 0;
-        for (const item of data.listings) {
-          const listingId = await createListing({
-            address: item.address || undefined,
-            ward: item.ward || undefined,
-            price: item.price ? Number(item.price) : undefined,
-            area: item.area ? Number(item.area) : undefined,
-            buildYear: item.buildYear ? Number(item.buildYear) : undefined,
-            source: Array.from(scrapeSources)[0] || "athome",
-            status: "new",
-            url: item.detailUrl || item.url || undefined,
-            description: item.description || undefined,
-            station: item.station || undefined,
-            walkMinutes: item.walkMinutes ? Number(item.walkMinutes) : undefined,
-            rooms: item.rooms ? Number(item.rooms) : undefined,
-            layout: item.layout || undefined,
-          });
-          if (item.matchedOrderIndices && data.orderCriteria) {
-            const activeOrders = (orders ?? []).filter((o) => o.status === "pending" || o.status === "active");
-            for (const idx of item.matchedOrderIndices) {
-              const matchedOrder = activeOrders[idx];
-              if (matchedOrder) {
-                await createMatching({
-                  orderId: matchedOrder._id,
-                  listingId: listingId,
-                  status: "matched",
-                });
-              }
-            }
-          }
-          count++;
-        }
-        const rejected = data.filterStats?.failed ?? 0;
-        const activeOrders = (orders ?? []).filter((o) => o.status === "pending" || o.status === "active");
-        const orderMatchCounts: Record<string, number> = {};
-        for (const item of data.listings) {
-          if (item.matchedOrderIndices && data.orderCriteria) {
-            for (const idx of item.matchedOrderIndices) {
-              const order = activeOrders[idx];
-              if (order) {
-                const name = order.name || order.ward || `Order#${idx}`;
-                orderMatchCounts[name] = (orderMatchCounts[name] || 0) + 1;
-              }
-            }
-          }
-        }
-        const matchSummary = Object.entries(orderMatchCounts)
-          .map(([name, cnt]) => `${name}: ${cnt}件`)
-          .join(" | ");
+      if (!result || result.error) {
         setScrapeStatus(
-          `スクレイピング完了！ ${count} 件を登録（${rejected} 件フィルター除外） — ${matchSummary}`
+          `エラー: ${result?.error ?? "スクレイピングを開始できませんでした（応答がありません）"}`,
         );
-      } else {
-        setScrapeStatus(`スクレイピング完了。`);
+        return;
       }
+
+      setScrapeStatus(SCRAPE_STARTED_MESSAGE);
+      // Best-effort: show the run that was just queued. A failure here says
+      // nothing about the dispatch, which already succeeded, so it is swallowed.
+      void refreshRuns();
     } catch (err) {
       setScrapeStatus(`エラー: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      // The dispatch is over even though the run is not; leaving the button
+      // spinning would be waiting for an event that never reaches this browser.
       setIsScraping(false);
+    }
+  };
+
+  /** Recent workflow runs, so the board can show queued / in-progress / done. */
+  const refreshRuns = async () => {
+    setIsLoadingRuns(true);
+    try {
+      const result = (await getRecentRuns({})) as
+        | { runs?: WorkflowRun[]; error?: string }
+        | undefined;
+      if (!result || result.error) {
+        setRunsError(result?.error ?? "実行状況を取得できませんでした");
+        setRuns([]);
+        return;
+      }
+      setRunsError("");
+      setRuns(result.runs ?? []);
+    } catch (err) {
+      setRunsError(err instanceof Error ? err.message : String(err));
+      setRuns([]);
+    } finally {
+      setIsLoadingRuns(false);
     }
   };
 
@@ -176,7 +196,13 @@ export default function AdminPage() {
   // Checks scrapers one at a time and persists each result as it lands, so the
   // board fills in progressively. A single request for all 19 would take
   // minutes and time out in the browser.
+  //
+  // LOCAL ONLY. This probes scraper-service directly over HTTP; there is no
+  // hosted scraper to probe, so outside `npm run dev` the buttons that call this
+  // are not rendered at all. The board itself still shows the last results any
+  // developer recorded, because those live in Convex (api.scraperHealth.list).
   const runHealthCheck = async (only?: string) => {
+    if (!isDev) return;
     const sources = only ? [only] : Object.keys(SOURCE_LABELS);
     setIsCheckingHealth(true);
     try {
@@ -284,17 +310,23 @@ export default function AdminPage() {
               {healthProgress && (
                 <span className="text-sm font-medium text-slate-600">{healthProgress}</span>
               )}
-              <Button
-                onClick={() => runHealthCheck()}
-                disabled={isCheckingHealth}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
-              >
-                {isCheckingHealth ? (
-                  <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />検査中...</>
-                ) : (
-                  <><ShieldCheck className="w-4 h-4 mr-2" />全スクレイパー検査</>
-                )}
-              </Button>
+              {isDev ? (
+                <Button
+                  onClick={() => runHealthCheck()}
+                  disabled={isCheckingHealth}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
+                >
+                  {isCheckingHealth ? (
+                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />検査中...</>
+                  ) : (
+                    <><ShieldCheck className="w-4 h-4 mr-2" />全スクレイパー検査</>
+                  )}
+                </Button>
+              ) : (
+                <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 leading-relaxed max-w-sm">
+                  検査の実行はローカル開発環境専用です（スクレイパーサービスに直接接続するため）。以下は最後に記録された結果です。
+                </span>
+              )}
             </div>
           </div>
 
@@ -385,13 +417,15 @@ export default function AdminPage() {
                       )}
                     </div>
 
-                    <Button
-                      onClick={() => runHealthCheck(src)}
-                      disabled={isCheckingHealth}
-                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-2 py-1 h-auto shrink-0"
-                    >
-                      再検査
-                    </Button>
+                    {isDev && (
+                      <Button
+                        onClick={() => runHealthCheck(src)}
+                        disabled={isCheckingHealth}
+                        className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-2 py-1 h-auto shrink-0"
+                      >
+                        再検査
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -482,15 +516,20 @@ export default function AdminPage() {
               ) : (
                 <Play className="w-5 h-5" />
               )}
-              {isScraping ? "スクレイピング実行中..." : "手動スクレイピング開始"}
+              {isScraping ? "リクエスト送信中..." : "手動スクレイピング開始"}
             </Button>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              実行は GitHub Actions 上で行われます。開始後はこの画面を閉じても処理は継続し、
+              結果は Convex に直接保存されて自動的に反映されます。
+            </p>
 
             {scrapeStatus && (
               <div
                 className={`p-4 rounded-xl text-sm font-semibold leading-relaxed ${
                   scrapeStatus.startsWith("エラー")
                     ? "bg-red-50 text-red-700 border border-red-200"
-                    : scrapeStatus.startsWith("スクレイピング完了")
+                    : scrapeStatus.startsWith("スクレイピングを開始")
                     ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
                     : "bg-slate-100 text-slate-800"
                 }`}
@@ -498,6 +537,68 @@ export default function AdminPage() {
                 {scrapeStatus}
               </div>
             )}
+
+            {/* Run status. getRecentRuns is an ACTION (Convex queries cannot
+                fetch), so this does NOT update reactively — it is refreshed on
+                demand and once right after a dispatch. */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-bold text-slate-700">最近の実行状況</Label>
+                <Button
+                  onClick={() => void refreshRuns()}
+                  disabled={isLoadingRuns}
+                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-3 py-1 h-auto"
+                >
+                  {isLoadingRuns ? (
+                    <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />取得中</>
+                  ) : (
+                    <><RefreshCw className="w-3.5 h-3.5 mr-1.5" />更新</>
+                  )}
+                </Button>
+              </div>
+
+              {runsError ? (
+                <div className="p-3 rounded-xl text-xs font-semibold leading-relaxed bg-red-50 text-red-700 border border-red-200">
+                  {runsError}
+                </div>
+              ) : runs.length === 0 ? (
+                <p className="text-xs text-slate-500 font-medium">
+                  「更新」を押すと GitHub Actions の実行履歴を取得します。
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {runs.map((run) => (
+                    <li
+                      key={run.id}
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-800">
+                          {RUN_STATUS_LABELS[run.status ?? ""] || run.status || "不明"}
+                          {run.conclusion &&
+                            ` ・ ${RUN_CONCLUSION_LABELS[run.conclusion] || run.conclusion}`}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium truncate">
+                          {run.created_at
+                            ? new Date(run.created_at).toLocaleString("ja-JP")
+                            : "—"}
+                        </div>
+                      </div>
+                      {run.html_url && (
+                        <a
+                          href={run.html_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-bold text-emerald-700 hover:underline shrink-0"
+                        >
+                          ログを見る
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -510,10 +611,14 @@ export default function AdminPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
+            {/* Was: green "稼働中" purely because the VITE_SCRAPER_URL env var was
+                non-empty — it said Active on a phone that could not reach the
+                scraper at all. Scraping now runs on GitHub Actions, so name that
+                instead of asserting a health we do not measure. */}
             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-bold text-slate-700">スクレイパーAPI</span>
+              <span className="text-sm font-bold text-slate-700">スクレイピング実行環境</span>
               <Badge className="bg-emerald-700 text-white font-bold text-xs">
-                {scraperUrl ? "稼働中 (Active)" : "未設定"}
+                GitHub Actions
               </Badge>
             </div>
             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">

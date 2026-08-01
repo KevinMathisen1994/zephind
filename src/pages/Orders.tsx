@@ -44,7 +44,41 @@ import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 const GMAPS_KEY = import.meta.env
   .VITE_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string;
-const SCRAPER_URL = import.meta.env.VITE_SCRAPER_URL as string;
+
+// Every source cli.ts knows about (scraper-service/src/services/scraperRegistry.ts
+// KNOWN_SOURCES). Sent as the workflow's `sources` input for 一括取得; leaving it
+// empty would fall through to the workflow's curated 6-source default instead.
+const ALL_SCRAPE_SOURCES = [
+  "athome",
+  "hatomark",
+  "kenbiya",
+  "rakuten",
+  "suumo",
+  "homes",
+  "nomu",
+  "nomu_pro",
+  "mitsui",
+  "stepon",
+  "tokyu",
+  "mizuho",
+  "mitsubishi_ufj",
+  "odakyu",
+  "keio",
+  "haseko",
+  "daikyo",
+  "tokyotatemono",
+  "asahi",
+];
+
+// All 23 special wards, used when an order names no area at all.
+const ALL_TOKYO_WARD_CODES = [
+  "13101", "13102", "13103", "13104", "13105", "13106", "13107", "13108",
+  "13109", "13110", "13111", "13112", "13113", "13114", "13115", "13116",
+  "13117", "13118", "13119", "13120", "13121", "13122", "13123",
+];
+
+const SCRAPE_STARTED_MESSAGE =
+  "スクレイピングを開始しました。完了まで数分かかります。結果は自動で表示されます。";
 
 // Some orders store requirements in the nested `criteria` blob rather than as
 // top-level columns (e.g. { criteria: { walkMinutes: 15 } }). Reading only the
@@ -92,12 +126,12 @@ export default function OrdersPage() {
   const customers = useQuery(api.customers.list);
   const createOrder = useMutation(api.orders.create);
   const deleteOrder = useMutation(api.orders.remove);
-  const createListing = useMutation(api.listings.create);
-  const createMatching = useMutation(api.matching.create);
   const saveScore = useMutation(api.matching.saveScore);
   const updateOrder = useMutation(api.orders.update);
   const matches = useQuery(api.matching.list);
   const evaluateListing = useAction(api.evaluate.evaluateListing);
+  // Scraping no longer happens in the browser — see convex/scrapeTrigger.js.
+  const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
@@ -119,16 +153,17 @@ export default function OrdersPage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [proposalOrder, setProposalOrder] = useState<Doc<"orders"> | null>(null);
 
-  const scrapeAbortControllers = useRef<Map<string, AbortController>>(
-    new Map(),
-  );
+  // Per-order banner explaining that a dispatch was accepted (or why it wasn't).
+  // The run itself happens on GitHub Actions, so there is nothing here to poll;
+  // rows arrive through the reactive `matches`/`listings` queries.
+  const [scrapeNotice, setScrapeNotice] = useState<
+    Record<string, { kind: "ok" | "error"; text: string }>
+  >({});
 
+  // There is no in-flight browser request to abort any more. This is now purely
+  // an escape hatch for an order left with isScraping=true by an older build (or
+  // by a tab closed mid-dispatch), so the card stops claiming to be busy.
   const handleCancelScrape = async (order: Doc<"orders">) => {
-    const controller = scrapeAbortControllers.current.get(order._id);
-    if (controller) {
-      controller.abort();
-      scrapeAbortControllers.current.delete(order._id);
-    }
     await updateOrder({
       id: order._id,
       isScraping: false,
@@ -313,253 +348,102 @@ export default function OrdersPage() {
     }
   };
 
-  const handleScrapeOrder = async (
-    order: Doc<"orders">,
-    source?: string,
-    skipAutoEval = false,
-    customController?: AbortController,
-  ) => {
-    const controller = customController || new AbortController();
-    if (!customController) {
-      scrapeAbortControllers.current.set(order._id, controller);
-    }
-    setScrapingOrderId(order._id);
-    await updateOrder({
-      id: order._id,
-      isScraping: true,
-      scrapingStatus: "scraping",
-    });
-    try {
-      if (controller.signal.aborted) return;
-      const orderWards =
-        order.wards && order.wards.length > 0
-          ? order.wards
-          : order.ward
-            ? [order.ward]
-            : [];
-      const codes =
-        orderWards.length > 0
-          ? (orderWards
-              .map((w: string) => wardLabelToCode(w))
-              .filter(Boolean) as string[])
-          : [
-              "13101",
-              "13102",
-              "13103",
-              "13104",
-              "13105",
-              "13106",
-              "13107",
-              "13108",
-              "13109",
-              "13110",
-              "13111",
-              "13112",
-              "13113",
-              "13114",
-              "13115",
-              "13116",
-              "13117",
-              "13118",
-              "13119",
-              "13120",
-              "13121",
-              "13122",
-              "13123",
-            ];
-
-      const orderCriteria = [
-        {
-          ward: order.ward || undefined,
-          wards:
-            order.wards && order.wards.length > 0 ? order.wards : undefined,
-          priceMin: order.priceMin || undefined,
-          priceMax: order.priceMax || undefined,
-          walkMinutes:
-            order.walkMinutes ?? order.criteria?.walkMinutes ?? undefined,
-          minBuildingCoverageRatio:
-            order.minBuildingCoverageRatio ??
-            order.criteria?.minBuildingCoverageRatio ??
-            undefined,
-          minFloorAreaRatio:
-            order.minFloorAreaRatio ??
-            order.criteria?.minFloorAreaRatio ??
-            undefined,
-          propertyTypes: order.propertyTypes ?? undefined,
-          landSizeMin: order.landSizeMin ?? undefined,
-          landSizeMax: order.landSizeMax ?? undefined,
-          buildingSizeMin: order.buildingSizeMin ?? undefined,
-          buildingSizeMax: order.buildingSizeMax ?? undefined,
-          maxBuildAge: order.maxBuildAge ?? undefined,
-          minBuildYear: order.minBuildYear ?? undefined,
-          minYield: order.minYield ?? undefined,
-          maxYield: order.maxYield ?? undefined,
-          minRoadWidth: order.minRoadWidth ?? undefined,
-          minTotalUnits: order.minTotalUnits ?? undefined,
-          maxFloor: order.maxFloor ?? undefined,
-          excludeFirstFloor: order.excludeFirstFloor ?? undefined,
-          minElevators: order.minElevators ?? undefined,
-          structureTypes: order.structureTypes ?? undefined,
-          layoutTypes: order.layoutTypes ?? undefined,
-        },
-      ].filter((o) => Object.values(o).some((v) => v !== undefined));
-
-      const src = source || scrapeSource[order._id] || "athome";
-      const res = await fetch(
-        `${SCRAPER_URL}/scrape?areaCodes=${codes.join(",")}&source=${src}&orders=${encodeURIComponent(JSON.stringify(orderCriteria))}`,
-        { signal: controller.signal },
-      );
-      const data = await res.json();
-
-      if (data.listings && Array.isArray(data.listings)) {
-        const seen = new Set<string>();
-        const urlToListingId = new Map<string, string>();
-        const addrToListingId = new Map<string, string>();
-        if (listings) {
-          for (const l of listings) {
-            if (l.url) urlToListingId.set(l.url, l._id);
-            const key = `${l.address}|${l.price}|${l.ward}`;
-            addrToListingId.set(key, l._id);
-          }
-        }
-        const existingMatchKeys = new Set<string>();
-        if (matches && order._id) {
-          for (const m of matches) {
-            if (m.orderId === order._id) {
-              existingMatchKeys.add(m.listingId ?? "");
-            }
-          }
-        }
-        for (const item of data.listings) {
-          const itemUrl = item.detailUrl || item.url || "";
-          if (seen.has(itemUrl)) continue;
-          seen.add(itemUrl);
-          const addrKey = `${item.address}|${item.price}|${item.ward}`;
-          if (!itemUrl && seen.has(addrKey)) continue;
-          seen.add(addrKey);
-
-          let listingId = itemUrl ? urlToListingId.get(itemUrl) : undefined;
-          if (!listingId) listingId = addrToListingId.get(addrKey);
-          if (!listingId) {
-            const newId = await createListing({
-              address: item.address || undefined,
-              ward: item.ward || undefined,
-              price: item.price ? Number(item.price) : undefined,
-              area: item.area ? Number(item.area) : undefined,
-              buildYear: item.buildYear ? Number(item.buildYear) : undefined,
-              source: src,
-              status: "new",
-              url: itemUrl || undefined,
-              description: item.description || undefined,
-              station: item.station || undefined,
-              walkMinutes: item.walkMinutes
-                ? Number(item.walkMinutes)
-                : undefined,
-              rooms: item.rooms ? Number(item.rooms) : undefined,
-              layout: item.layout || undefined,
-              buildingCoverageRatio:
-                item.buildingCoverageRatio != null
-                  ? Number(item.buildingCoverageRatio)
-                  : undefined,
-              floorAreaRatio:
-                item.floorAreaRatio != null
-                  ? Number(item.floorAreaRatio)
-                  : undefined,
-              propertyType: item.propertyType || undefined,
-            });
-            listingId = newId;
-          }
-          if (!listingId || existingMatchKeys.has(listingId)) continue;
-          await createMatching({
-            orderId: order._id,
-            listingId: listingId,
-            status: "matched",
-          });
-        }
-      }
-
-      // Automatically trigger evaluation after scraping finishes!
-      if (!skipAutoEval && !controller.signal.aborted) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        await handleBatchEvaluate(order);
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        console.log("Scrape request aborted by user");
-      } else {
-        console.error("Scrape error:", err);
-      }
-    } finally {
-      if (!customController) {
-        await updateOrder({
-          id: order._id,
-          isScraping: false,
-          scrapingStatus: "completed",
-        });
-        setScrapingOrderId(null);
-        scrapeAbortControllers.current.delete(order._id);
-        // Single-source scrape had no auto-evaluate at all; only 全14サイト一括取得
-        // attempted it. Guarded by customController so the bulk path (which
-        // drives this function per source) doesn't fire once per site.
-        if (autoEvaluate) setPendingAutoEvalOrderId(order._id);
-      }
-    }
+  /**
+   * Ward labels on the order -> JIS area codes for the workflow's `areas` input.
+   * An order that names no ward sweeps all 23 wards, exactly as the old
+   * browser-side scrape did.
+   */
+  const areaCodesForOrder = (order: Doc<"orders">) => {
+    const orderWards =
+      order.wards && order.wards.length > 0
+        ? order.wards
+        : order.ward
+          ? [order.ward]
+          : [];
+    if (orderWards.length === 0) return ALL_TOKYO_WARD_CODES;
+    return orderWards
+      .map((w: string) => wardLabelToCode(w))
+      .filter(Boolean) as string[];
   };
 
-  const handleScrapeAll = async (order: Doc<"orders">) => {
-    const controller = new AbortController();
-    scrapeAbortControllers.current.set(order._id, controller);
-
+  /**
+   * Ask GitHub Actions to run the scrape.
+   *
+   * WAS: `fetch(VITE_SCRAPER_URL + "/scrape")` from the browser, then write every
+   * returned listing to Convex from right here. VITE_SCRAPER_URL is frozen into
+   * the bundle at build time as http://localhost:3001, so on any machine other
+   * than the developer's the fetch pointed at a scraper that does not exist —
+   * these buttons were dead on every phone and every other laptop.
+   *
+   * NOW: convex/scrapeTrigger.js dispatches .github/workflows/scrape.yml, and the
+   * GitHub runner both scrapes and persists (scraper-service/src/cli.ts ->
+   * convex/ingest.js). So this returns the moment GitHub ACCEPTS the request;
+   * listings and matches land minutes later via the reactive useQuery calls.
+   * Nothing in this browser is ever told the run finished, so nothing here
+   * claims it did, and no spinner is left running waiting for word.
+   */
+  const dispatchScrape = async (order: Doc<"orders">, sources: string[]) => {
     setScrapingOrderId(order._id);
-    await updateOrder({
-      id: order._id,
-      isScraping: true,
-      scrapingStatus: "scraping",
+    setScrapeNotice((prev) => {
+      const next = { ...prev };
+      delete next[order._id];
+      return next;
     });
 
-    try {
-      for (const src of [
-        "athome",
-        "hatomark",
-        "kenbiya",
-        "rakuten",
-        "suumo",
-        "homes",
-        "nomu",
-        "nomu_pro",
-        "mitsui",
-        "stepon",
-        "tokyu",
-        "mizuho",
-        "mitsubishi_ufj",
-        "odakyu",
-        "keio",
-        "haseko",
-        "daikyo",
-        "tokyotatemono",
-        "asahi",
-      ]) {
-        if (controller.signal.aborted) break;
-        await handleScrapeOrder(order, src, true, controller);
-      }
-      if (!controller.signal.aborted && autoEvaluate) {
-        // Hand off to the effect above rather than calling directly — see note there.
-        setPendingAutoEvalOrderId(order._id);
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        console.log("Scrape all cancelled by user");
-      }
-    } finally {
+    const fail = async (text: string) => {
+      setScrapeNotice((prev) => ({ ...prev, [order._id]: { kind: "error", text } }));
+      // Never leave the card claiming to be busy because a dispatch failed.
       await updateOrder({
         id: order._id,
         isScraping: false,
-        scrapingStatus: "completed",
+        scrapingStatus: "failed",
       });
+    };
+
+    try {
+      const result = (await triggerScrape({
+        areas: areaCodesForOrder(order).join(","),
+        sources: sources.join(","),
+      })) as { ok?: boolean; error?: string } | undefined;
+
+      if (!result || result.error) {
+        await fail(
+          result?.error ?? "スクレイピングを開始できませんでした（応答がありません）",
+        );
+        return;
+      }
+
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [order._id]: { kind: "ok", text: SCRAPE_STARTED_MESSAGE },
+      }));
+      // "dispatched", not "scraping". The run lives on GitHub; a "scraping" flag
+      // written here would be a spinner with nothing left to clear it.
+      await updateOrder({
+        id: order._id,
+        isScraping: false,
+        scrapingStatus: "dispatched",
+      });
+
+      // The effect above deliberately waits for this order's matches to show up
+      // in the reactive query before evaluating, which is what an asynchronous
+      // run needs — but it only fires while this tab stays open.
+      if (autoEvaluate) setPendingAutoEvalOrderId(order._id);
+    } catch (err: unknown) {
+      console.error("Scrape dispatch error:", err);
+      await fail(
+        `スクレイピングを開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
       setScrapingOrderId(null);
-      scrapeAbortControllers.current.delete(order._id);
     }
   };
+
+  const handleScrapeOrder = (order: Doc<"orders">) =>
+    dispatchScrape(order, [scrapeSource[order._id] || "athome"]);
+
+  const handleScrapeAll = (order: Doc<"orders">) =>
+    dispatchScrape(order, ALL_SCRAPE_SOURCES);
 
   const [showForm, setShowForm] = useState(false);
   const [wards, setWards] = useState<string[]>([]);
@@ -1346,17 +1230,21 @@ export default function OrdersPage() {
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-800 text-sm font-bold rounded-xl animate-pulse border border-emerald-200">
                             <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
-                            ポータル一括検索中...
+                            {scrapingOrderId === order._id
+                              ? "取得リクエストを送信中..."
+                              : "ポータル一括検索中..."}
                           </div>
+                          {/* Only reachable for an order left flagged by an older
+                              build — the dispatch itself finishes in a second. */}
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleCancelScrape(order)}
                             className="h-9 px-3 text-xs font-bold text-red-600 border-red-200 hover:bg-red-50 rounded-xl gap-1"
-                            title="スクレイピング処理を即時キャンセル"
+                            title="「実行中」表示を解除します（GitHub Actions 側の処理は停止しません）"
                           >
                             <X className="w-3.5 h-3.5" />
-                            キャンセル
+                            表示をリセット
                           </Button>
                         </div>
                       ) : (
@@ -1491,6 +1379,21 @@ export default function OrdersPage() {
                         </button>
                       </div>
                     </div>
+
+                    {/* The scrape runs on GitHub Actions, so this banner is the
+                        only feedback the browser can honestly give: the request
+                        was accepted, results will arrive on their own. */}
+                    {scrapeNotice[order._id] && (
+                      <div
+                        className={`mt-3 p-3 rounded-xl text-xs font-bold leading-relaxed border ${
+                          scrapeNotice[order._id].kind === "error"
+                            ? "bg-red-50 text-red-700 border-red-200"
+                            : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                        }`}
+                      >
+                        {scrapeNotice[order._id].text}
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
 

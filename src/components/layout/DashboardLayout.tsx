@@ -20,11 +20,18 @@ export default function DashboardLayout() {
         />
       )}
 
-      {/* Mobile hamburger button */}
+      {/* Mobile nav toggle.
+          It was pinned to top-4 left-4 in both states, so once the drawer slid
+          open the X landed directly on top of the Zephind logo. Closed it stays
+          top-left over the page; open it moves to the drawer's right edge
+          (drawer is w-72 = 18rem, so 14.5rem keeps the ~44px button inside it). */}
       <button
         onClick={() => setMobileNavOpen(!mobileNavOpen)}
-        className="fixed top-4 left-4 z-40 lg:hidden p-2.5 rounded-xl bg-white border border-slate-200 shadow-md text-slate-700 hover:bg-slate-50 transition-colors"
-        aria-label="Toggle navigation menu"
+        className={`fixed top-4 z-40 lg:hidden p-2.5 rounded-xl bg-white border border-slate-200 shadow-md text-slate-700 cursor-pointer hover:bg-slate-50 transition-all duration-300 ease-in-out ${
+          mobileNavOpen ? "left-[14.5rem]" : "left-4"
+        }`}
+        aria-label={mobileNavOpen ? "メニューを閉じる" : "メニューを開く"}
+        aria-expanded={mobileNavOpen}
       >
         {mobileNavOpen ? (
           <X className="w-5 h-5" />
