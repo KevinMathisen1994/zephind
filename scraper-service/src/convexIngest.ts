@@ -38,6 +38,12 @@ export interface IngestSummary {
   listingsSkipped: number;
   matchesCreated: number;
   matchesSkipped: number;
+  /** Why matches were skipped — duplicate vs unownable vs listing rejected. */
+  matchSkipReasons?: {
+    duplicate?: number;
+    noOwner?: number;
+    listingRejected?: number;
+  };
 }
 
 export interface IngestClient {

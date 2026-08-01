@@ -86,6 +86,44 @@ export const wipeOrphanedData = internalMutation({
 });
 
 /**
+ * Deletes scraped listings. Safe-ish: listings are shared, contain no user data,
+ * and a scrape rebuilds them — but any `matching` row pointing at a deleted
+ * listing becomes a dangling reference, so this also drops those.
+ *
+ * Batched via `limit` because a single Convex mutation has execution limits and
+ * there are >1,200 rows. Call repeatedly until `remaining` is 0.
+ */
+export const wipeListings = internalMutation({
+  args: { confirm: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    if (args.confirm !== "DELETE") {
+      throw new Error('Refusing to run: pass { confirm: "DELETE" }');
+    }
+    const batch = args.limit ?? 500;
+    const rows = await ctx.db.query("listings").take(batch);
+    const ids = new Set(rows.map((r) => r._id));
+    for (const row of rows) await ctx.db.delete(row._id);
+
+    // Drop matching rows whose listing just went away, so the UI doesn't show
+    // matches that resolve to nothing.
+    let orphanedMatches = 0;
+    for (const m of await ctx.db.query("matching").collect()) {
+      if (m.listingId && ids.has(m.listingId)) {
+        await ctx.db.delete(m._id);
+        orphanedMatches++;
+      }
+    }
+
+    const remaining = (await ctx.db.query("listings").take(1)).length;
+    return {
+      listingsDeleted: rows.length,
+      matchingDeleted: orphanedMatches,
+      remaining: remaining > 0 ? "more — run again" : 0,
+    };
+  },
+});
+
+/**
  * Alternative to wiping: assign every orphaned row to one Clerk user id.
  * Kept alongside the wipe so the decision stays reversible in spirit — if you
  * change your mind before running the wipe, this recovers the same data.

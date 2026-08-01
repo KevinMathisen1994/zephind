@@ -139,6 +139,8 @@ export default function OrdersPage() {
   // 20-minute GitHub run looked like nothing was happening. GitHub is the only
   // real source of truth here (the browser is not involved in the run at all),
   // so poll it. Actions cannot be useQuery, hence the manual interval.
+  const ordersRef = useRef<typeof orders>(undefined);
+  ordersRef.current = orders;
   const [activeRun, setActiveRun] = useState<{ status: string; html_url: string; created_at: string } | null>(null);
 
   useEffect(() => {
@@ -152,6 +154,17 @@ export default function OrdersPage() {
           (x) => x.status === "queued" || x.status === "in_progress",
         );
         setActiveRun(live ?? null);
+        // Run finished: clear any order still flagged as dispatched, otherwise
+        // the badge sticks permanently (nothing else ever tells the app it ended).
+        if (!live) {
+          for (const o of ordersRef.current ?? []) {
+            if (o.scrapingStatus === "dispatched") {
+              void updateOrder({ id: o._id, scrapingStatus: "completed" }).catch(
+                () => {},
+              );
+            }
+          }
+        }
       } catch {
         /* transient GitHub/network hiccups shouldn't clear a known-live run */
       }
@@ -1208,6 +1221,17 @@ export default function OrdersPage() {
                         >
                           {order.status === "completed" ? "✓ 完了" : "進行中"}
                         </button>
+                        {/* Per-card scrape state. The dispatch sets
+                            scrapingStatus="dispatched"; combining that with a
+                            live GitHub run means "this order's scrape is running
+                            right now" and it survives reload, since both halves
+                            come from outside this component. */}
+                        {order.scrapingStatus === "dispatched" && activeRun && (
+                          <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs px-3 py-1 font-bold shrink-0 inline-flex items-center gap-1.5">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                            {activeRun.status === "queued" ? "取得待機中" : "取得中"}
+                          </Badge>
+                        )}
                         {matchCount > 0 && (
                           <Badge className="bg-emerald-700 text-white text-xs px-3 py-1 font-bold shadow-sm shrink-0">
                             {matchCount} 件抽出一致

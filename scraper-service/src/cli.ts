@@ -263,9 +263,17 @@ async function main(): Promise<number> {
         logger.info(
           `[${label}/${areaCode}] scraped=${scraped.length} passed=${stats.passed} ` +
             `inserted=${summary.listingsInserted} skipped=${summary.listingsSkipped} ` +
-            `matches=${summary.matchesCreated} matchesSkipped=${summary.matchesSkipped} ` +
+            `matches=${summary.matchesCreated} matchesSkipped=${summary.matchesSkipped}` +
+            (summary.matchesSkipped > 0 && summary.matchSkipReasons
+              ? `[dup=${summary.matchSkipReasons.duplicate ?? 0} ` +
+                `noOwner=${summary.matchSkipReasons.noOwner ?? 0} ` +
+                `listingRejected=${summary.matchSkipReasons.listingRejected ?? 0}]`
+              : "") +
+            ` ` +
             `(${Math.round((Date.now() - jobStart) / 1000)}s)` +
-            (stats.failed > 0 ? `\n    rejected ${stats.failed}: ${topReasons || "(no reason recorded)"}` : ""),
+            (stats.failed > 0 ? `\n    rejected ${stats.failed} listings — reason tallies below count ` +
+              `(listing x order) pairs across all ${criteria.length} orders, so they ` +
+              `exceed the listing count: ${topReasons || "(no reason recorded)"}` : ""),
         );
       } catch (err) {
         sourceFailed++;

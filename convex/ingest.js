@@ -139,6 +139,10 @@ export const ingestScrape = mutation({
     let listingsSkipped = 0;
     let matchesCreated = 0;
     let matchesSkipped = 0;
+    // Broken down by cause: "matchesSkipped=55" alone couldn't distinguish
+    // "already done" from "this order can never receive matches", which made a
+    // normal idempotent re-run look identical to a data-model bug.
+    const skipReasons = { listingRejected: 0, noOwner: 0, duplicate: 0 };
 
     // url -> listing _id, for resolving the match pairs below without re-querying.
     const listingIdByUrl = new Map();
@@ -222,6 +226,7 @@ export const ingestScrape = mutation({
       if (!listingId) {
         // Its listing was rejected above (or never sent).
         matchesSkipped++;
+        skipReasons.listingRejected++;
         continue;
       }
 
@@ -235,6 +240,7 @@ export const ingestScrape = mutation({
         // Missing order, or a pre-isolation order with no owner. Inserting an
         // ownerless match would create a row no query can ever return, so skip.
         matchesSkipped++;
+        skipReasons.noOwner++;
         continue;
       }
 
@@ -245,6 +251,7 @@ export const ingestScrape = mutation({
         .first();
       if (existingMatch) {
         matchesSkipped++;
+        skipReasons.duplicate++;
         continue;
       }
 
@@ -258,6 +265,12 @@ export const ingestScrape = mutation({
       matchesCreated++;
     }
 
-    return { listingsInserted, listingsSkipped, matchesCreated, matchesSkipped };
+    return {
+      listingsInserted,
+      listingsSkipped,
+      matchesCreated,
+      matchesSkipped,
+      matchSkipReasons: skipReasons,
+    };
   },
 });
