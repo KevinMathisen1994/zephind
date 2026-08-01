@@ -14,6 +14,7 @@ import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
 import { TOKYO_WARDS, TOKYO_CITIES, wardLabelToCode } from "../lib/tokyoWards";
 import {
+  RefreshCw,
   Plus,
   X,
   Trash2,
@@ -132,6 +133,37 @@ export default function OrdersPage() {
   const evaluateListing = useAction(api.evaluate.evaluateListing);
   // Scraping no longer happens in the browser — see convex/scrapeTrigger.js.
   const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
+  const getRecentRuns = useAction(api.scrapeTrigger.getRecentRuns);
+
+  // Scrape progress used to live in local React state, so a reload lost it and a
+  // 20-minute GitHub run looked like nothing was happening. GitHub is the only
+  // real source of truth here (the browser is not involved in the run at all),
+  // so poll it. Actions cannot be useQuery, hence the manual interval.
+  const [activeRun, setActiveRun] = useState<{ status: string; html_url: string; created_at: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = (await getRecentRuns({})) as { runs?: any[]; error?: string } | undefined;
+        if (cancelled || !r?.runs) return;
+        // queued | in_progress mean a run is live; anything else is finished.
+        const live = r.runs.find(
+          (x) => x.status === "queued" || x.status === "in_progress",
+        );
+        setActiveRun(live ?? null);
+      } catch {
+        /* transient GitHub/network hiccups shouldn't clear a known-live run */
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 30_000); // 30s: runs last minutes, not seconds
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [getRecentRuns]);
+
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
@@ -1080,6 +1112,34 @@ export default function OrdersPage() {
             登録オーダー一覧
           </h2>
         </div>
+
+        {/* Live GitHub Actions run banner. Survives reload because the state
+            comes from GitHub, not from this component. */}
+        {activeRun && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
+            <RefreshCw className="w-5 h-5 text-emerald-700 animate-spin shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold text-emerald-900">
+                {activeRun.status === "queued"
+                  ? "スクレイピングの実行を待機中です"
+                  : "スクレイピングを実行中です"}
+              </div>
+              <div className="text-xs text-emerald-800/80 font-medium mt-0.5">
+                完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
+                {activeRun.created_at &&
+                  ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
+              </div>
+            </div>
+            <a
+              href={activeRun.html_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-bold text-emerald-800 underline shrink-0 self-start sm:self-auto"
+            >
+              実行ログを見る
+            </a>
+          </div>
+        )}
 
         {orders === undefined ? (
           <div className="space-y-4">

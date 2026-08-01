@@ -250,11 +250,22 @@ async function main(): Promise<number> {
         sourceOk++;
         jobsOk++;
 
+        // Surface WHY listings were dropped. hardFilter already tallies reasons,
+        // but without them a line like "scraped=208 passed=1" looks like a broken
+        // scraper when it is usually a narrow order (budget, walk time, ward).
+        // Sorted desc and capped so a wide sweep stays readable.
+        const topReasons = Object.entries(stats.reasons || {})
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([reason, n]) => `${reason}=${n}`)
+          .join(" ");
+
         logger.info(
           `[${label}/${areaCode}] scraped=${scraped.length} passed=${stats.passed} ` +
             `inserted=${summary.listingsInserted} skipped=${summary.listingsSkipped} ` +
             `matches=${summary.matchesCreated} matchesSkipped=${summary.matchesSkipped} ` +
-            `(${Math.round((Date.now() - jobStart) / 1000)}s)`,
+            `(${Math.round((Date.now() - jobStart) / 1000)}s)` +
+            (stats.failed > 0 ? `\n    rejected ${stats.failed}: ${topReasons || "(no reason recorded)"}` : ""),
         );
       } catch (err) {
         sourceFailed++;
