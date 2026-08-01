@@ -1,6 +1,7 @@
 import { action } from "./_generated/server.js";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api.js";
+import { requireUserId } from "./lib/authz.js";
 
 export const evaluateWithGemini = action({
   args: {
@@ -22,6 +23,11 @@ export const evaluateWithGemini = action({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Unauthenticated callers could invoke this action directly with the
+    // Convex URL from the frontend bundle and burn LLM / Google Places /
+    // MLIT quota. The mutations it writes through are already scoped;
+    // this stops the spend itself.
+    await requireUserId(ctx);
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return { error: "GEMINI_API_KEY not configured" };

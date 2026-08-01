@@ -53,6 +53,39 @@ export const wipeTenantData = internalMutation({
 });
 
 /**
+ * Deletes ONLY the pre-isolation rows (those with no `userId`), leaving
+ * everything created since auth was added intact.
+ *
+ * This is almost always the one you want. `wipeTenantData` above empties the
+ * tables wholesale — it was written when 100% of rows were orphaned. Once real
+ * per-user data exists (orders you created after signing in, matches from a
+ * scheduled scrape) a full wipe destroys that too.
+ */
+export const wipeOrphanedData = internalMutation({
+  args: { confirm: v.string() },
+  handler: async (ctx, args) => {
+    if (args.confirm !== "DELETE") {
+      throw new Error('Refusing to run: pass { confirm: "DELETE" }');
+    }
+    const deleted = {};
+    const kept = {};
+    for (const table of TENANT_TABLES) {
+      const rows = await ctx.db.query(table).collect();
+      let d = 0;
+      for (const row of rows) {
+        if (!row.userId) {
+          await ctx.db.delete(row._id);
+          d++;
+        }
+      }
+      deleted[table] = d;
+      kept[table] = rows.length - d;
+    }
+    return { deleted, kept, note: "listings untouched (shared scraped data)" };
+  },
+});
+
+/**
  * Alternative to wiping: assign every orphaned row to one Clerk user id.
  * Kept alongside the wipe so the decision stays reversible in spirit — if you
  * change your mind before running the wipe, this recovers the same data.

@@ -1,6 +1,7 @@
 import { action } from "./_generated/server.js";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api.js";
+import { requireUserId } from "./lib/authz.js";
 
 const GH_MODELS = ["gpt-4o-mini", "gpt-4o", "DeepSeek-V3"];
 
@@ -24,6 +25,11 @@ export const evaluateWithGH = action({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Unauthenticated callers could invoke this action directly with the
+    // Convex URL from the frontend bundle and burn LLM / Google Places /
+    // MLIT quota. The mutations it writes through are already scoped;
+    // this stops the spend itself.
+    await requireUserId(ctx);
     const apiKey = process.env.GITHUB_MODELS_KEY;
     if (!apiKey) {
       return { error: "GITHUB_MODELS_KEY not configured. Get one free at https://github.com/settings/tokens (no scopes needed)" };

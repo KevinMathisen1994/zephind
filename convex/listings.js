@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUserId } from "./lib/authz.js";
 export const list = query({
     args: {
         ward: v.optional(v.string()),
@@ -54,6 +55,11 @@ export const create = mutation({
         propertyType: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        // Reads stay shared by design (scraped portal data is common
+        // infrastructure), but WRITES were fully open: anyone holding the
+        // Convex URL from the frontend bundle could insert junk or delete
+        // every listing. Shared != unauthenticated.
+        await requireUserId(ctx);
         // Idempotent: skip if same address+price exists (area may vary between agents)
         if (args.address && args.price) {
             const existing = await ctx.db
@@ -77,6 +83,7 @@ export const create = mutation({
 export const remove = mutation({
     args: { id: v.id("listings") },
     handler: async (ctx, args) => {
+        await requireUserId(ctx);
         await ctx.db.delete(args.id);
     },
 });
@@ -103,6 +110,7 @@ export const update = mutation({
         propertyType: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        await requireUserId(ctx);
         const { id, ...fields } = args;
         await ctx.db.patch(id, fields);
     },

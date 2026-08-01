@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server.js";
 import { v } from "convex/values";
+import { requireUserId } from "./lib/authz.js";
 
 export const list = query({
   args: {},
@@ -28,6 +29,8 @@ export const record = mutation({
     error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Status board is readable by all, but only a signed-in user may write to it.
+    await requireUserId(ctx);
     const existing = await ctx.db
       .query("scraperHealth")
       .withIndex("by_source", (q) => q.eq("source", args.source))

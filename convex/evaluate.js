@@ -2,6 +2,7 @@ import { action } from "./_generated/server.js";
 import { v } from "convex/values";
 import { api } from "./_generated/api.js";
 import { computeMatchScore, wardCityCode } from "./lib/scoring.js";
+import { requireUserId } from "./lib/authz.js";
 
 // Scoring logic lives in ./lib/scoring.js so it can be unit-tested with plain
 // `node`, outside the Convex runtime. See that file for the layered model.
@@ -60,6 +61,11 @@ export const evaluateListing = action({
     ),
   },
   handler: async (ctx, args) => {
+    // Unauthenticated callers could invoke this action directly with the
+    // Convex URL from the frontend bundle and burn LLM / Google Places /
+    // MLIT quota. The mutations it writes through are already scoped;
+    // this stops the spend itself.
+    await requireUserId(ctx);
     const apiKey = process.env.RAX_API_KEY;
     if (!apiKey) {
       return { error: "RAX_API_KEY not configured" };

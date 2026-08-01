@@ -77,6 +77,9 @@ export default defineSchema({
         .index("by_status", ["status"])
         .index("by_user", ["userId"]),
     properties: defineTable({
+        // Owner (Clerk JWT subject). Added for parity with the other
+        // per-user tables; optional so any legacy row still parses.
+        userId: v.optional(v.string()),
         address: v.optional(v.string()),
         ward: v.optional(v.string()),
         price: v.optional(v.number()),
@@ -118,7 +121,8 @@ export default defineSchema({
         expectedMarketValue: v.optional(v.number()),
     })
         .index("by_ward", ["ward"])
-        .index("by_score", ["score"]),
+        .index("by_score", ["score"])
+        .index("by_user", ["userId"]),
     proposals: defineTable({
         propertyId: v.optional(v.string()),
         orderId: v.optional(v.string()),

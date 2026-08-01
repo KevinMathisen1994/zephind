@@ -1,6 +1,7 @@
 import { action } from "./_generated/server.js";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api.js";
+import { requireUserId } from "./lib/authz.js";
 
 const GROQ_MODELS = [
   "llama-3.3-70b-versatile",
@@ -28,6 +29,11 @@ export const evaluateWithGroq = action({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Unauthenticated callers could invoke this action directly with the
+    // Convex URL from the frontend bundle and burn LLM / Google Places /
+    // MLIT quota. The mutations it writes through are already scoped;
+    // this stops the spend itself.
+    await requireUserId(ctx);
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       return { error: "GROQ_API_KEY not configured. Get one free at https://console.groq.com/keys" };
