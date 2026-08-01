@@ -16,6 +16,7 @@ import type * as evaluateGH from "../evaluateGH.js";
 import type * as evaluateGemini from "../evaluateGemini.js";
 import type * as evaluateGroq from "../evaluateGroq.js";
 import type * as http from "../http.js";
+import type * as ingest from "../ingest.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as listings from "../listings.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   evaluateGemini: typeof evaluateGemini;
   evaluateGroq: typeof evaluateGroq;
   http: typeof http;
+  ingest: typeof ingest;
   "lib/authz": typeof lib_authz;
   "lib/scoring": typeof lib_scoring;
   listings: typeof listings;

@@ -34,7 +34,11 @@ export default defineSchema({
     })
         .index("by_ward", ["ward"])
         .index("by_price", ["price"])
-        .index("by_source", ["source"]),
+        .index("by_source", ["source"])
+        // The scheduled scraper dedupes every scraped listing by url on each run.
+        // Without this index that is a full table scan per listing, which blows
+        // the read limit as soon as the table grows.
+        .index("by_url", ["url"]),
     orders: defineTable({
         name: v.optional(v.string()),
         ward: v.optional(v.string()),

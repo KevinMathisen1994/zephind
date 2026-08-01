@@ -1,0 +1,88 @@
+name: Scheduled scrape
+
+# Nightly portal sweep. The browser UI used to be the only thing that persisted
+# scrape results; this run has no browser, so scraper-service/src/cli.ts writes
+# to Convex itself through the secret-guarded functions in convex/ingest.js.
+
+on:
+  schedule:
+    # 03:30 JST daily — off-peak for the Japanese property portals we scrape.
+    # GitHub cron is UTC and JST is UTC+9, so 03:30 JST = 18:30 UTC the previous day.
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+    inputs:
+      areas:
+        description: "Comma-separated JIS area codes (e.g. 13115,13109). Empty = derive from existing orders."
+        required: false
+        default: ""
+      sources:
+        description: "Comma-separated scraper sources (e.g. suumo,stepon). Empty = all known sources."
+        required: false
+        default: ""
+
+# A long run must never overlap the next one; queued duplicates are useless.
+concurrency:
+  group: scheduled-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: scraper-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Must be >= 20.19: scraper-service/fix-yargs.js is ESM in a package
+          # without "type": "module", and only 20.19+ auto-detects module syntax.
+          # setup-node resolves "20" to the latest 20.x, which satisfies that.
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: scraper-service/package-lock.json
+
+      # puppeteer (not puppeteer-core) is the dependency and nothing in this repo
+      # sets PUPPETEER_SKIP_CHROMIUM_DOWNLOAD outside the Dockerfile, so `npm ci`
+      # downloads its own Chrome into ~/.cache/puppeteer. Restoring that cache
+      # BEFORE npm ci makes the postinstall a no-op. (The Dockerfile's system
+      # chromium + PUPPETEER_EXECUTABLE_PATH approach is deliberately not used
+      # here — no scraper sets executablePath, so the bundled browser is fine.)
+      - name: Cache Puppeteer browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('scraper-service/package-lock.json') }}
+          restore-keys: |
+            puppeteer-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scrape
+        env:
+          CONVEX_URL: ${{ secrets.CONVEX_URL }}
+          SCRAPER_INGEST_SECRET: ${{ secrets.SCRAPER_INGEST_SECRET }}
+          # Passed as env rather than argv so a dispatch input cannot inject shell.
+          # Empty string falls through to the CLI's defaults (all sources, and
+          # the ward codes named by existing orders).
+          SCRAPE_AREA_CODES: ${{ github.event.inputs.areas }}
+          # Scheduled runs use a curated high-yield subset; manual dispatch can
+          # override with any sources (empty input => this default).
+          #
+          # BUDGET MATH — read before widening this.
+          # One (source, area) pair costs roughly 60-100s. Measured today for
+          # 杉並区: suumo 389 listings/101s, tokyu 265, rakuten 200, homes 126,
+          # hatomark 110, nomu 109 — those six produced most of the volume.
+          # All 19 sources x the 12 ward codes our orders name is ~228 pairs
+          # (~2.5h), which blew the old 60-minute timeout.
+          #   6 sources x 12 areas ~= 96 min/run  -> ~2900 min/month daily
+          #   GitHub free: 2000 min/month on a PRIVATE repo, UNLIMITED if public.
+          # So on a private repo either make the repo public, drop to every
+          # other day (cron "30 18 */2 * *"), or pin SCRAPE_AREA_CODES to the
+          # wards you actually work. Public repo: widen freely.
+          SCRAPE_SOURCES: ${{ github.event.inputs.sources || 'suumo,tokyu,rakuten,homes,hatomark,nomu' }}
+        run: npm run scrape:cron
