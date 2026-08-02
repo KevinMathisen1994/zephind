@@ -85,6 +85,19 @@
   button:disabled {
     cursor: not-allowed;
   }
+
+  /* Placeholders read as real content here: the app sets bold, near-black type
+     widely, and inputs inherit it, so a placeholder looked like a filled-in
+     value. Lighten the colour and drop back to a normal weight so it reads as a
+     hint. opacity:1 is needed because Firefox dims placeholders by default,
+     which would compound with the lighter colour. */
+  ::placeholder,
+  input::placeholder,
+  textarea::placeholder {
+    color: #b4bfcd;
+    font-weight: 400 !important;
+    opacity: 1;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased text-base leading-relaxed;
     font-family: var(--font-jp-sans);

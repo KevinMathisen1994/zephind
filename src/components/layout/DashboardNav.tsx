@@ -4,7 +4,6 @@ import {
   FileCheck2,
   Sliders,
   Building,
-  CheckCircle2,
   ChevronRight,
   Users,
   Handshake,
@@ -114,17 +113,6 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
           </NavLink>
         ))}
       </nav>
-
-      {/* Footer Info */}
-      <div className="p-4 mx-4 rounded-xl bg-emerald-50/60 border border-emerald-100">
-        <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 mb-1">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          全14サイト 自動収集対応
-        </div>
-        <p className="text-[11px] text-emerald-800/80 leading-relaxed font-medium">
-          住友・三井・東急・野村・みずほ・三菱UFJ・小田急・京王・朝日・長谷工・大京・東京建物・LIFULL
-        </p>
-      </div>
 
       {/* Signed-in account — there was no way to tell which account a session
           belonged to, which matters now that data is per-user. */}

@@ -31,7 +31,6 @@ import {
   FileCheck2,
   SlidersHorizontal,
   CheckCircle2,
-  Layers,
   ArrowUpRight,
   FileText,
   ChevronLeft,
@@ -189,6 +188,17 @@ export default function OrdersPage() {
 
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
+  // Properties ticked in the results list, carried into the proposal modal so
+  // the same list is not presented twice.
+  const [selectedForProposal, setSelectedForProposal] = useState<Set<string>>(
+    new Set(),
+  );
+  const toggleProposalSelection = (matchId: string) =>
+    setSelectedForProposal((prev) => {
+      const next = new Set(prev);
+      next.has(matchId) ? next.delete(matchId) : next.add(matchId);
+      return next;
+    });
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -1148,7 +1158,6 @@ export default function OrdersPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            <Layers className="w-5 h-5 text-emerald-700" />
             一覧
           </h2>
         </div>
@@ -1170,14 +1179,6 @@ export default function OrdersPage() {
                   ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
               </div>
             </div>
-            <a
-              href={activeRun.html_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-bold text-emerald-800 underline shrink-0 self-start sm:self-auto"
-            >
-              実行ログを見る
-            </a>
           </div>
         )}
 
@@ -1214,6 +1215,12 @@ export default function OrdersPage() {
           orders.map((order) => {
             const orderMatchList = orderMatches(order._id);
             const matchCount = orderMatchList?.length ?? 0;
+            // selectedForProposal is keyed by matchId across every card, so count
+            // only the ones belonging to THIS order — otherwise ticking on one
+            // card would enable the proposal button on all of them.
+            const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
+              selectedForProposal.has(m._id),
+            ).length;
 
             return (
               <Card
@@ -1244,9 +1251,13 @@ export default function OrdersPage() {
                               ? "bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 shadow-xs"
                               : "bg-slate-200 text-slate-700 border-slate-200 hover:bg-slate-300"
                           }`}
-                          title="クリックでステータス変更 (進行中 ⇄ 完了)"
+                          title="クリックで完了/未完了を切り替えます"
                         >
-                          {order.status === "completed" ? "✓ 完了" : "検索完了"}
+                          {order.status === "completed"
+                            ? "✓ 完了"
+                            : matchCount > 0
+                              ? "未完了"
+                              : "未検索"}
                         </button>
                         {/* Per-card scrape state. The dispatch sets
                             scrapingStatus="dispatched"; combining that with a
@@ -1296,8 +1307,8 @@ export default function OrdersPage() {
                           );
                           if (!customer) return null;
                           return (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold shrink-0">
-                              <Users className="w-3.5 h-3.5 text-emerald-700" />
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs font-bold shrink-0">
+                              <Users className="w-3.5 h-3.5 text-indigo-600" />
                               顧客: {customer.name}
                               {customer.phone ? ` (${customer.phone})` : ""}
                             </span>
@@ -1431,7 +1442,7 @@ export default function OrdersPage() {
                               title="選択したサイトから物件を取得します"
                             >
                               <Play className="w-3.5 h-3.5" />
-                              検索
+                              手動検索
                             </Button>
                           </div>
 
@@ -1462,13 +1473,30 @@ export default function OrdersPage() {
                                 )}
                               </Button>
 
+                              {/* Disabled until something is ticked: opening the
+                                  modal with an empty selection just showed an
+                                  empty proposal, so the button promised an action
+                                  it could not complete. Counts only THIS order's
+                                  selections — the set is keyed by matchId and
+                                  shared across cards. */}
                               <Button
                                 size="sm"
-                                className="h-10 text-xs font-bold gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-md shadow-emerald-700/20"
+                                disabled={selectedCountForOrder === 0}
+                                title={
+                                  selectedCountForOrder === 0
+                                    ? "提案する物件を下の一覧から選択してください"
+                                    : `選択中の ${selectedCountForOrder} 件を提案します`
+                                }
+                                className={`h-10 text-xs font-bold gap-1.5 rounded-xl transition-colors ${
+                                  selectedCountForOrder === 0
+                                    ? "bg-slate-200 text-slate-500 shadow-none"
+                                    : "bg-emerald-700 hover:bg-emerald-800 text-white shadow-md shadow-emerald-700/20"
+                                }`}
                                 onClick={() => setProposalOrder(order)}
                               >
                                 <Send className="w-3.5 h-3.5" />
                                 顧客へ物件を提案・メール送信
+                                {selectedCountForOrder > 0 && ` (${selectedCountForOrder})`}
                               </Button>
                             </>
                           )}
@@ -1576,7 +1604,16 @@ export default function OrdersPage() {
                         return (
                           <div
                             key={m._id}
-                            className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/30 hover:border-slate-300 transition-all duration-150"
+                            // Selected rows tint very lightly rather than using a
+                            // strong fill: with a long list, a saturated highlight
+                            // competes with the 評価 score and source badges. A
+                            // faint wash plus a slightly firmer border is enough to
+                            // scan which rows are going into the proposal.
+                            className={`border rounded-xl overflow-hidden transition-all duration-150 ${
+                              selectedForProposal.has(m._id)
+                                ? "border-emerald-200 bg-emerald-50/40 hover:border-emerald-300"
+                                : "border-slate-200 bg-slate-50/30 hover:border-slate-300"
+                            }`}
                           >
                             {/* Header Row */}
                             <div
@@ -1584,6 +1621,18 @@ export default function OrdersPage() {
                               onClick={() => toggleExpand(m._id)}
                             >
                               <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                                {/* Tick here, then 顧客へ物件を提案 opens with these
+                                    already chosen. stopPropagation keeps the click
+                                    from toggling the row's expand state. */}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedForProposal.has(m._id)}
+                                  onChange={() => toggleProposalSelection(m._id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-4 h-4 accent-emerald-700 shrink-0 cursor-pointer"
+                                  title="提案メールに含める"
+                                  aria-label="提案に含める"
+                                />
                                 <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
                                 <span className="text-base font-bold text-slate-900 truncate">
                                   {listing?.address ||
@@ -1963,6 +2012,7 @@ export default function OrdersPage() {
       {proposalOrder && (
         <ProposalModal
           order={proposalOrder}
+          initialSelectedMatchIds={selectedForProposal}
           orderMatchList={orderMatches(proposalOrder._id) || []}
           matchedListing={matchedListing}
           evaluations={evaluations}

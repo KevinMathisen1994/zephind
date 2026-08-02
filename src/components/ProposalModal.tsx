@@ -25,6 +25,10 @@ interface ProposalModalProps {
   orderMatchList: Doc<"matching">[];
   matchedListing: (id: string) => Doc<"listings"> | undefined;
   evaluations: Record<string, string>;
+  /** Ticked in the results list before opening. When non-empty the picker below
+   *  starts collapsed — re-listing the same properties the user just chose is
+   *  redundant work, but it stays reachable for adjustments. */
+  initialSelectedMatchIds?: Set<string>;
   onClose: () => void;
 }
 
@@ -33,6 +37,7 @@ export const ProposalModal = ({
   orderMatchList,
   matchedListing,
   evaluations,
+  initialSelectedMatchIds,
   onClose,
 }: ProposalModalProps) => {
   const customers = useQuery(api.customers.list);
@@ -41,8 +46,17 @@ export const ProposalModal = ({
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(
     order?.customerId || "",
   );
-  const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(
-    new Set(),
+  // Seed from what was ticked in the results list. Filtered against the current
+  // matches so a stale id (listing removed since ticking) cannot select nothing.
+  const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(() => {
+    if (!initialSelectedMatchIds?.size) return new Set();
+    const valid = orderMatchList
+      .map((m) => m._id)
+      .filter((id) => initialSelectedMatchIds.has(id));
+    return new Set(valid);
+  });
+  const [showPicker, setShowPicker] = useState<boolean>(
+    !initialSelectedMatchIds?.size,
   );
   const [listingSearch, setListingSearch] = useState<string>("");
   const [customMessage, setCustomMessage] = useState<string>(
@@ -364,6 +378,21 @@ export const ProposalModal = ({
 
           {/* Listing Selection List */}
           <div className="space-y-3">
+            {!showPicker && (
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                <div className="text-xs font-bold text-emerald-900">
+                  一覧で選択した {selectedMatchIds.size} 件を提案に含めます
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPicker(true)}
+                  className="text-xs font-bold text-emerald-800 underline cursor-pointer"
+                >
+                  選択を変更
+                </button>
+              </div>
+            )}
+            <div className={showPicker ? "space-y-3" : "hidden"}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
                 提案に含める物件を選択 ({selectedMatchIds.size} /{" "}
@@ -457,6 +486,7 @@ export const ProposalModal = ({
                     </div>
                   );
                 })}
+            </div>
             </div>
           </div>
 
