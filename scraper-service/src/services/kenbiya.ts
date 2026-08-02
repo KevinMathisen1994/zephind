@@ -28,7 +28,22 @@ const CODE_TO_WARD: Record<string, string> = {
   "13402": "青ヶ島村", "13421": "小笠原村",
 };
 
+/**
+ * Ward/city name -> kenbiya area slug, harvested from the area picker on
+ * https://www.kenbiya.com/s/tokyo/ (the links under 東京都, e.g.
+ * /pp0/s/tokyo/mitaka-shi/ "三鷹市 (190)"). Wards take "-ku", 市部 cities
+ * take "-shi".
+ *
+ * The 郡部/島嶼部 municipalities (瑞穂町, 日の出町, 檜原村, 奥多摩町 and the
+ * islands) deliberately have NO entry: kenbiya does not give them their own
+ * area slug at all. It lumps every one of them into a single catch-all bucket
+ * /pp0/s/tokyo/etc/ ("その他"), which mixes several municipalities together, so
+ * there is nothing that could be mapped 1:1 to a code. Scraping "etc" for a
+ * specific 町/村 would return other municipalities' listings, which is worse
+ * than returning nothing.
+ */
 const WARD_TO_SLUG: Record<string, string> = {
+  // 23 special wards
   "千代田区": "chiyoda-ku", "中央区": "chuo-ku", "港区": "minato-ku",
   "新宿区": "shinjuku-ku", "文京区": "bunkyo-ku", "台東区": "taito-ku",
   "墨田区": "sumida-ku", "江東区": "koto-ku", "品川区": "shinagawa-ku",
@@ -37,6 +52,16 @@ const WARD_TO_SLUG: Record<string, string> = {
   "豊島区": "toshima-ku", "北区": "kita-ku", "荒川区": "arakawa-ku",
   "板橋区": "itabashi-ku", "練馬区": "nerima-ku", "足立区": "adachi-ku",
   "葛飾区": "katsushika-ku", "江戸川区": "edogawa-ku",
+  // 26 市部 cities
+  "八王子市": "hachioji-shi", "立川市": "tachikawa-shi", "武蔵野市": "musashino-shi",
+  "三鷹市": "mitaka-shi", "青梅市": "ome-shi", "府中市": "fuchu-shi",
+  "昭島市": "akishima-shi", "調布市": "chofu-shi", "町田市": "machida-shi",
+  "小金井市": "koganei-shi", "小平市": "kodaira-shi", "日野市": "hino-shi",
+  "東村山市": "higashimurayama-shi", "国分寺市": "kokubunji-shi", "国立市": "kunitachi-shi",
+  "福生市": "fussa-shi", "狛江市": "komae-shi", "東大和市": "higashiyamato-shi",
+  "清瀬市": "kiyose-shi", "東久留米市": "higashikurume-shi", "武蔵村山市": "musashimurayama-shi",
+  "多摩市": "tama-shi", "稲城市": "inagi-shi", "羽村市": "hamura-shi",
+  "あきる野市": "akiruno-shi", "西東京市": "nishitokyo-shi",
 };
 
 async function extractListings(page: any): Promise<PropertyListing[]> {
@@ -183,7 +208,12 @@ export async function scrapeKenbiya(areaCode: string, filterTypes?: string[]): P
 
     for (let p = 0; p < maxPages && hasMore; p++) {
       if (p === 0) {
-        const baseUrl = `https://www.kenbiya.com/s/tokyo/${wardSlug}/`;
+        // The /pp0/ prefix (= "all property types") is REQUIRED. Without it,
+        // https://www.kenbiya.com/s/tokyo/mitaka-shi/ 302s to
+        // https://www.kenbiya.com/pp0/s/tokyo/ and silently drops the area, so
+        // every ward/city scraped the same all-Tokyo page. With it,
+        // /pp0/s/tokyo/mitaka-shi/ loads 「東京都三鷹市の収益物件一覧」 as expected.
+        const baseUrl = `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/`;
         logger.info(`[Kenbiya Scraper] Loading page for ${wardName} (batch ${p + 1})...`);
 
         try {

@@ -134,14 +134,24 @@ export default function OrdersPage() {
   // Scraping no longer happens in the browser — see convex/scrapeTrigger.js.
   const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
   const getRecentRuns = useAction(api.scrapeTrigger.getRecentRuns);
+  const cancelScrape = useAction(api.scrapeTrigger.cancelScrape);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
   // Scrape progress used to live in local React state, so a reload lost it and a
   // 20-minute GitHub run looked like nothing was happening. GitHub is the only
   // real source of truth here (the browser is not involved in the run at all),
   // so poll it. Actions cannot be useQuery, hence the manual interval.
+  // GitHub workflow runs are GLOBAL: getRecentRuns returns any run by anyone, so
+  // showing the banner on `activeRun` alone told account A that account B was
+  // scraping. `orders` is per-user scoped, so requiring one of MY orders to be
+  // mid-dispatch keeps the indicator to runs this account actually asked for.
+  /** True only when the live GitHub run is one THIS account started. */
+  const isMyRun = (o: { scrapeRunId?: number }) =>
+    activeRun != null && o.scrapeRunId != null && o.scrapeRunId === activeRun.id;
+
   const ordersRef = useRef<typeof orders>(undefined);
   ordersRef.current = orders;
-  const [activeRun, setActiveRun] = useState<{ status: string; html_url: string; created_at: string } | null>(null);
+  const [activeRun, setActiveRun] = useState<{ id: number; status: string; html_url: string; created_at: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +168,7 @@ export default function OrdersPage() {
         // the badge sticks permanently (nothing else ever tells the app it ended).
         if (!live) {
           for (const o of ordersRef.current ?? []) {
-            if (o.scrapingStatus === "dispatched") {
+            if (o.scrapingStatus === "dispatched" || o.scrapeRunId != null) {
               void updateOrder({ id: o._id, scrapingStatus: "completed" }).catch(
                 () => {},
               );
@@ -286,7 +296,10 @@ export default function OrdersPage() {
   // it was created in. The freshly-created matches are not in that snapshot no
   // matter how long you sleep, so it evaluated nothing. Instead, flag the order
   // and let an effect fire once the reactive query actually contains its matches.
-  const [autoEvaluate, setAutoEvaluate] = useState(true);
+  // Always on: evaluating after a scrape is the point, and a checkbox nobody
+  // unticks is just noise. NOTE it still only runs while the tab is open — the
+  // effect reacts to matches arriving in the browser. Hence the manual fallback.
+  const autoEvaluate = true;
   const [pendingAutoEvalOrderId, setPendingAutoEvalOrderId] = useState<string | null>(null);
   const autoEvalFired = useRef<Set<string>>(new Set());
 
@@ -449,7 +462,10 @@ export default function OrdersPage() {
       const result = (await triggerScrape({
         areas: areaCodesForOrder(order).join(","),
         sources: sources.join(","),
-      })) as { ok?: boolean; error?: string } | undefined;
+        // Lets the action stamp this order with the run it started, so progress
+        // is attributed to this order (and therefore this account) precisely.
+        orderId: order._id,
+      })) as { ok?: boolean; runId?: number; error?: string } | undefined;
 
       if (!result || result.error) {
         await fail(
@@ -484,11 +500,12 @@ export default function OrdersPage() {
     }
   };
 
-  const handleScrapeOrder = (order: Doc<"orders">) =>
-    dispatchScrape(order, [scrapeSource[order._id] || "athome"]);
-
-  const handleScrapeAll = (order: Doc<"orders">) =>
-    dispatchScrape(order, ALL_SCRAPE_SOURCES);
+  const handleScrapeOrder = (order: Doc<"orders">) => {
+    // "all" is the default selection, so the single 取得 button covers both the
+    // every-portal case and a single-portal case.
+    const chosen = scrapeSource[order._id] || "all";
+    return dispatchScrape(order, chosen === "all" ? ALL_SCRAPE_SOURCES : [chosen]);
+  };
 
   const [showForm, setShowForm] = useState(false);
   const [wards, setWards] = useState<string[]>([]);
@@ -1128,7 +1145,7 @@ export default function OrdersPage() {
 
         {/* Live GitHub Actions run banner. Survives reload because the state
             comes from GitHub, not from this component. */}
-        {activeRun && (
+        {activeRun && (orders ?? []).some(isMyRun) && (
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
             <RefreshCw className="w-5 h-5 text-emerald-700 animate-spin shrink-0" />
             <div className="min-w-0 flex-1">
@@ -1226,11 +1243,36 @@ export default function OrdersPage() {
                             live GitHub run means "this order's scrape is running
                             right now" and it survives reload, since both halves
                             come from outside this component. */}
-                        {order.scrapingStatus === "dispatched" && activeRun && (
-                          <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs px-3 py-1 font-bold shrink-0 inline-flex items-center gap-1.5">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
-                            {activeRun.status === "queued" ? "取得待機中" : "取得中"}
-                          </Badge>
+                        {isMyRun(order) && (
+                          <span className="inline-flex items-center gap-1.5 shrink-0">
+                            <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs px-3 py-1 font-bold inline-flex items-center gap-1.5">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                              {activeRun?.status === "queued" ? "取得待機中" : "取得中"}
+                            </Badge>
+                            <button
+                              onClick={async () => {
+                                setCancellingOrderId(order._id);
+                                try {
+                                  const r = (await cancelScrape({ orderId: order._id })) as
+                                    | { ok?: boolean; error?: string }
+                                    | undefined;
+                                  setScrapeNotice((prev) => ({
+                                    ...prev,
+                                    [order._id]: r?.error
+                                      ? r.error
+                                      : "スクレイピングを中止しました。",
+                                  }));
+                                } finally {
+                                  setCancellingOrderId(null);
+                                }
+                              }}
+                              disabled={cancellingOrderId === order._id}
+                              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 cursor-pointer hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50"
+                              title="GitHub Actions の実行を中止します"
+                            >
+                              {cancellingOrderId === order._id ? "中止中..." : "中止"}
+                            </button>
+                          </span>
                         )}
                         {matchCount > 0 && (
                           <Badge className="bg-emerald-700 text-white text-xs px-3 py-1 font-bold shadow-sm shrink-0">
@@ -1336,7 +1378,7 @@ export default function OrdersPage() {
                           <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
                             <select
                               className="h-9 text-xs font-bold bg-white text-slate-800 px-2 rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
-                              value={scrapeSource[order._id] || "athome"}
+                              value={scrapeSource[order._id] || "all"}
                               onChange={(e) =>
                                 setScrapeSource((prev) => ({
                                   ...prev,
@@ -1344,6 +1386,10 @@ export default function OrdersPage() {
                                 }))
                               }
                             >
+                              {/* Default. Scraping every portal is the normal
+                                  action; picking one is the exception, so it
+                                  leads the list and is the fallback value. */}
+                              <option value="all">すべてのサイト</option>
                               <option value="athome">At Home</option>
                               <option value="suumo">SUUMO</option>
                               <option value="homes">LIFULL HOME'S</option>
@@ -1369,45 +1415,24 @@ export default function OrdersPage() {
                               </option>
                             </select>
                             <Button
-                              variant="ghost"
                               size="sm"
-                              className="h-9 text-xs font-bold gap-1 text-slate-700 hover:text-slate-900"
+                              className="h-9 text-xs font-bold gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-sm"
                               onClick={() => handleScrapeOrder(order)}
+                              title="選択したサイトから物件を取得します"
                             >
                               <Play className="w-3.5 h-3.5" />
-                              個別取得
+                              取得
                             </Button>
                           </div>
 
-                          <Button
-                            size="sm"
-                            className="h-10 text-xs font-bold gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-sm"
-                            onClick={() => handleScrapeAll(order)}
-                            title="全14サイト一括スクレイピング"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            全14サイト一括取得
-                          </Button>
-
                           {matchCount > 0 && (
                             <>
-                              <label
-                                    className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 select-none cursor-pointer px-2"
-                                    title="スクレイピング完了後、抽出された物件を自動で評価します"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={autoEvaluate}
-                                      onChange={(e) => setAutoEvaluate(e.target.checked)}
-                                      className="w-3.5 h-3.5 accent-emerald-700"
-                                    />
-                                    取得後に自動評価
-                                  </label>
                                   <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-10 text-xs font-bold gap-1.5 border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
+                                className="h-9 text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg"
                                 onClick={() => handleBatchEvaluate(order)}
+                                title="通常は取得後に自動評価されます。タブを閉じていた等で未評価が残った場合の予備操作です。"
                                 disabled={evaluatingOrderId === order._id}
                               >
                                 {evaluatingOrderId === order._id ? (
@@ -1421,8 +1446,8 @@ export default function OrdersPage() {
                                   </>
                                 ) : (
                                   <>
-                                    <FileText className="w-3.5 h-3.5 text-emerald-700" />
-                                    一括評価
+                                    <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                    未評価を評価
                                   </>
                                 )}
                               </Button>

@@ -97,9 +97,17 @@ function matchesOrder(
     return [false, "価格上限超過"];
   }
 
-  // Walk minutes
-  if (criteria.walkMinutes) {
-    const walk = listing.walkMinutes ?? 99;
+  // Walk minutes.
+  // Was `listing.walkMinutes ?? 99`, i.e. "unknown means 99 minutes", so any
+  // listing whose walk time failed to parse was rejected outright. Every other
+  // optional-attribute check here skips when the field is missing, and several
+  // scrapers legitimately produce walk=undefined (homes' address parsing folds
+  // the traffic line into the address). Treating unknown as a rejection quietly
+  // discarded listings that may well be within range — 徒歩分数超過 was the
+  // second-largest rejection reason in a real run. Skip when unknown instead, so
+  // an unparsed field is a data gap rather than a silent disqualification.
+  if (criteria.walkMinutes && listing.walkMinutes != null) {
+    const walk = listing.walkMinutes;
     if (walk > criteria.walkMinutes) {
       incrementReason(reasons, "徒歩分数超過");
       return [false, "徒歩分数超過"];

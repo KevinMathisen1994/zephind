@@ -50,6 +50,7 @@ export const create = mutation({
         customerId: v.optional(v.string()),
         isScraping: v.optional(v.boolean()),
         scrapingStatus: v.optional(v.string()),
+        scrapeRunId: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         // userId is taken from the verified JWT and any client-supplied value is
@@ -106,6 +107,7 @@ export const update = mutation({
         customerId: v.optional(v.string()),
         isScraping: v.optional(v.boolean()),
         scrapingStatus: v.optional(v.string()),
+        scrapeRunId: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         // Ownership check first: without it any signed-in user could patch any

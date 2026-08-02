@@ -32,6 +32,7 @@
 import { action } from "./_generated/server.js";
 import { v } from "convex/values";
 import { requireUserId } from "./lib/authz.js";
+import { api } from "./_generated/api.js";
 
 const WORKFLOW_FILE = "scrape.yml";
 const GITHUB_API_VERSION = "2022-11-28";
@@ -102,6 +103,9 @@ export const triggerScrape = action({
   args: {
     areas: v.optional(v.string()),
     sources: v.optional(v.string()),
+    // When present, the run this dispatch starts is recorded on that order so
+    // the UI can show progress for THIS user's scrape only.
+    orderId: v.optional(v.id("orders")),
   },
   handler: async (ctx, args) => {
     await requireUserId(ctx);
@@ -147,8 +151,42 @@ export const triggerScrape = action({
       };
     }
 
+    // workflow_dispatch returns 204 with no body, so it never tells us which run
+    // it created. Poll briefly for the newest workflow_dispatch run and record
+    // its id — without this, the UI can only ask "is ANY run live", which showed
+    // one account's scrape to every other account.
+    let runId = null;
+    for (let attempt = 0; attempt < 5 && runId === null; attempt++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const listRes = await fetch(
+          `https://api.github.com/repos/${repo}/actions/workflows/scrape.yml/runs` +
+            `?event=workflow_dispatch&per_page=1`,
+          { headers: githubHeaders(token) },
+        );
+        if (!listRes.ok) continue;
+        const data = await listRes.json();
+        const newest = data.workflow_runs?.[0];
+        // Only claim it if it is genuinely fresh; an older run would pin the UI
+        // to something this dispatch did not start.
+        if (newest && Date.now() - new Date(newest.created_at).getTime() < 120_000) {
+          runId = newest.id;
+        }
+      } catch {
+        /* transient — keep trying within the attempt budget */
+      }
+    }
+
+    if (args.orderId && runId !== null) {
+      await ctx.runMutation(api.orders.update, {
+        id: args.orderId,
+        scrapeRunId: runId,
+      });
+    }
+
     return {
       ok: true,
+      runId,
       // Echoed back so the UI can say what was actually requested; "" means the
       // workflow's default applies.
       areas,
@@ -205,5 +243,57 @@ export const getRecentRuns = action({
         html_url: run.html_url ?? null,
       })),
     };
+  },
+});
+
+/**
+ * Cancels the GitHub Actions run started for a given order.
+ *
+ * Ownership is enforced by going through `api.orders.get`, which is already
+ * scoped to the caller — so a user can only cancel a run attached to an order
+ * they own, never an arbitrary run id they guessed.
+ */
+export const cancelScrape = action({
+  args: { orderId: v.id("orders") },
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const { repo, token } = githubConfig();
+
+    // Throws if the order is missing or belongs to someone else.
+    const order = await ctx.runQuery(api.orders.get, { id: args.orderId });
+    const runId = order?.scrapeRunId;
+    if (!runId) {
+      return { error: "このオーダーには実行中のスクレイピングがありません。" };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/actions/runs/${runId}/cancel`,
+      { method: "POST", headers: githubHeaders(token) },
+    );
+
+    // 202 Accepted = cancellation requested. 409 means it already finished or
+    // was already cancelling, which is the desired end state either way.
+    if (response.status !== 202 && response.status !== 409) {
+      let body = "";
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        body = "(レスポンス本文を読み取れませんでした)";
+      }
+      return {
+        error: `スクレイピングの中止に失敗しました (GitHub ${response.status}): ${body || "(本文なし)"}`,
+      };
+    }
+
+    // Clear the local flags now rather than waiting for the poller: GitHub can
+    // take a while to report the run as cancelled, and leaving the badge up
+    // would make the button look broken.
+    await ctx.runMutation(api.orders.update, {
+      id: args.orderId,
+      scrapingStatus: "cancelled",
+      scrapeRunId: undefined,
+    });
+
+    return { ok: true, alreadyFinished: response.status === 409 };
   },
 });

@@ -29,8 +29,29 @@ const CODE_TO_WARD: Record<string, string> = {
   "13402": "青ヶ島村", "13421": "小笠原村",
 };
 
-// Ward label → URL slug used by homes.co.jp
+/**
+ * Ward/city label → URL slug used by homes.co.jp
+ * (https://www.homes.co.jp/{path}/tokyo/{slug}/list/).
+ *
+ * Harvested from the site's own 東京都 area indexes — homes only links the
+ * municipalities that currently have stock for that property type, so the list
+ * is the union of several verticals:
+ *   https://www.homes.co.jp/tochi/tokyo/city/          (23 wards + all 26 市, 瑞穂町, 日の出町, 大島町)
+ *   https://www.homes.co.jp/kodate/chuko/tokyo/city/   (adds 檜原村, 奥多摩町)
+ * 神津島村 and 三宅村 are not linked from any of those indexes; their slugs were
+ * confirmed by loading /tochi/tokyo/{slug}/list/ directly, which returns HTTP
+ * 200 with the titles 「神津島村の土地…」/「三宅島三宅村の土地…」 (an unknown
+ * slug returns a hard 404).
+ *
+ * NOT mapped: 利島村, 新島村, 御蔵島村, 八丈町, 青ヶ島村, 小笠原村. They are not
+ * linked from any homes area index and direct probing of candidate slugs could
+ * not confirm one — homes answers repeated probes with an Akamai "Human
+ * Verification" page, so the attempts were inconclusive rather than negative.
+ * Nothing is entered for them on purpose: a guessed slug 404s and the scraper
+ * reports that as "0 listings", indistinguishable from "no inventory".
+ */
 const WARD_TO_SLUG: Record<string, string> = {
+  // 23 special wards
   "千代田区": "chiyoda-city",
   "中央区": "chuo-city",
   "港区": "minato-city",
@@ -54,6 +75,42 @@ const WARD_TO_SLUG: Record<string, string> = {
   "足立区": "adachi-city",
   "葛飾区": "katsushika-city",
   "江戸川区": "edogawa-city",
+  // 26 市部 cities
+  "八王子市": "hachioji-city",
+  "立川市": "tachikawa-city",
+  "武蔵野市": "musashino-city",
+  "三鷹市": "mitaka-city",
+  "青梅市": "ome-city",
+  "府中市": "fuchu-city",
+  "昭島市": "akishima-city",
+  "調布市": "chofu-city",
+  "町田市": "machida-city",
+  "小金井市": "koganei-city",
+  "小平市": "kodaira-city",
+  "日野市": "hino-city",
+  "東村山市": "higashimurayama-city",
+  "国分寺市": "kokubunji-city",
+  "国立市": "kunitachi-city",
+  "福生市": "fussa-city",
+  "狛江市": "komae-city",
+  "東大和市": "higashiyamato-city",
+  "清瀬市": "kiyose-city",
+  "東久留米市": "higashikurume-city",
+  "武蔵村山市": "musashimurayama-city",
+  "多摩市": "tama-city",
+  "稲城市": "inagi-city",
+  "羽村市": "hamura-city",
+  "あきる野市": "akiruno-city",
+  "西東京市": "nishitokyo-city",
+  // 郡部 (西多摩郡) — homes prefixes the county
+  "瑞穂町": "nishitama_mizuho-city",
+  "日の出町": "nishitama_hinode-city",
+  "檜原村": "nishitama_hinohara-city",
+  "奥多摩町": "nishitama_okutama-city",
+  // 島嶼部 (only the ones whose slug could be confirmed)
+  "大島町": "oshima-city",
+  "神津島村": "kozushima-city",
+  "三宅村": "miyake-city",
 };
 
 // Category map: label → URL path segment

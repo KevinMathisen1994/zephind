@@ -19,9 +19,25 @@ const CATEGORY_MAP: Record<string, string> = {
   "収益物件": "mansion",
 };
 
-// Verified one-by-one against the anchors on
-// https://www.haseko-chukai.com/syutoken-buy/mansion/areas/tokyoto/
+/**
+ * Municipality code -> haseko area slug. The URL template appends "-city",
+ * so 13115 becomes /syutoken-buy/{type}/tokyoto/suginamiku-city/.
+ *
+ * Harvested from the site's own data on
+ * https://www.haseko-chukai.com/syutoken-buy/mansion/areas/tokyoto/ , which
+ * carries a hidden field per municipality:
+ *   <input name="shiku_roma" id="13205" value="omeshi" type="hidden">
+ * present for all 62 Tokyo municipalities (commented out for the ones with a
+ * zero listing count, but the code->roma pair is still authoritative). The
+ * visible anchors on that page only cover municipalities that currently have
+ * inventory, which is why the 市部 entries could not all be read off the links.
+ *
+ * Every slug below was checked to return HTTP 200 on
+ * /syutoken-buy/{land,house,mansion}/tokyoto/{slug}-city/ ; an unknown slug
+ * 302-redirects instead, so 200 means the area page genuinely exists.
+ */
 const WARD_SLUG_MAP: Record<string, string> = {
+  // 23 special wards
   "13101": "chiyodaku", "13102": "chuoku", "13103": "minatoku",
   "13104": "shinjukuku", "13105": "bunkyoku", "13106": "taitoku",
   "13107": "sumidaku", "13108": "kotoku", "13109": "shinagawaku",
@@ -30,6 +46,24 @@ const WARD_SLUG_MAP: Record<string, string> = {
   "13116": "toshimaku", "13117": "kitaku", "13118": "arakawaku",
   "13119": "itabashiku", "13120": "nerimaku", "13121": "adachiku",
   "13122": "katsushikaku", "13123": "edogawaku",
+  // 26 市部 cities
+  "13201": "hachiojishi", "13202": "tachikawashi", "13203": "musashinoshi",
+  "13204": "mitakashi", "13205": "omeshi", "13206": "fuchushi",
+  "13207": "akishimashi", "13208": "chofushi", "13209": "machidashi",
+  "13210": "koganeishi", "13211": "kodairashi", "13212": "hinoshi",
+  "13213": "higashimurayamashi", "13214": "kokubunjishi", "13215": "kunitachishi",
+  "13218": "fussashi", "13219": "komaeshi", "13220": "higashiyamatoshi",
+  "13221": "kiyoseshi", "13222": "higashikurumeshi", "13223": "musashimurayamashi",
+  "13224": "tamashi", "13225": "inagishi", "13227": "hamurashi",
+  "13228": "akirunoshi", "13229": "nishitokyoshi",
+  // 郡部 (西多摩郡) — the slug carries the county prefix
+  "13303": "nishitamagunmizuhomachi", "13305": "nishitamagunhinodemachi",
+  "13307": "nishitamagunhinoharamura", "13308": "nishitamagunokutamamachi",
+  // 島嶼部
+  "13361": "oshimamachi", "13362": "toshimamura", "13363": "niijimamura",
+  "13364": "kozushimamura", "13381": "miyakejimamiyakemura",
+  "13382": "mikurajimamura", "13401": "hachijojimahachijomachi",
+  "13402": "aogashimamura", "13421": "ogasawaramura",
 };
 
 async function extractListings(page: any, propertyType: string, typePath: string): Promise<PropertyListing[]> {
