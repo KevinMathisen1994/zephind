@@ -182,9 +182,30 @@ async function main(): Promise<number> {
 
   logger.info(`Scraping ${sources.length} source(s) x ${areaCodes.length} area(s): [${sources.join(", ")}] x [${areaCodes.join(", ")}]`);
 
-  // Property types requested by the first order, matching the HTTP endpoint's
-  // behaviour so the cron run scrapes the same category pages the UI does.
-  const requestedTypes = criteria.length > 0 ? criteria[0].propertyTypes : undefined;
+  // UNION of every order's property types, not just the first one's.
+  //
+  // This used to be `criteria[0].propertyTypes`, so one order silently governed
+  // the whole sweep: if order #1 wanted only マンション, then athome and hatomark
+  // (which expose 土地/一戸建て categories) logged "No matching categories" and
+  // scraped NOTHING — for every area, including areas belonging to other orders
+  // that did want 土地. An entire run could come back empty because of one
+  // unrelated order.
+  //
+  // Scraping the union is safe: hardFilter still enforces each order's own
+  // propertyTypes afterwards, so a listing only matches orders that asked for
+  // its type. An order with no propertyTypes means "any", which must widen the
+  // sweep to everything rather than narrow it.
+  const anyOrderWantsEverything = criteria.some(
+    (c) => !c.propertyTypes || c.propertyTypes.length === 0,
+  );
+  const unionTypes = Array.from(
+    new Set(criteria.flatMap((c) => c.propertyTypes ?? [])),
+  );
+  const requestedTypes =
+    anyOrderWantsEverything || unionTypes.length === 0 ? undefined : unionTypes;
+  logger.info(
+    `Property types for this sweep: ${requestedTypes ? requestedTypes.join(", ") : "(all — at least one order has no type filter)"}`,
+  );
 
   const total: IngestSummary = {
     listingsInserted: 0,

@@ -21,8 +21,20 @@ on:
         default: ""
 
 # A long run must never overlap the next one; queued duplicates are useless.
+# Key on the WORK, not a single global lock.
+#
+# With one fixed group every dispatch serialized behind the last — and worse,
+# GitHub keeps only ONE pending run per group, so a third dispatch silently
+# cancelled the queued second one. With several people triggering scrapes from
+# their phones that means quietly losing someone's run.
+#
+# Keying on areas+sources means: different requests run in PARALLEL (each run
+# gets its own isolated VM, so there is no Chrome contention between them, and
+# a public repo has unlimited Actions minutes), while an identical repeat
+# request still queues behind the first instead of duplicating the work.
+# The scheduled run passes no inputs, so it occupies its own "scrape--" group.
 concurrency:
-  group: scheduled-scrape
+  group: scrape-${{ github.event.inputs.areas }}-${{ github.event.inputs.sources }}
   cancel-in-progress: false
 
 jobs:
