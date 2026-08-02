@@ -52,6 +52,37 @@ export function hardFilter(
   return { passed, failed, stats };
 }
 
+
+/** Site labels vary (区分マンション, 中古マンション, 一棟アパート). Reduce to a canonical type. */
+function canonicalPropertyType(raw: string): string {
+  const t = raw.replace(/\s/g, "");
+  if (/土地|宅地|用地/.test(t)) return "土地";
+  if (/マンション/.test(t)) return "マンション";
+  if (/アパート/.test(t)) return "アパート";
+  if (/戸建|一戸建て/.test(t)) return "一戸建て";
+  if (/ビル/.test(t)) return "ビル";
+  if (/店舗|事務所/.test(t)) return "店舗";
+  return t;
+}
+
+/**
+ * Building types that can be bought as an income-producing asset. 土地 is
+ * excluded deliberately: raw land generates no yield, so 収益物件 should not
+ * silently pull in every plot of land.
+ */
+const INCOME_TYPES = new Set(["マンション", "アパート", "一戸建て", "ビル", "店舗"]);
+
+export function propertyTypeMatches(listingType: string, wanted: string[]): boolean {
+  const canon = canonicalPropertyType(listingType);
+  for (const w of wanted) {
+    const wc = canonicalPropertyType(w);
+    if (wc === canon) return true;
+    // 収益物件 is a category, so treat it as "any income-producing building type".
+    if (w.includes("収益") && INCOME_TYPES.has(canon)) return true;
+  }
+  return false;
+}
+
 function matchesOrder(
   listing: PropertyListing,
   criteria: OrderCriteria,
@@ -130,9 +161,20 @@ function matchesOrder(
     }
   }
 
-  // Property type filter
+  // Property type filter.
+  //
+  // This used to be a bare `criteria.propertyTypes.includes(listing.propertyType)`
+  // exact string match, which failed in two ways seen in real runs:
+  //
+  //  1. 収益物件 is an investment CATEGORY, not a building shape. No scraper emits
+  //     that string (they emit 土地 / 一戸建て / マンション from their own category
+  //     maps), so an order asking for 収益物件 matched literally nothing from any
+  //     of the 19 sources — 131 マンション in 新宿区 were all rejected.
+  //  2. Sites label the same thing differently: nomu_pro emits 区分マンション and
+  //     一棟マンション, kenbiya emits ビル. Exact match rejects all of them even
+  //     when the category is exactly what the buyer asked for.
   if (criteria.propertyTypes && criteria.propertyTypes.length > 0) {
-    if (!listing.propertyType || !criteria.propertyTypes.includes(listing.propertyType)) {
+    if (!listing.propertyType || !propertyTypeMatches(listing.propertyType, criteria.propertyTypes)) {
       incrementReason(reasons, "物件種別不一致");
       return [false, "物件種別不一致"];
     }
