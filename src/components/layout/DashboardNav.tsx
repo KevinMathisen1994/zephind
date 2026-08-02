@@ -14,14 +14,14 @@ import {
 const navItems = [
   {
     to: "/orders",
-    label: "買主オーダー管理",
+    label: "物件検索",
     description: "希望条件と自動マッチング",
     icon: FileCheck2,
   },
   {
     to: "/customers",
     label: "顧客管理",
-    description: "買主・クライアント情報",
+    description: "買主情報",
     icon: Users,
   },
   {
@@ -32,7 +32,7 @@ const navItems = [
   },
   {
     to: "/admin",
-    label: "スクレイピング・管理",
+    label: "検索・管理",
     description: "データ収集とシステム設定",
     icon: Sliders,
   },

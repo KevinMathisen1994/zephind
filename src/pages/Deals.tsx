@@ -87,13 +87,13 @@ export default function DealsPage() {
         <div>
           <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
             <Handshake className="w-4 h-4 text-emerald-600" />
-            パイプライン＆成約トラッキング
+            成約トラッキング
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
-            案件・提案管理 (パイプライン)
+            案件・提案管理 
           </h1>
           <p className="text-base text-slate-500 mt-1 leading-relaxed">
-            買主クライアントへの物件提案履歴、交渉ステータス、成約完了案件を統合管理します
+            買主への物件提案履歴、交渉ステータス、成約完了案件を統合管理します
           </p>
         </div>
       </div>

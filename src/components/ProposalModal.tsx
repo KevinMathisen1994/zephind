@@ -28,13 +28,13 @@ interface ProposalModalProps {
   onClose: () => void;
 }
 
-export default function ProposalModal({
+export const ProposalModal = ({
   order,
   orderMatchList,
   matchedListing,
   evaluations,
   onClose,
-}: ProposalModalProps) {
+}: ProposalModalProps) => {
   const customers = useQuery(api.customers.list);
   const createDeal = useMutation(api.deals.create);
 
@@ -600,7 +600,7 @@ export default function ProposalModal({
             <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                 <Settings className="w-4 h-4 text-emerald-700" />
-                EmailJS API 設定 (無料クライアント送信)
+                メール設定 
               </h3>
               <button
                 onClick={() => setShowConfigModal(false)}

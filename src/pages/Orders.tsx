@@ -79,7 +79,7 @@ const ALL_TOKYO_WARD_CODES = [
 ];
 
 const SCRAPE_STARTED_MESSAGE =
-  "スクレイピングを開始しました。完了まで数分かかります。結果は自動で表示されます。";
+  "検索を開始しました。完了まで数分かかります。結果は自動で表示されます。";
 
 // Some orders store requirements in the nested `criteria` blob rather than as
 // top-level columns (e.g. { criteria: { walkMinutes: 15 } }). Reading only the
@@ -469,7 +469,7 @@ export default function OrdersPage() {
 
       if (!result || result.error) {
         await fail(
-          result?.error ?? "スクレイピングを開始できませんでした（応答がありません）",
+          result?.error ?? "検索を開始できませんでした（応答がありません）",
         );
         return;
       }
@@ -493,7 +493,7 @@ export default function OrdersPage() {
     } catch (err: unknown) {
       console.error("Scrape dispatch error:", err);
       await fail(
-        `スクレイピングを開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
+        `検索を開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setScrapingOrderId(null);
@@ -724,7 +724,7 @@ export default function OrdersPage() {
             自動マッチング＆物件評価システム
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
-            買主オーダー管理
+            物件検索
           </h1>
           <p className="text-base text-slate-500 mt-1 leading-relaxed">
             買主希望条件の登録、全14不動産ポータル横断検索、物件評価を一括管理
@@ -750,7 +750,7 @@ export default function OrdersPage() {
           </div>
           <div className="min-w-0">
             <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              登録オーダー数
+              登録された依頼数
             </div>
             <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {orders === undefined ? (
@@ -768,7 +768,7 @@ export default function OrdersPage() {
           </div>
           <div className="min-w-0">
             <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              進行中オーダー
+              検索完了
             </div>
             <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {orders === undefined ? (
@@ -786,7 +786,7 @@ export default function OrdersPage() {
           </div>
           <div className="min-w-0">
             <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              抽出一致物件数
+              全検索結果
             </div>
             <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
               {matches === undefined ? (
@@ -835,7 +835,7 @@ export default function OrdersPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
                     <Label className="text-sm font-bold text-slate-700">
-                      オーダー名（案件名）
+                      案件名 
                     </Label>
                     <Input
                       placeholder="例: 山田様 渋谷区・港区 商業用地サーチ"
@@ -849,7 +849,7 @@ export default function OrdersPage() {
                     <div className="flex items-center justify-between">
                       <Label className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
                         <Users className="w-4 h-4 text-emerald-700" />
-                        紐付ける顧客 (買主・クライアント)
+                        紐付ける顧客 (買主)
                       </Label>
                       <button
                         type="button"
@@ -996,8 +996,18 @@ export default function OrdersPage() {
                     <Label className="text-sm font-bold text-slate-700">
                       物件種別
                     </Label>
+                    <p className="text-xs text-slate-500 font-medium -mt-1">
+                      収益物件をお探しの場合は、種別ではなく下の「最低利回り」で指定してください。
+                    </p>
+                    {/* 収益物件 was removed from this list: it is an investment
+                        CATEGORY (bought for rental income), not a building shape,
+                        so it belongs on a different axis from 土地/一戸建て/マンション.
+                        It also matched nothing — no scraper emits that string — and
+                        minYield already expresses the same intent. Orders created
+                        before this still work via propertyTypeMatches() in
+                        scraper-service/src/services/propertyMatcher.ts. */}
                     <div className="flex flex-wrap gap-3">
-                      {["土地", "一戸建て", "マンション", "収益物件"].map(
+                      {["土地", "一戸建て", "マンション"].map(
                         (t) => {
                           const isSelected = propertyTypes.includes(t);
                           return (
@@ -1118,7 +1128,7 @@ export default function OrdersPage() {
                     ? "保存中..."
                     : editingOrderId
                       ? "変更内容を保存"
-                      : "オーダーを作成"}
+                      : "作成"}
                 </Button>
                 {done && (
                   <span className="text-base text-emerald-600 font-semibold flex items-center gap-1.5">
@@ -1139,7 +1149,7 @@ export default function OrdersPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
             <Layers className="w-5 h-5 text-emerald-700" />
-            登録オーダー一覧
+            一覧
           </h2>
         </div>
 
@@ -1151,8 +1161,8 @@ export default function OrdersPage() {
             <div className="min-w-0 flex-1">
               <div className="text-sm font-bold text-emerald-900">
                 {activeRun.status === "queued"
-                  ? "スクレイピングの実行を待機中です"
-                  : "スクレイピングを実行中です"}
+                  ? "検索の実行を待機中です"
+                  : "検索を実行中です"}
               </div>
               <div className="text-xs text-emerald-800/80 font-medium mt-0.5">
                 完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
@@ -1236,7 +1246,7 @@ export default function OrdersPage() {
                           }`}
                           title="クリックでステータス変更 (進行中 ⇄ 完了)"
                         >
-                          {order.status === "completed" ? "✓ 完了" : "進行中"}
+                          {order.status === "completed" ? "✓ 完了" : "検索完了"}
                         </button>
                         {/* Per-card scrape state. The dispatch sets
                             scrapingStatus="dispatched"; combining that with a
@@ -1260,7 +1270,7 @@ export default function OrdersPage() {
                                     ...prev,
                                     [order._id]: r?.error
                                       ? r.error
-                                      : "スクレイピングを中止しました。",
+                                      : "検索を中止しました。",
                                   }));
                                 } finally {
                                   setCancellingOrderId(null);
@@ -1276,7 +1286,7 @@ export default function OrdersPage() {
                         )}
                         {matchCount > 0 && (
                           <Badge className="bg-emerald-700 text-white text-xs px-3 py-1 font-bold shadow-sm shrink-0">
-                            {matchCount} 件抽出一致
+                            {matchCount} 件
                           </Badge>
                         )}
 
@@ -1421,7 +1431,7 @@ export default function OrdersPage() {
                               title="選択したサイトから物件を取得します"
                             >
                               <Play className="w-3.5 h-3.5" />
-                              取得
+                              検索
                             </Button>
                           </div>
 

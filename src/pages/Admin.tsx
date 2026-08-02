@@ -49,7 +49,7 @@ type WorkflowRun = {
 };
 
 const SCRAPE_STARTED_MESSAGE =
-  "スクレイピングを開始しました。完了まで数分かかります。結果は自動で表示されます。";
+  "検索を開始しました。完了まで数分かかります。結果は自動で表示されます。";
 
 const RUN_STATUS_LABELS: Record<string, string> = {
   queued: "待機中",
@@ -679,7 +679,7 @@ export default function AdminPage() {
               ) : manualListings.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-12 text-slate-400 font-medium">
-                    登録されている物件がありません。「手動スクレイピング開始」を実行してください。
+                    登録されている物件がありません。「手動検索開始」を実行してください。
                   </TableCell>
                 </TableRow>
               ) : (

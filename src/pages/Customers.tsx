@@ -137,10 +137,10 @@ export default function CustomersPage() {
             顧客データベース
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
-            顧客管理 (買主・クライアント)
+            顧客管理 (買主)
           </h1>
           <p className="text-base text-slate-500 mt-1 leading-relaxed">
-            買主クライアント情報の登録、連絡先管理、希望物件オーダーとの紐付けが一括で行えます
+            買主情報の登録、連絡先管理、希望物件オーダーとの紐付けが一括で行えます
           </p>
         </div>
         <Button
@@ -434,7 +434,7 @@ export default function CustomersPage() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="例: 東京都港区六本木1-2-3"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
                 />
               </div>
 

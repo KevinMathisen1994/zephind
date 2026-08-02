@@ -140,7 +140,6 @@ async function main(): Promise<number> {
   logger.info(`Cron scrape starting — convex=${client.convexUrl}`);
 
   let orders = await client.listOrdersForMatching();
-  const criteria = orders.map(toCriteria);
   // listOrdersForMatching returns EVERY account's orders, which is right for the
   // nightly sweep but wrong for a user-initiated run: without this filter one
   // person's dispatch matched against strangers' orders, and their criteria
@@ -157,6 +156,7 @@ async function main(): Promise<number> {
       process.exit(1);
     }
   }
+  const criteria = orders.map(toCriteria);
   logger.info(`Fetched ${orders.length} order(s) for matching`);
 
   // Default target: only the wards someone is actually looking for.
