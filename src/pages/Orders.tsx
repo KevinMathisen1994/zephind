@@ -40,7 +40,7 @@ import {
   Send,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import ProposalModal from "../components/ProposalModal";
+import { ProposalModal } from "../components/ProposalModal";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 const GMAPS_KEY = import.meta.env

@@ -9,8 +9,7 @@ export default function DashboardLayout() {
   return (
     // h-screen + overflow-hidden makes the SHELL exactly viewport height so the
     // <main> below becomes the scroll container. Previously the shell was
-    // min-h-screen, so the whole page scrolled and the sidebar (min-h-screen)
-    // scrolled away with it — main's overflow-y-auto never actually engaged.
+    // min-h-screen, so the whole page scrolled and the sidebar (min-h-screen)   // scrolled away with it — main's overflow-y-auto never actually engaged.
     <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900">
       {/* Mobile nav overlay */}
       {mobileNavOpen && (
