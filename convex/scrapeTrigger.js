@@ -110,6 +110,15 @@ export const triggerScrape = action({
   handler: async (ctx, args) => {
     await requireUserId(ctx);
 
+    // Verify the caller owns the order they are scoping the run to. api.orders.get
+    // is already per-user scoped, so this throws for someone else's id. Without it
+    // any signed-in user could spend Actions minutes running a scrape for another
+    // account's order (the resulting matches would still be attributed to that
+    // order's owner, so it was never a data leak — just unauthorised work).
+    if (args.orderId) {
+      await ctx.runQuery(api.orders.get, { id: args.orderId });
+    }
+
     const { repo, token } = githubConfig();
     const areas = cleanListInput(args.areas, "エリアコード");
     const sources = cleanListInput(args.sources, "取得サイト");
@@ -126,7 +135,9 @@ export const triggerScrape = action({
         // (all known sources / area codes derived from existing orders).
         body: JSON.stringify({
           ref: WORKFLOW_REF,
-          inputs: { areas, sources },
+          // Scope the run to this order so one account's scrape does not match
+        // against every other account's orders.
+        inputs: { areas, sources, orderId: args.orderId ?? "" },
         }),
       });
     } catch (err) {

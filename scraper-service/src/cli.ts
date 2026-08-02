@@ -139,8 +139,24 @@ async function main(): Promise<number> {
   const client = createIngestClient();
   logger.info(`Cron scrape starting — convex=${client.convexUrl}`);
 
-  const orders = await client.listOrdersForMatching();
+  let orders = await client.listOrdersForMatching();
   const criteria = orders.map(toCriteria);
+  // listOrdersForMatching returns EVERY account's orders, which is right for the
+  // nightly sweep but wrong for a user-initiated run: without this filter one
+  // person's dispatch matched against strangers' orders, and their criteria
+  // widened this sweep (e.g. an order with no type filter forced "all types").
+  const onlyOrderId = (process.env.SCRAPE_ORDER_ID || "").trim();
+  if (onlyOrderId) {
+    const before = orders.length;
+    orders = orders.filter((o) => o._id === onlyOrderId);
+    logger.info(
+      `Scoped to order ${onlyOrderId}: ${orders.length} of ${before} order(s)`,
+    );
+    if (orders.length === 0) {
+      logger.error(`Order ${onlyOrderId} not found — nothing to match against.`);
+      process.exit(1);
+    }
+  }
   logger.info(`Fetched ${orders.length} order(s) for matching`);
 
   // Default target: only the wards someone is actually looking for.

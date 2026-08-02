@@ -19,6 +19,10 @@ on:
         description: "Comma-separated scraper sources (e.g. suumo,stepon). Empty = all known sources."
         required: false
         default: ""
+      orderId:
+        description: "Match against ONLY this order. Empty = every order (the nightly sweep). User-initiated scrapes set this so one account's run does not do work for another's."
+        required: false
+        default: ""
 
 # A long run must never overlap the next one; queued duplicates are useless.
 # Key on the WORK, not a single global lock.
