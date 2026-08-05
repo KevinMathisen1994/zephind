@@ -11,32 +11,52 @@
   --font-ibm-plex-mono: "IBM Plex Mono", monospace;
   --radius: 12px;
 
-  /* Japanese Professional Green Theme (#1A7100 / Forest Emerald) */
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-  --popover: #ffffff;
-  --popover-foreground: #0f172a;
+  /* ── Zephind · Japanese Professional Palette ── */
+  --bg-page: #f6f8f7;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f9faf9;
+  --bg-brand: #f1f7ef;
 
-  --primary: #1a7100;
+  --text-primary: #1a1f1b;
+  --text-secondary: #5a635d;
+  --text-muted: #939b95;
+  --text-placeholder: #b4bdb7;
+
+  --brand: #1a7100;
+  --brand-hover: #155d00;
+  --brand-soft: #f0f7ed;
+  --brand-border: #caddc4;
+
+  --border-subtle: #eaeeea;
+  --border-default: #dde1dd;
+  --border-strong: #c8cdc8;
+
+  --ring-color: #1a7100;
+  --shadow-xs: 0 1px 2px rgba(10, 20, 10, 0.04);
+  --shadow-sm: 0 1px 3px rgba(10, 20, 10, 0.05), 0 1px 2px rgba(10, 20, 10, 0.04);
+  --shadow-md: 0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.04);
+  --shadow-lg: 0 8px 32px rgba(10, 20, 10, 0.08), 0 2px 8px rgba(10, 20, 10, 0.04);
+
+  /* shadcn-compatible semantic aliases */
+  --background: var(--bg-page);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-surface);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--brand);
   --primary-foreground: #ffffff;
-
-  --secondary: #f1f5f9;
-  --secondary-foreground: #1e293b;
-
-  --muted: #f8fafc;
-  --muted-foreground: #64748b;
-
-  --accent: #f0fdf4;
+  --secondary: var(--bg-surface-hover);
+  --secondary-foreground: var(--text-primary);
+  --muted: #f6f8f7;
+  --muted-foreground: var(--text-muted);
+  --accent: var(--brand-soft);
   --accent-foreground: #14532d;
-
-  --destructive: #ef4444;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-
-  --border: #e2e8f0;
-  --input: #cbd5e1;
-  --ring: #1a7100;
+  --border: var(--border-subtle);
+  --input: var(--border-default);
+  --ring: var(--ring-color);
 }
 
 @theme inline {
@@ -59,24 +79,37 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 
+/* ─────────────────────────────
+   Base layer
+   ───────────────────────────── */
 @layer base {
   html {
-    /* Browser default is 16px; 17px made the whole UI read oversized. */
     font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+
   * {
     @apply border-border;
   }
 
-  /* Tailwind v4 removed the Preflight rule that gave buttons cursor:pointer, so
-     every button in the app reverted to the default arrow. Restore it globally
-     rather than adding cursor-pointer to each button by hand. */
+  body {
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-family: var(--font-jp-sans);
+    font-feature-settings: "palt" 1;
+    font-size: 1rem;
+    line-height: 1.75;
+    letter-spacing: 0.01em;
+  }
+
+  /* ── cursor restoration (tailwind v4 compat) ── */
   button:not(:disabled),
   [role="button"]:not(:disabled),
   summary {
@@ -86,84 +119,42 @@
     cursor: not-allowed;
   }
 
-  /* Placeholders read as real content here: the app sets bold, near-black type
-     widely, and inputs inherit it, so a placeholder looked like a filled-in
-     value. Lighten the colour and drop back to a normal weight so it reads as a
-     hint. opacity:1 is needed because Firefox dims placeholders by default,
-     which would compound with the lighter colour. */
+  /* ── placeholders ── */
   ::placeholder,
   input::placeholder,
   textarea::placeholder {
-    color: #b4bfcd;
+    color: var(--text-placeholder);
     font-weight: 400 !important;
     opacity: 1;
   }
-  body {
-    @apply bg-background text-foreground font-sans antialiased text-base leading-relaxed;
-    font-family: var(--font-jp-sans);
-    font-feature-settings: "palt" 1;
-    font-size: 1rem;
-  }
 
-  /* Utility Font Size Scaling for Enhanced Readability */
-  .text-xs {
-    font-size: 0.75rem !important;
-    line-height: 1.15rem !important;
-  } /* 12px */
-  .text-sm {
-    font-size: 0.85rem !important;
-    line-height: 1.35rem !important;
-  } /* 13.6px */
-  .text-base {
-    font-size: 0.95rem !important;
-    line-height: 1.55rem !important;
-  } /* 15.2px */
-  .text-lg {
-    font-size: 1.1rem !important;
-    line-height: 1.65rem !important;
-  } /* 17.6px */
-  .text-xl {
-    font-size: 1.3rem !important;
-    line-height: 1.8rem !important;
-  } /* 20.8px */
-  .text-2xl {
-    font-size: 1.5rem !important;
-    line-height: 2rem !important;
-  } /* 24px */
-  .text-3xl {
-    font-size: 1.7rem !important;
-    line-height: 2.2rem !important;
-  } /* 27.2px */
+  /* ── selection ── */
+  ::selection {
+    background: #d4e8d0;
+    color: #1a3d12;
+  }
+}
+
+/* ─────────────────────────────
+   Typography scale (no !important)
+   ───────────────────────────── */
+@layer base {
+  .text-xs  { font-size: 0.75rem;  line-height: 1.15rem; }
+  .text-sm  { font-size: 0.85rem;  line-height: 1.4rem;  }
+  .text-base { font-size: 0.95rem; line-height: 1.65rem; }
+  .text-lg  { font-size: 1.1rem;   line-height: 1.7rem;  }
+  .text-xl  { font-size: 1.3rem;   line-height: 1.85rem; }
+  .text-2xl { font-size: 1.55rem;  line-height: 2.1rem;  }
+  .text-3xl { font-size: 1.8rem;   line-height: 2.3rem;  }
 
   @media (min-width: 768px) {
-    .text-xs {
-      font-size: 0.8125rem !important;
-      line-height: 1.35rem !important;
-    } /* 14px */
-    .text-sm {
-      font-size: 0.9rem !important;
-      line-height: 1.5rem !important;
-    } /* 16px */
-    .text-base {
-      font-size: 1rem !important;
-      line-height: 1.75rem !important;
-    } /* 18px */
-    .text-lg {
-      font-size: 1.15rem !important;
-      line-height: 1.85rem !important;
-    } /* 20px */
-    .text-xl {
-      font-size: 1.4rem !important;
-      line-height: 2.1rem !important;
-    } /* 25px */
-    .text-2xl {
-      font-size: 1.7rem !important;
-      line-height: 2.4rem !important;
-    } /* 32px */
-    .text-3xl {
-      font-size: 2rem !important;
-      line-height: 2.8rem !important;
-    } /* 38px */
+    .text-xs  { font-size: 0.8125rem; line-height: 1.35rem; }
+    .text-sm  { font-size: 0.9rem;    line-height: 1.55rem; }
+    .text-base { font-size: 1rem;     line-height: 1.8rem;  }
+    .text-lg  { font-size: 1.15rem;   line-height: 1.9rem;  }
+    .text-xl  { font-size: 1.45rem;   line-height: 2.15rem; }
+    .text-2xl { font-size: 1.75rem;   line-height: 2.45rem; }
+    .text-3xl { font-size: 2.1rem;    line-height: 2.85rem; }
   }
 }
 
@@ -171,41 +162,91 @@
   font-family: var(--font-ibm-plex-mono), monospace;
 }
 
-/* Skeleton Loading Shimmer */
+/* ─────────────────────────────
+   Skeleton shimmer
+   ───────────────────────────── */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
-
 .skeleton-shimmer {
-  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+  background: linear-gradient(110deg, #eef0ee 25%, #e2e5e2 37%, #eef0ee 63%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s infinite ease-in-out;
+  animation: shimmer 1.6s infinite ease-in-out;
 }
 
-/* Custom Scrollbar */
+/* ─────────────────────────────
+   Custom scrollbar
+   ───────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #c8cdc8;
   border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #a5aba5;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+/* ─────────────────────────────
+   Shared component-level utilities
+   ───────────────────────────── */
+
+/* KPI stat cards — consistent across all pages */
+.kpi-card {
+  @apply bg-white rounded-2xl border border-[var(--border-subtle)] p-4 md:p-5 flex items-center gap-3 md:gap-4;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+.kpi-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+/* Page header card */
+.page-header {
+  @apply bg-white rounded-2xl border border-[var(--border-subtle)] p-6 md:p-8;
+  box-shadow: var(--shadow-xs);
+}
+
+/* Subtle brand-dot divider */
+.brand-divider {
+  @apply flex items-center gap-2 text-[#1a7100] font-bold text-xs tracking-wider uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Tab / pill group */
+.pill-group {
+  @apply flex flex-wrap items-center gap-1 bg-[#f1f3f1] p-1 rounded-xl;
+}
+
+.pill {
+  @apply px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-150;
+}
+.pill-active {
+  @apply bg-white text-[#1a1f1b] shadow-sm;
+}
+.pill-inactive {
+  @apply text-[#5a635d] hover:text-[#1a1f1b];
+}
+
+/* Empty-state card */
+.empty-state {
+  @apply border border-[var(--border-subtle)] rounded-2xl bg-white p-12 text-center;
+}
+
+/* Smooth focus ring override */
+.focus-brand:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26, 113, 0, 0.15);
+  border-color: var(--brand);
 }

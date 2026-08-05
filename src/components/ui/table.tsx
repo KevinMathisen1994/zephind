@@ -3,7 +3,7 @@ import { cn } from "../../lib/utils";
 
 export function Table({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className="relative w-full overflow-auto">
+    <div className="relative w-full overflow-auto rounded-xl border border-[var(--border-subtle)]">
       <table className={cn("w-full caption-bottom text-sm", className)}>
         {children}
       </table>
@@ -12,16 +12,21 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 }
 
 export function TableHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <thead className={cn("[&_tr]:border-b", className)}>{children}</thead>;
+  return <thead className={cn("bg-[var(--bg-surface-hover)]", className)}>{children}</thead>;
 }
 
 export function TableBody({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <tbody className={cn("[&_tr:last-child]:border-0", className)}>{children}</tbody>;
+  return <tbody className={cn("divide-y divide-[var(--border-subtle)]", className)}>{children}</tbody>;
 }
 
 export function TableRow({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <tr className={cn("border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", className)}>
+    <tr
+      className={cn(
+        "transition-colors hover:bg-[var(--bg-surface-hover)]/70",
+        className,
+      )}
+    >
       {children}
     </tr>
   );
@@ -29,7 +34,12 @@ export function TableRow({ children, className = "" }: { children: ReactNode; cl
 
 export function TableHead({ children, className = "" }: { children?: ReactNode; className?: string }) {
   return (
-    <th className={cn("h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0", className)}>
+    <th
+      className={cn(
+        "h-11 px-4 text-left align-middle text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]",
+        className,
+      )}
+    >
       {children}
     </th>
   );
@@ -37,7 +47,7 @@ export function TableHead({ children, className = "" }: { children?: ReactNode; 
 
 export function TableCell({ children, className = "", ...props }: TdHTMLAttributes<HTMLTableCellElement> & { children: ReactNode }) {
   return (
-    <td className={cn("p-4 align-middle [&:has([role=checkbox])]:pr-0", className)} {...props}>
+    <td className={cn("px-4 py-3 align-middle text-sm", className)} {...props}>
       {children}
     </td>
   );

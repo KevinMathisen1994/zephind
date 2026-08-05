@@ -725,18 +725,18 @@ export default function OrdersPage() {
   const totalEvaluatedCount = Object.keys(evaluations).length;
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm">
+    <div className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
+      {/* ── Page Header ── */}
+      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div>
-          <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
-            <FileText className="w-4 h-4 text-emerald-600" />
+          <div className="brand-divider mb-1">
+            <FileText className="w-3.5 h-3.5" />
             自動マッチング＆物件評価システム
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
             物件検索
           </h1>
-          <p className="text-base text-slate-500 mt-1 leading-relaxed">
+          <p className="text-sm text-[var(--text-muted)] mt-1">
             買主希望条件の登録、全14不動産ポータル横断検索、物件評価を一括管理
           </p>
         </div>
@@ -745,93 +745,54 @@ export default function OrdersPage() {
             if (showForm) resetForm();
             setShowForm(!showForm);
           }}
-          className="h-12 px-6 text-base font-semibold gap-2 shadow-lg shadow-emerald-700/20 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl transition-all duration-200 shrink-0"
+          className="h-11 px-5 text-sm font-bold gap-2 rounded-xl"
+          style={{
+            background: showForm ? "var(--bg-surface-hover)" : "var(--brand)",
+            color: showForm ? "var(--text-primary)" : "#fff",
+            boxShadow: showForm ? "none" : "0 4px 14px rgba(26,113,0,0.25)",
+          }}
         >
-          {showForm ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
           {showForm ? "キャンセル" : "新規オーダー作成"}
         </Button>
       </div>
 
-      {/* KPI Overview Metrics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
-            <FileCheck2 className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              登録された依頼数
+      {/* ── KPI cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        {[
+          { icon: FileCheck2,   color: "var(--brand)",        bg: "var(--brand-soft)", label: "登録された依頼数", value: totalOrdersCount,    loading: orders === undefined },
+          { icon: CheckCircle2, color: "#0d9488",              bg: "#f0fdfa",           label: "検索完了",         value: activeOrdersCount,   loading: orders === undefined },
+          { icon: Building2,    color: "#d97706",              bg: "#fffbeb",           label: "全検索結果",       value: totalMatchesCount,   loading: matches === undefined },
+          { icon: FileText,     color: "#7c3aed",              bg: "#f5f3ff",           label: "評価完了数",       value: totalEvaluatedCount, loading: false },
+        ].map((kpi, i) => (
+          <div key={i} className="kpi-card">
+            <div
+              className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-xl shrink-0"
+              style={{ background: kpi.bg, color: kpi.color }}
+            >
+              <kpi.icon className="w-4 h-4 md:w-5 md:h-5" />
             </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {orders === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                totalOrdersCount
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-100 text-emerald-800 shrink-0">
-            <CheckCircle2 className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              検索完了
-            </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {orders === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                activeOrdersCount
-              )}
+            <div className="min-w-0">
+              <div className="text-[10px] md:text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
+                {kpi.label}
+              </div>
+              <div className="text-lg md:text-xl font-extrabold text-[var(--text-primary)] font-data tracking-tight">
+                {kpi.loading ? <Skeleton className="h-6 w-10" /> : kpi.value}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-amber-50 text-amber-600 shrink-0">
-            <Building2 className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              全検索結果
-            </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {matches === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                totalMatchesCount
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-purple-50 text-purple-600 shrink-0">
-            <FileText className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              評価完了数
-            </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {totalEvaluatedCount}
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Order Creation / Editing Form */}
       {showForm && (
-        <Card className="border-2 border-emerald-600/30 shadow-xl bg-white rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
-          <CardHeader className="bg-slate-50 border-b border-slate-200 p-6">
-            <CardTitle className="text-xl font-bold flex items-center gap-2 text-slate-900">
-              <SlidersHorizontal className="w-5 h-5 text-emerald-700" />
+        <Card className="border-2 border-[var(--brand-border)] shadow-lg rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
+          <CardHeader className="bg-[var(--bg-surface-hover)] border-b border-[var(--border-subtle)] p-5 md:p-6">
+            <CardTitle className="text-lg font-extrabold flex items-center gap-2 text-[var(--text-primary)]">
+              <SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />
               {editingOrderId ? "オーダー編集" : "新規買主オーダー作成"}
             </CardTitle>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
               買主の希望条件を入力してください。条件に合致する物件を全14ポータルから自動抽出します。
             </p>
           </CardHeader>
@@ -1128,24 +1089,14 @@ export default function OrdersPage() {
               </div>
 
               {/* Form Buttons */}
-              <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
-                <Button
-                  type="submit"
-                  disabled={creating}
-                  className="h-12 px-8 text-base font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-lg shadow-emerald-700/20"
-                >
-                  {creating
-                    ? "保存中..."
-                    : editingOrderId
-                      ? "変更内容を保存"
-                      : "作成"}
+              <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-subtle)]">
+                <Button type="submit" disabled={creating} size="lg">
+                  {creating ? "保存中..." : editingOrderId ? "変更内容を保存" : "作成"}
                 </Button>
                 {done && (
-                  <span className="text-base text-emerald-600 font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-5 h-5" />
-                    {editingOrderId
-                      ? "オーダーを更新しました"
-                      : "オーダーを作成しました"}
+                  <span className="text-sm font-bold text-[var(--brand)] flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                    {editingOrderId ? "オーダーを更新しました" : "オーダーを作成しました"}
                   </span>
                 )}
               </div>
@@ -1155,62 +1106,43 @@ export default function OrdersPage() {
       )}
 
       {/* Orders List Section */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            一覧
-          </h2>
-        </div>
+      <div className="space-y-4">
+        <h2 className="text-lg font-extrabold text-[var(--text-primary)]">一覧</h2>
 
-        {/* Live GitHub Actions run banner. Survives reload because the state
-            comes from GitHub, not from this component. */}
+        {/* Live GitHub Actions run banner */}
         {activeRun && (orders ?? []).some(isMyRun) && (
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
-            <RefreshCw className="w-5 h-5 text-emerald-700 animate-spin shrink-0" />
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)]">
+            <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-emerald-900">
-                {activeRun.status === "queued"
-                  ? "検索の実行を待機中です"
-                  : "検索を実行中です"}
+              <div className="text-sm font-bold text-[#14532d]">
+                {activeRun.status === "queued" ? "検索の実行を待機中です" : "検索を実行中です"}
               </div>
-              <div className="text-xs text-emerald-800/80 font-medium mt-0.5">
+              <div className="text-xs text-[var(--text-muted)] mt-0.5">
                 完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
-                {activeRun.created_at &&
-                  ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
+                {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
               </div>
             </div>
           </div>
         )}
 
         {orders === undefined ? (
-          <div className="space-y-4">
-            <Card className="p-6 border border-slate-200/80 rounded-2xl">
-              <div className="space-y-3">
-                <Skeleton className="h-6 w-1/3" />
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            </Card>
-            <Card className="p-6 border border-slate-200/80 rounded-2xl">
-              <div className="space-y-3">
-                <Skeleton className="h-6 w-1/3" />
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            </Card>
+          <div className="space-y-3">
+            {[1, 2].map((n) => (
+              <Card key={n} className="p-6">
+                <div className="space-y-3">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-14 w-full" />
+                </div>
+              </Card>
+            ))}
           </div>
         ) : orders.length === 0 ? (
-          <Card className="border border-slate-200/80 rounded-2xl bg-white">
-            <CardContent className="p-12 text-center">
-              <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-base font-bold text-slate-700">
-                登録済みオーダーがありません
-              </p>
-              <p className="text-sm text-slate-400 mt-1">
-                「新規オーダー作成」から希望条件を登録してください。
-              </p>
-            </CardContent>
-          </Card>
+          <div className="empty-state">
+            <Building2 className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto mb-3" />
+            <p className="text-sm font-bold text-[var(--text-secondary)]">登録済みオーダーがありません</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">「新規オーダー作成」から希望条件を登録してください。</p>
+          </div>
         ) : (
           orders.map((order) => {
             const orderMatchList = orderMatches(order._id);
@@ -1225,13 +1157,13 @@ export default function OrdersPage() {
             return (
               <Card
                 key={order._id}
-                className="bg-white border border-slate-200/80 shadow-sm rounded-2xl overflow-hidden hover:border-slate-300 transition-all duration-200"
+                className="overflow-hidden hover:border-[var(--border-strong)] transition-all duration-150"
               >
-                <CardHeader className="p-6 border-b border-slate-100 bg-slate-50/50">
-                  <div className="flex flex-col gap-4">
+                <CardHeader className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] p-5">
+                  <div className="flex flex-col gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <CardTitle className="text-xl font-extrabold text-slate-900 tracking-tight break-words">
+                        <CardTitle>
                           {order.name || `オーダー #${order._id.slice(0, 6)}`}
                         </CardTitle>
                         <button
@@ -1246,10 +1178,10 @@ export default function OrdersPage() {
                               status: nextStatus,
                             });
                           }}
-                          className={`text-xs px-3 py-1 font-bold shrink-0 transition-all select-none rounded-xl border ${
+                          className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
                             order.status === "completed"
-                              ? "bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 shadow-xs"
-                              : "bg-slate-200 text-slate-700 border-slate-200 hover:bg-slate-300"
+                              ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
+                              : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
                           }`}
                           title="クリックで完了/未完了を切り替えます"
                         >
@@ -1266,8 +1198,8 @@ export default function OrdersPage() {
                             come from outside this component. */}
                         {isMyRun(order) && (
                           <span className="inline-flex items-center gap-1.5 shrink-0">
-                            <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs px-3 py-1 font-bold inline-flex items-center gap-1.5">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                            <Badge variant="brand" className="gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" />
                               {activeRun?.status === "queued" ? "取得待機中" : "取得中"}
                             </Badge>
                             <button
@@ -1296,7 +1228,7 @@ export default function OrdersPage() {
                           </span>
                         )}
                         {matchCount > 0 && (
-                          <Badge className="bg-emerald-700 text-white text-xs px-3 py-1 font-bold shadow-sm shrink-0">
+                          <Badge className="font-extrabold">
                             {matchCount} 件
                           </Badge>
                         )}
@@ -1307,75 +1239,43 @@ export default function OrdersPage() {
                           );
                           if (!customer) return null;
                           return (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs font-bold shrink-0">
-                              <Users className="w-3.5 h-3.5 text-indigo-600" />
-                              顧客: {customer.name}
+                            <Badge variant="neutral" className="gap-1">
+                              <Users className="w-3 h-3" />
+                              {customer.name}
                               {customer.phone ? ` (${customer.phone})` : ""}
-                            </span>
+                            </Badge>
                           );
                         })()}
                       </div>
 
                       {/* Criteria Details */}
-                      <div className="flex flex-wrap items-center gap-2 mt-3 text-sm font-medium text-slate-600 leading-relaxed">
-                        {(order.wards?.length
-                          ? order.wards
-                          : order.ward
-                            ? [order.ward]
-                            : []
-                        ).map((w) => (
-                          <span
-                            key={w}
-                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-100 whitespace-nowrap"
-                          >
-                            <MapPin className="w-3 h-3" />
-                            {w}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-xs font-medium text-[var(--text-secondary)]">
+                        {(order.wards?.length ? order.wards : order.ward ? [order.ward] : []).map((w) => (
+                          <span key={w} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[11px] font-bold whitespace-nowrap">
+                            <MapPin className="w-3 h-3" />{w}
                           </span>
                         ))}
-
-                        <span className="text-slate-400">|</span>
-                        <span>
-                          価格:{" "}
-                          <strong className="text-slate-900">
-                            {order.priceMin && order.priceMax
-                              ? `${order.priceMin.toLocaleString()} 〜 ${order.priceMax.toLocaleString()}`
-                              : order.priceMin
-                                ? `${order.priceMin.toLocaleString()} 〜`
-                                : order.priceMax
-                                  ? `〜 ${order.priceMax.toLocaleString()}`
-                                  : "指定なし"}
-                            万円
-                          </strong>
-                        </span>
-
+                        <span className="text-[var(--border-strong)]">·</span>
+                        <span>価格: <strong className="text-[var(--text-primary)]">
+                          {order.priceMin && order.priceMax ? `${order.priceMin.toLocaleString()} 〜 ${order.priceMax.toLocaleString()}`
+                            : order.priceMin ? `${order.priceMin.toLocaleString()} 〜`
+                            : order.priceMax ? `〜 ${order.priceMax.toLocaleString()}`
+                            : "指定なし"} 万円
+                        </strong></span>
                         {(order.walkMinutes ?? order.criteria?.walkMinutes) && (
-                          <>
-                            <span className="text-slate-400">|</span>
-                            <span>
-                              徒歩{" "}
-                              {order.walkMinutes ?? order.criteria?.walkMinutes}{" "}
-                              分以内
-                            </span>
-                          </>
+                          <><span className="text-[var(--border-strong)]">·</span><span>徒歩 {order.walkMinutes ?? order.criteria?.walkMinutes} 分以内</span></>
                         )}
-
-                        {order.propertyTypes &&
-                          order.propertyTypes.length > 0 && (
-                            <>
-                              <span className="text-slate-400">|</span>
-                              <span>{order.propertyTypes.join("・")}</span>
-                            </>
-                          )}
+                        {order.propertyTypes && order.propertyTypes.length > 0 && (
+                          <><span className="text-[var(--border-strong)]">·</span><span>{order.propertyTypes.join("・")}</span></>
+                        )}
                       </div>
                     </div>
 
                     {/* Action Controls */}
                     <div className="flex flex-wrap items-center gap-2">
-                      {scrapingOrderId === order._id ||
-                      order.isScraping ||
-                      order.scrapingStatus === "scraping" ? (
+                      {scrapingOrderId === order._id || order.isScraping || order.scrapingStatus === "scraping" ? (
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-800 text-sm font-bold rounded-xl animate-pulse border border-emerald-200">
+                          <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--brand-soft)] text-[#14532d] text-xs font-bold rounded-xl animate-pulse border border-[var(--brand-border)]">
                             <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
                             {scrapingOrderId === order._id
                               ? "取得リクエストを送信中..."
@@ -1482,62 +1382,37 @@ export default function OrdersPage() {
                               <Button
                                 size="sm"
                                 disabled={selectedCountForOrder === 0}
-                                title={
-                                  selectedCountForOrder === 0
-                                    ? "提案する物件を下の一覧から選択してください"
-                                    : `選択中の ${selectedCountForOrder} 件を提案します`
-                                }
-                                className={`h-10 text-xs font-bold gap-1.5 rounded-xl transition-colors ${
-                                  selectedCountForOrder === 0
-                                    ? "bg-slate-200 text-slate-500 shadow-none"
-                                    : "bg-emerald-700 hover:bg-emerald-800 text-white shadow-md shadow-emerald-700/20"
-                                }`}
+                                title={selectedCountForOrder === 0 ? "提案する物件を下の一覧から選択してください" : `選択中の ${selectedCountForOrder} 件を提案します`}
+                                className={selectedCountForOrder === 0 ? "opacity-50" : ""}
                                 onClick={() => setProposalOrder(order)}
                               >
-                                <Send className="w-3.5 h-3.5" />
-                                顧客へ物件を提案・メール送信
-                                {selectedCountForOrder > 0 && ` (${selectedCountForOrder})`}
+                                <Send className="w-3 h-3" />
+                                顧客へ提案・送信{selectedCountForOrder > 0 && ` (${selectedCountForOrder})`}
                               </Button>
                             </>
                           )}
                         </>
                       )}
 
-                      <div className="flex items-center gap-2 ml-auto shrink-0">
-                        {/* Were bare 16px slate-400 glyphs with no labels, easy to
-                            miss and easy to mis-click. Now labelled, bordered, and
-                            pushed to their own group away from the primary actions
-                            so 削除 in particular is deliberate rather than adjacent. */}
-                        <button
-                          onClick={() => handleEditClick(order)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold cursor-pointer hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
-                          title="このオーダーを編集"
-                        >
-                          <Edit className="w-4 h-4" />
+                      <div className="flex items-center gap-1.5 ml-auto shrink-0">
+                        <Button variant="ghost" size="sm" onClick={() => handleEditClick(order)} title="このオーダーを編集">
+                          <Edit className="w-3.5 h-3.5" />
                           編集
-                        </button>
-                        <button
-                          onClick={() => handleDelete(order._id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold cursor-pointer hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors"
-                          title="このオーダーを削除"
-                        >
-                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDelete(order._id)} title="このオーダーを削除" className="hover:text-red-600 hover:bg-red-50">
+                          <Trash2 className="w-3.5 h-3.5" />
                           削除
-                        </button>
+                        </Button>
                       </div>
                     </div>
 
-                    {/* The scrape runs on GitHub Actions, so this banner is the
-                        only feedback the browser can honestly give: the request
-                        was accepted, results will arrive on their own. */}
+                    {/* Scrape notice */}
                     {scrapeNotice[order._id] && (
-                      <div
-                        className={`mt-3 p-3 rounded-xl text-xs font-bold leading-relaxed border ${
-                          scrapeNotice[order._id].kind === "error"
-                            ? "bg-red-50 text-red-700 border-red-200"
-                            : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                        }`}
-                      >
+                      <div className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed ${
+                        scrapeNotice[order._id].kind === "error"
+                          ? "bg-red-50 text-red-700 border border-red-200"
+                          : "bg-[var(--brand-soft)] text-[#14532d] border border-[var(--brand-border)]"
+                      }`}>
                         {scrapeNotice[order._id].text}
                       </div>
                     )}
@@ -1546,8 +1421,8 @@ export default function OrdersPage() {
 
                 {/* Matched Listings Drawer */}
                 {matchCount > 0 && orderMatchList && (
-                  <CardContent className="p-6 space-y-3 bg-white">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  <CardContent className="p-5 space-y-2">
+                    <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                       抽出物件一覧 ({matchCount}件)
                     </div>
 
@@ -1633,16 +1508,14 @@ export default function OrdersPage() {
                                   title="提案メールに含める"
                                   aria-label="提案に含める"
                                 />
-                                <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
-                                <span className="text-base font-bold text-slate-900 truncate">
-                                  {listing?.address ||
-                                    m.listingId?.slice(0, 8) ||
-                                    "—"}
+                                <MapPin className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
+                                <span className="text-sm font-bold text-[var(--text-primary)] truncate">
+                                  {listing?.address || m.listingId?.slice(0, 8) || "—"}
                                 </span>
 
                                 {/* Source Portal Tag */}
                                 {listing?.source && (
-                                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 shrink-0">
+                                  <Badge variant="brand" className="text-[10px] shrink-0">
                                     {listing.source === "stepon"
                                       ? "住友不動産"
                                       : listing.source === "mitsui"
@@ -1678,14 +1551,14 @@ export default function OrdersPage() {
                                                                   "homes"
                                                                 ? "LIFULL HOME'S"
                                                                 : listing.source}
-                                  </span>
+                                  </Badge>
                                 )}
 
                                 {/* Property Type Tag */}
                                 {listing?.propertyType && (
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 shrink-0">
+                                  <Badge variant="neutral" className="text-[10px] shrink-0">
                                     {listing.propertyType}
-                                  </span>
+                                  </Badge>
                                 )}
 
                                 {/* Prominent Score Badge on Item Header BEFORE Expanding */}

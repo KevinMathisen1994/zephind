@@ -98,117 +98,58 @@ export default function DealsPage() {
         </div>
       </div>
 
-      {/* KPI Overview Metrics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
-            <Handshake className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              総提案案件数
+      {/* ── KPI cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        {[
+          { icon: Handshake,  color: "var(--brand)",  bg: "var(--brand-soft)", label: "総提案案件数",     value: totalDeals,         loading: deals === undefined },
+          { icon: Clock,      color: "#d97706",       bg: "#fffbeb",           label: "交渉中案件数",     value: negotiatingCount,  loading: deals === undefined },
+          { icon: Award,      color: "var(--brand)",  bg: "#f0f7ed",           label: "成約完了数",       value: closedWonCount,    loading: deals === undefined, highlight: true },
+          { icon: TrendingUp, color: "#7c3aed",       bg: "#f5f3ff",           label: "成約取引金額",     value: `${closedWonVolume.toLocaleString()} 万円`, loading: deals === undefined, valueSmall: true },
+        ].map((kpi, i) => (
+          <div key={i} className={`kpi-card ${kpi.highlight ? "border-[var(--brand-border)] bg-[var(--brand-soft)]/40" : ""}`}>
+            <div className={`flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-xl shrink-0 ${kpi.highlight ? "bg-[var(--brand)] text-white" : ""}`}
+                 style={kpi.highlight ? {} : { background: kpi.bg, color: kpi.color }}>
+              <kpi.icon className="w-4 h-4 md:w-5 md:h-5" />
             </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {deals === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                totalDeals
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-amber-50 text-amber-600 shrink-0">
-            <Clock className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              交渉中案件数
-            </div>
-            <div className="text-lg md:text-2xl font-black text-slate-900 font-data tracking-tight truncate">
-              {deals === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                negotiatingCount
-              )}
+            <div className="min-w-0">
+              <div className={`text-[10px] md:text-[11px] font-semibold uppercase tracking-wide ${kpi.highlight ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>
+                {kpi.label}
+              </div>
+              <div className={`${kpi.valueSmall ? "text-sm md:text-base" : "text-lg md:text-xl"} font-extrabold text-[var(--text-primary)] font-data tracking-tight`}>
+                {kpi.loading ? <Skeleton className="h-6 w-10" /> : kpi.value}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-emerald-300 shadow-md bg-emerald-50/30 flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-emerald-700 text-white shrink-0 shadow-md shadow-emerald-700/20">
-            <Award className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-extrabold text-emerald-900 uppercase truncate">
-              成約完了数
-            </div>
-            <div className="text-lg md:text-2xl font-black text-emerald-900 font-data tracking-tight truncate">
-              {deals === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-10 md:w-12" />
-              ) : (
-                closedWonCount
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2 md:gap-4">
-          <div className="p-2 md:p-3.5 rounded-lg md:rounded-xl bg-purple-50 text-purple-600 shrink-0">
-            <TrendingUp className="w-4 h-4 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] md:text-xs font-semibold text-slate-400 truncate">
-              成約案件 取引金額
-            </div>
-            <div className="text-sm md:text-xl font-black text-slate-900 font-data tracking-tight truncate">
-              {deals === undefined ? (
-                <Skeleton className="h-6 md:h-7 w-14 md:w-16" />
-              ) : (
-                `${closedWonVolume.toLocaleString()} 万円`
-              )}
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Stage Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
-        {/* Stage Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-bold w-full md:w-auto">
+      {/* ── Filter tabs + search ── */}
+      <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-3 rounded-2xl border border-[var(--border-subtle)]" style={{ boxShadow: "var(--shadow-xs)" }}>
+        <div className="pill-group w-full md:w-auto">
           {[
             { key: "all", label: `全件 (${totalDeals})` },
             { key: "proposed", label: `提案中 (${proposedCount})` },
             { key: "negotiating", label: `交渉中 (${negotiatingCount})` },
-            { key: "closed_won", label: `✓ 成約完了 (${closedWonCount})` },
+            { key: "closed_won", label: `✓ 成約 (${closedWonCount})` },
             { key: "closed_lost", label: `見送り (${closedLostCount})` },
           ].map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveStage(tab.key)}
-              className={`px-3.5 py-1.5 rounded-lg transition-all ${
-                activeStage === tab.key
-                  ? tab.key === "closed_won"
-                    ? "bg-emerald-700 text-white shadow-xs font-black"
-                    : "bg-white text-slate-900 shadow-xs font-extrabold"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
+              className={`pill ${activeStage === tab.key ? (tab.key === "closed_won" ? "pill-active bg-[var(--brand)]! text-white!" : "pill-active") : "pill-inactive"}`}
             >
               {tab.label}
             </button>
           ))}
         </div>
-
-        {/* Search */}
-        <div className="relative w-full md:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        <div className="relative w-full md:w-64">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="件名・顧客名で検索..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700 transition-all"
+            className="w-full pl-9 pr-4 py-2 bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] rounded-xl text-sm font-medium focus:outline-none focus:border-[var(--brand)] transition-all"
           />
         </div>
       </div>
@@ -241,42 +182,24 @@ export default function DealsPage() {
             return (
               <Card
                 key={deal._id}
-                className={`bg-white border shadow-sm rounded-2xl overflow-hidden transition-all duration-200 ${
-                  isWon
-                    ? "border-emerald-300 bg-emerald-50/20"
-                    : "border-slate-200/80 hover:border-slate-300"
-                }`}
+                className={`overflow-hidden transition-all duration-150 ${isWon ? "border-[var(--brand-border)] bg-[var(--brand-soft)]/30" : "hover:border-[var(--border-strong)]"}`}
               >
-                <CardHeader className="p-6 border-b border-slate-100 bg-slate-50/50">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-1.5 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        <CardTitle className="text-lg md:text-xl font-extrabold text-slate-900 tracking-tight truncate">
-                          {deal.title}
-                        </CardTitle>
-
+                <CardHeader className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)]">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle>{deal.title}</CardTitle>
                         {/* Stage Badge */}
                         {deal.status === "closed_won" ? (
-                          <Badge className="bg-emerald-700 text-white font-extrabold text-xs px-3 py-1 shadow-sm">
-                            <Award className="w-3.5 h-3.5 mr-1" />
-                            成約完了
-                          </Badge>
+                          <Badge className="font-extrabold gap-1"><Award className="w-3 h-3" />成約完了</Badge>
                         ) : deal.status === "negotiating" ? (
-                          <Badge className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-xs px-3 py-1">
-                            <Clock className="w-3.5 h-3.5 mr-1" />
-                            交渉中
-                          </Badge>
+                          <Badge variant="brand" className="font-extrabold gap-1"><Clock className="w-3 h-3" />交渉中</Badge>
                         ) : deal.status === "closed_lost" ? (
-                          <Badge className="bg-slate-200 text-slate-700 font-bold text-xs px-3 py-1">
-                            見送り
-                          </Badge>
+                          <Badge variant="neutral">見送り</Badge>
                         ) : (
-                          <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 font-extrabold text-xs px-3 py-1">
-                            提案中
-                          </Badge>
+                          <Badge variant="brand">提案中</Badge>
                         )}
-
-                        <span className="text-xs font-semibold text-slate-400">
+                        <span className="text-[11px] font-medium text-[var(--text-muted)]">
                           {deal.createdAt ? new Date(deal.createdAt).toLocaleDateString("ja-JP") : "日付不明"} 提案
                         </span>
                       </div>

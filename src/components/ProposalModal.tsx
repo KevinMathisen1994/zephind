@@ -32,6 +32,33 @@ interface ProposalModalProps {
   onClose: () => void;
 }
 
+/** Numbered heading so the three stacked steps of the modal read as distinct
+ *  sections instead of one continuous form. */
+const SectionHeader = ({
+  step,
+  icon: Icon,
+  title,
+  action,
+}: {
+  step: number;
+  icon: typeof Users;
+  title: string;
+  action?: React.ReactNode;
+}) => (
+  <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex items-center gap-2">
+      <span className="w-5 h-5 rounded-md bg-emerald-700 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+        {step}
+      </span>
+      <Icon className="w-3.5 h-3.5 text-emerald-700" />
+      <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+        {title}
+      </span>
+    </div>
+    {action}
+  </div>
+);
+
 export const ProposalModal = ({
   order,
   orderMatchList,
@@ -296,7 +323,7 @@ export const ProposalModal = ({
     <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+        <div className="p-6 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-700 flex items-center justify-center shadow-md shadow-emerald-700/20 text-white">
               <Send className="w-5 h-5" />
@@ -328,8 +355,10 @@ export const ProposalModal = ({
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-200">
           {/* Customer Selection & Message Box */}
+          <section className="p-6 space-y-3">
+          <SectionHeader step={1} icon={Users} title="提案先と添え状" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50 p-5 rounded-2xl border border-slate-200/80">
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -375,9 +404,20 @@ export const ProposalModal = ({
               />
             </div>
           </div>
+          </section>
 
           {/* Listing Selection List */}
-          <div className="space-y-3">
+          <section className="p-6 space-y-3">
+            <SectionHeader
+              step={2}
+              icon={CheckSquare}
+              title="提案する物件"
+              action={
+                <span className="text-xs font-bold text-slate-500">
+                  {selectedMatchIds.size} / {orderMatchList.length}件 選択中
+                </span>
+              }
+            />
             {!showPicker && (
               <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                 <div className="text-xs font-bold text-emerald-900">
@@ -394,9 +434,8 @@ export const ProposalModal = ({
             )}
             <div className={showPicker ? "space-y-3" : "hidden"}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                提案に含める物件を選択 ({selectedMatchIds.size} /{" "}
-                {orderMatchList.length}件 選択中)
+              <div className="text-xs font-semibold text-slate-500">
+                提案に含める物件を選択してください
               </div>
               <div className="flex items-center gap-3">
                 <div className="relative w-48 sm:w-56">
@@ -488,9 +527,11 @@ export const ProposalModal = ({
                 })}
             </div>
             </div>
-          </div>
+          </section>
 
           {/* Status Feedback Banners */}
+          {(emailJSSuccess || emailJSError) && (
+          <div className="px-6 py-4 space-y-3">
           {emailJSSuccess && (
             <div className="p-4 rounded-xl bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 animate-in fade-in">
               <Check className="w-5 h-5" />
@@ -509,22 +550,25 @@ export const ProposalModal = ({
               </button>
             </div>
           )}
+          </div>
+          )}
 
           {/* Email Subject & Body (Editable) */}
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-emerald-700" />
-                提案メール内容 (編集可能)
-              </div>
-              <button
-                type="button"
-                onClick={handleResetTemplate}
-                className="text-xs font-bold text-emerald-700 hover:underline"
-              >
-                テンプレート本文を再生成
-              </button>
-            </div>
+          <section className="p-6 space-y-3">
+            <SectionHeader
+              step={3}
+              icon={FileText}
+              title="提案メール内容 (編集可能)"
+              action={
+                <button
+                  type="button"
+                  onClick={handleResetTemplate}
+                  className="text-xs font-bold text-emerald-700 hover:underline"
+                >
+                  テンプレート本文を再生成
+                </button>
+              }
+            />
 
             <div className="space-y-2">
               <div>
@@ -557,10 +601,10 @@ export const ProposalModal = ({
                 />
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+        <div className="p-5 border-t border-slate-200 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Button
               type="button"

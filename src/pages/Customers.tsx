@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
+import { Input } from "../components/ui/input";
 import {
   Users,
   Plus,
@@ -128,219 +129,133 @@ export default function CustomersPage() {
   };
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm">
+    <div className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
+      {/* ── Header ── */}
+      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div>
-          <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
-            <Users className="w-4 h-4 text-emerald-600" />
+          <div className="brand-divider mb-1">
+            <Users className="w-3.5 h-3.5" />
             顧客データベース
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
             顧客管理 (買主)
           </h1>
-          <p className="text-base text-slate-500 mt-1 leading-relaxed">
+          <p className="text-sm text-[var(--text-muted)] mt-1">
             買主情報の登録、連絡先管理、希望物件オーダーとの紐付けが一括で行えます
           </p>
         </div>
-        <Button
-          onClick={handleOpenCreate}
-          className="h-12 px-6 text-base font-semibold gap-2 shadow-lg shadow-emerald-700/20 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl transition-all duration-200 shrink-0"
-        >
-          <Plus className="w-5 h-5" />
+        <Button onClick={handleOpenCreate} size="lg" className="gap-2">
+          <Plus className="w-4 h-4" />
           新規顧客登録
         </Button>
       </div>
 
-      {/* KPI Overview Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
-            <Users className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
-              登録顧客数
+      {/* ── KPI cards ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+        {[
+          { icon: Users,       color: "var(--brand)",  bg: "var(--brand-soft)", label: "登録顧客数",       value: customers?.length,           loading: customers === undefined },
+          { icon: FileCheck2,  color: "#0d9488",       bg: "#f0fdfa",           label: "連携済みオーダー数", value: orders?.filter((o) => !!o.customerId).length, loading: orders === undefined },
+          { icon: Building,    color: "#6366f1",       bg: "#eef2ff",           label: "法人顧客数",       value: customers?.filter((c) => !!c.company).length, loading: customers === undefined },
+        ].map((kpi, i) => (
+          <div key={i} className="kpi-card">
+            <div className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-xl shrink-0" style={{ background: kpi.bg, color: kpi.color }}>
+              <kpi.icon className="w-4 h-4 md:w-5 md:h-5" />
             </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
-              {customers === undefined ? (
-                <Skeleton className="h-7 w-12" />
-              ) : (
-                customers.length
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-emerald-100 text-emerald-800 shrink-0">
-            <FileCheck2 className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
-              連携済みオーダー数
-            </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
-              {orders === undefined ? (
-                <Skeleton className="h-7 w-12" />
-              ) : (
-                orders.filter((o) => !!o.customerId).length
-              )}
+            <div className="min-w-0">
+              <div className="text-[10px] md:text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">{kpi.label}</div>
+              <div className="text-lg md:text-xl font-extrabold text-[var(--text-primary)] font-data tracking-tight">
+                {kpi.loading ? <Skeleton className="h-6 w-10" /> : kpi.value}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-slate-100 text-slate-700 shrink-0">
-            <Building className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400">
-              法人顧客数
-            </div>
-            <div className="text-2xl font-black text-slate-900 font-data tracking-tight">
-              {customers === undefined ? (
-                <Skeleton className="h-7 w-12" />
-              ) : (
-                customers.filter((c) => !!c.company).length
-              )}
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Search & Actions Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* ── Search bar ── */}
+      <div className="flex items-center gap-4 bg-white p-3 rounded-2xl border border-[var(--border-subtle)]" style={{ boxShadow: "var(--shadow-xs)" }}>
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="氏名・電話・メール・会社名で検索..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700 transition-all"
+            className="w-full pl-9 pr-4 py-2 bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] rounded-xl text-sm font-medium text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_rgba(26,113,0,0.1)] transition-all"
           />
         </div>
-        <div className="text-xs font-bold text-slate-400">
-          該当: {filteredCustomers.length} 件
-        </div>
+        <span className="text-[11px] font-bold text-[var(--text-muted)] shrink-0">該当: {filteredCustomers.length} 件</span>
       </div>
 
       {/* Customer List */}
       {customers === undefined ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((n) => (
-            <Skeleton key={n} className="h-48 w-full rounded-2xl" />
-          ))}
+          {[1, 2, 3].map((n) => <Skeleton key={n} className="h-44 w-full" />)}
         </div>
       ) : filteredCustomers.length === 0 ? (
-        <Card className="border border-slate-200/80 rounded-2xl bg-white">
-          <CardContent className="p-12 text-center">
-            <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-base font-bold text-slate-700">
-              登録されている顧客がありません
-            </p>
-            <p className="text-sm text-slate-400 mt-1">
-              「新規顧客登録」から顧客情報を追加してください。
-            </p>
-          </CardContent>
-        </Card>
+        <div className="empty-state">
+          <Users className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto mb-3" />
+          <p className="text-sm font-bold text-[var(--text-secondary)]">登録されている顧客がありません</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">「新規顧客登録」から顧客情報を追加してください。</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredCustomers.map((c) => {
             const orderCount = getCustomerOrdersCount(c._id);
             return (
-              <Card
-                key={c._id}
-                className="bg-white border border-slate-200/80 shadow-sm rounded-2xl overflow-hidden hover:border-slate-300 transition-all duration-200 flex flex-col justify-between"
-              >
-                <CardHeader className="p-5 border-b border-slate-100 bg-slate-50/50">
-                  <div className="flex items-start justify-between gap-3">
+              <Card key={c._id} className="overflow-hidden hover:border-[var(--border-strong)] transition-all duration-150 flex flex-col">
+                <CardHeader className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)]">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-900 font-extrabold flex items-center justify-center text-base border border-emerald-200 shrink-0">
+                      <div className="w-9 h-9 rounded-xl bg-[var(--brand-soft)] text-[var(--brand)] font-extrabold flex items-center justify-center text-sm border border-[var(--brand-border)] shrink-0">
                         {c.name.slice(0, 1)}
                       </div>
                       <div>
-                        <CardTitle className="text-lg font-extrabold text-slate-900 tracking-tight">
-                          {c.name}
-                        </CardTitle>
+                        <CardTitle>{c.name}</CardTitle>
                         {c.company && (
-                          <div className="flex items-center gap-1 text-xs font-semibold text-slate-500 mt-0.5">
-                            <Building className="w-3 h-3 text-slate-400" />
-                            {c.company}
+                          <div className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)] mt-0.5">
+                            <Building className="w-3 h-3" />{c.company}
                           </div>
                         )}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleEditClick(c)}
-                        className="p-2 text-slate-400 hover:text-emerald-700 transition-colors rounded-lg hover:bg-slate-100"
-                        title="編集"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c._id)}
-                        className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-slate-100"
-                        title="削除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" onClick={() => handleEditClick(c)} title="編集" className="h-8 w-8">
+                        <Edit className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(c._id)} title="削除" className="h-8 w-8 hover:text-red-600 hover:bg-red-50">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
-
-                <CardContent className="p-5 space-y-3 text-xs font-medium text-slate-600 flex-1">
+                <CardContent className="p-4 space-y-2.5 text-xs font-medium text-[var(--text-secondary)] flex-1">
                   {c.phone && (
                     <div className="flex items-center gap-2">
-                      <Phone className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                      <a
-                        href={`tel:${c.phone}`}
-                        className="hover:underline font-bold text-slate-900"
-                      >
-                        {c.phone}
-                      </a>
+                      <Phone className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
+                      <a href={`tel:${c.phone}`} className="hover:underline font-bold text-[var(--text-primary)]">{c.phone}</a>
                     </div>
                   )}
-
                   {c.email && (
                     <div className="flex items-center gap-2">
-                      <Mail className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                      <a
-                        href={`mailto:${c.email}`}
-                        className="hover:underline font-semibold text-slate-800 truncate"
-                      >
-                        {c.email}
-                      </a>
+                      <Mail className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
+                      <a href={`mailto:${c.email}`} className="hover:underline font-semibold text-[var(--text-primary)] truncate">{c.email}</a>
                     </div>
                   )}
-
                   {c.address && (
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <MapPin className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
                       <span className="truncate">{c.address}</span>
                     </div>
                   )}
-
                   {c.notes && (
-                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-700 text-xs mt-2 leading-relaxed">
-                      <FileText className="w-3 h-3 text-slate-400 inline mr-1" />
+                    <div className="p-2.5 rounded-xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs leading-relaxed">
+                      <FileText className="w-3 h-3 text-[var(--text-muted)] inline mr-1" />
                       {c.notes}
                     </div>
                   )}
-
-                  <div className="pt-2 flex items-center justify-between border-t border-slate-100 mt-3">
-                    <Badge className="bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold px-2.5 py-0.5">
-                      連携オーダー: {orderCount}件
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => navigate("/orders")}
-                      className="text-xs font-bold text-emerald-800 hover:bg-emerald-50 h-7 px-2"
-                    >
+                  <div className="pt-2 flex items-center justify-between border-t border-[var(--border-subtle)] mt-2">
+                    <Badge variant="brand">連携オーダー: {orderCount}件</Badge>
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/orders")}>
                       オーダー管理
                       <ArrowRight className="w-3 h-3 ml-1" />
                     </Button>
@@ -354,47 +269,27 @@ export default function CustomersPage() {
 
       {/* Create / Edit Customer Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                <Users className="w-5 h-5 text-emerald-700" />
+        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-[var(--border-subtle)] w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)]">
+              <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                <Users className="w-4 h-4 text-[var(--brand)]" />
                 {editingCustomer ? "顧客情報の編集" : "新規顧客登録"}
               </h3>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <Button variant="ghost" size="icon" onClick={() => setShowModal(false)} className="h-8 w-8">
+                <X className="w-4 h-4" />
+              </Button>
             </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
                   氏名 <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="例: 山田 太郎"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
-                />
+                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="例: 山田 太郎" />
               </div>
-
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  会社名・屋号
-                </label>
-                <input
-                  type="text"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="例: 株式会社ABCインベストメント"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
-                />
+                <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">会社名・屋号</label>
+                <Input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="例: 株式会社ABCインベストメント" />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -451,25 +346,10 @@ export default function CustomersPage() {
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowModal(false)}
-                  className="rounded-xl border-slate-200 text-xs font-bold"
-                >
-                  キャンセル
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={submitting || !name.trim()}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold px-5"
-                >
-                  {submitting
-                    ? "保存中..."
-                    : editingCustomer
-                      ? "更新する"
-                      : "登録する"}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[var(--border-subtle)]">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowModal(false)}>キャンセル</Button>
+                <Button type="submit" size="sm" disabled={submitting || !name.trim()}>
+                  {submitting ? "保存中..." : editingCustomer ? "更新する" : "登録する"}
                 </Button>
               </div>
             </form>

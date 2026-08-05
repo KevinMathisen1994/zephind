@@ -294,8 +294,8 @@ export default function AdminPage() {
       </div>
 
       {/* Scraper Health Board */}
-      <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl">
-        <CardHeader className="p-6 border-b border-slate-100">
+      <Card>
+        <CardHeader className="p-5 border-b border-[var(--border-subtle)]">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
