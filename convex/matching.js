@@ -88,6 +88,18 @@ export const saveScore = mutation({
   },
 });
 
+export const saveScoreDetail = mutation({
+  args: {
+    matchId: v.id("matching"),
+    scoreDetail: v.any(),
+  },
+  handler: async (ctx, args) => {
+    // Same as saveEvaluation — an unguarded patch reachable with any id.
+    await requireOwned(ctx, "マッチング", args.matchId);
+    await ctx.db.patch(args.matchId, { scoreDetail: args.scoreDetail });
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("matching") },
   handler: async (ctx, args) => {

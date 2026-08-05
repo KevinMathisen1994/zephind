@@ -1,11 +1,43 @@
 import { action } from "./_generated/server.js";
 import { v } from "convex/values";
-import { api } from "./_generated/api.js";
-import { computeMatchScore, wardCityCode } from "./lib/scoring.js";
+import { api, internal } from "./_generated/api.js";
+import { computeMatchScore, wardCityCode, mlitTypeForListing } from "./lib/scoring.js";
 import { requireUserId } from "./lib/authz.js";
+import { CACHE_TTL_MS } from "./marketCache.js";
 
 // Scoring logic lives in ./lib/scoring.js so it can be unit-tested with plain
 // `node`, outside the Convex runtime. See that file for the layered model.
+
+// The Rax AI gateway sometimes streams SSE ("data: {...}\n\n" chunks) even
+// when asked not to, instead of a single JSON object. Handle both shapes so
+// a stray stream doesn't blow up on JSON.parse (it used to fail on the
+// literal "data:" prefix with "Unexpected token 'd'").
+function parseChatCompletion(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("data:")) {
+    return JSON.parse(trimmed);
+  }
+
+  let content = "";
+  let model;
+  let error;
+  for (const line of trimmed.split("\n")) {
+    const payload = line.trim().replace(/^data:\s*/, "");
+    if (!payload || payload === "[DONE]") continue;
+    let chunk;
+    try {
+      chunk = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (chunk.error) error = chunk.error;
+    if (chunk.model) model = chunk.model;
+    const delta = chunk.choices?.[0]?.delta?.content;
+    if (delta) content += delta;
+  }
+  if (error) return { error };
+  return { model, choices: [{ message: { content } }] };
+}
 
 export const evaluateListing = action({
   args: {
@@ -117,113 +149,192 @@ export const evaluateListing = action({
 `.trim()
       : "【顧客ニーズ】一般的な投資用不動産として評価を行ってください。";
 
-    // 3. Fetch Nearby Facilities via Google Places API
+    // 3. Fetch Nearby Facilities via Google Places API. Cached per address for
+    // 30 days — amenities within 500m of a fixed address don't move week to
+    // week, so re-geocoding and re-searching on every "再評価" click is pure
+    // waste (and burns Places quota).
     let nearbyInfo = "";
     let nearbyTotalCount = null;
+    // Surfaced to the UI (and stored on the match) so a failed lookup shows up
+    // as "this comparison didn't run" instead of silently dropping the score
+    // component with no trace.
+    const dataWarnings = [];
     const placesKey = process.env.GOOGLE_PLACES_API_KEY;
     if (placesKey && args.address) {
+      const addressKey = args.address.trim();
       try {
-        const geoQuery = encodeURIComponent(
-          `${args.address} ${args.ward || ""} 東京`,
-        );
-        const geoRes = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?address=${geoQuery}&key=${placesKey}`,
-        );
-        const geoData = await geoRes.json();
-        const loc = geoData.results?.[0]?.geometry?.location;
+        const cached = await ctx.runQuery(internal.marketCache.getPlacesCache, {
+          address: addressKey,
+        });
+        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+          nearbyInfo = cached.nearbyInfo || "";
+          nearbyTotalCount = cached.nearbyTotalCount ?? null;
+        } else {
+          const geoQuery = encodeURIComponent(
+            `${args.address} ${args.ward || ""} 東京`,
+          );
+          const geoRes = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${geoQuery}&key=${placesKey}`,
+          );
+          const geoData = await geoRes.json();
+          if (geoData.status && !["OK", "ZERO_RESULTS"].includes(geoData.status)) {
+            throw new Error(`Geocoding failed: ${geoData.status}`);
+          }
+          const loc = geoData.results?.[0]?.geometry?.location;
 
-        if (loc) {
-          const types = [
-            "restaurant",
-            "lodging",
-            "train_station",
-            "park",
-            "supermarket",
-            "convenience_store",
-          ];
-          const results = [];
-          let countSum = 0;
-          for (const type of types) {
-            const placesRes = await fetch(
-              `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${loc.lat},${loc.lng}&radius=500&type=${type}&language=ja&key=${placesKey}`,
-            );
-            const placesData = await placesRes.json();
-            const count = placesData.results?.length || 0;
-            countSum += count;
-            if (count > 0) {
-              const names = placesData.results
-                .slice(0, 3)
-                .map((r) => r.name)
-                .join("、");
-              const label =
-                type === "lodging"
-                  ? "ホテル"
-                  : type === "train_station"
-                    ? "駅"
-                    : type === "convenience_store"
-                      ? "コンビニ"
-                      : type === "supermarket"
-                        ? "スーパー"
-                        : type === "restaurant"
-                          ? "飲食店"
-                          : "公園";
-              results.push(
-                `・${label}: 徒歩5分圏内に${count}件（主要: ${names}）`,
+          if (loc) {
+            const types = [
+              "restaurant",
+              "lodging",
+              "train_station",
+              "park",
+              "supermarket",
+              "convenience_store",
+            ];
+            const results = [];
+            let countSum = 0;
+            for (const type of types) {
+              const placesRes = await fetch(
+                `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${loc.lat},${loc.lng}&radius=500&type=${type}&language=ja&key=${placesKey}`,
               );
+              const placesData = await placesRes.json();
+              if (
+                placesData.status &&
+                !["OK", "ZERO_RESULTS"].includes(placesData.status)
+              ) {
+                throw new Error(`Places search failed: ${placesData.status}`);
+              }
+              const count = placesData.results?.length || 0;
+              countSum += count;
+              if (count > 0) {
+                const names = placesData.results
+                  .slice(0, 3)
+                  .map((r) => r.name)
+                  .join("、");
+                const label =
+                  type === "lodging"
+                    ? "ホテル"
+                    : type === "train_station"
+                      ? "駅"
+                      : type === "convenience_store"
+                        ? "コンビニ"
+                        : type === "supermarket"
+                          ? "スーパー"
+                          : type === "restaurant"
+                            ? "飲食店"
+                            : "公園";
+                results.push(
+                  `・${label}: 徒歩5分圏内に${count}件（主要: ${names}）`,
+                );
+              }
+            }
+            nearbyTotalCount = countSum;
+            if (results.length > 0) {
+              nearbyInfo =
+                "\n\n【周辺インフラ環境（徒歩5分圏内）】\n" + results.join("\n");
             }
           }
-          nearbyTotalCount = countSum;
-          if (results.length > 0) {
-            nearbyInfo =
-              "\n\n【周辺インフラ環境（徒歩5分圏内）】\n" + results.join("\n");
-          }
+
+          await ctx.runMutation(internal.marketCache.savePlacesCache, {
+            address: addressKey,
+            nearbyTotalCount,
+            nearbyInfo,
+            fetchedAt: Date.now(),
+          });
         }
       } catch (e) {
         console.error("[Places API] Error:", e);
+        dataWarnings.push(
+          "周辺施設データの取得に失敗したため、この項目は評価から除外されています。",
+        );
       }
     }
 
-    // 4. Fetch Historical MLIT Transaction Data
+    // 4. Fetch Historical MLIT Transaction Data. Cached per (ward, year) for
+    // 30 days — reinfolib publishes quarterly, so re-fetching the same
+    // ward/year on every evaluation is wasted quota. The cache stores every
+    // transaction type for the ward/year so it's reusable across listings of
+    // any property type; filtering to the listing's own type happens below.
     let historicalInfo = "";
     let marketAvgPrice = null; // used later as a real-comp signal in scoring
+    let comparables = []; // closest-matching sold comps, for "is this priced right"
     const reinfolibKey = process.env.REINFOLIB_API_KEY;
     if (reinfolibKey && args.ward) {
-      try {
-        // Listing `ward` is inconsistent in this dataset (proper names, raw MLIT
-        // city codes like "13212", blanks, and truncated forms like "京都町田市").
-        // A raw-map lookup silently returned undefined for ~28% of listings, so
-        // the comps block never ran and marketAvgPrice stayed null for them.
-        const cityCode = wardCityCode(args.ward);
-        if (cityCode) {
+      // Listing `ward` is inconsistent in this dataset (proper names, raw MLIT
+      // city codes like "13212", blanks, and truncated forms like "京都町田市").
+      // A raw-map lookup silently returned undefined for ~28% of listings, so
+      // the comps block never ran and marketAvgPrice stayed null for them.
+      const cityCode = wardCityCode(args.ward);
+      if (!cityCode) {
+        dataWarnings.push(
+          `「${args.ward}」の区を特定できなかったため、取引相場データを取得できませんでした。`,
+        );
+      } else {
+        try {
+          // Averaging land trades in with condo trades (the old behavior)
+          // produced a market price meaningless for either — filter to the
+          // MLIT type that matches this listing.
+          const targetType = mlitTypeForListing(args.propertyType);
           const currentYear = new Date().getFullYear();
           const yearData = {};
           for (const year of [currentYear - 1, currentYear - 2]) {
-            const mlitUrl = `https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001?year=${year}&area=13&city=${cityCode}&language=ja`;
-            const mlitRes = await fetch(mlitUrl, {
-              headers: { "Ocp-Apim-Subscription-Key": reinfolibKey },
+            const cached = await ctx.runQuery(internal.marketCache.getMlitCache, {
+              ward: args.ward,
+              year,
             });
-            const mlitData = await mlitRes.json();
-            const items = mlitData.data || [];
-            const landPrices = items
-              .filter((i) => i.TradePrice)
-              .map((i) => parseFloat(i.TradePrice.replace(/,/g, "")) / 10000);
-            yearData[String(year)] = {
-              prices: landPrices,
-              count: landPrices.length,
-            };
+            let items;
+            if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+              items = cached.comparables || [];
+            } else {
+              const mlitUrl = `https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001?year=${year}&area=13&city=${cityCode}&language=ja`;
+              const mlitRes = await fetch(mlitUrl, {
+                headers: { "Ocp-Apim-Subscription-Key": reinfolibKey },
+              });
+              if (!mlitRes.ok) {
+                throw new Error(`MLIT API HTTP ${mlitRes.status}`);
+              }
+              const mlitData = await mlitRes.json();
+              items = (mlitData.data || [])
+                .filter((i) => i.TradePrice)
+                .map((i) => ({
+                  type: i.Type,
+                  district: i.DistrictName,
+                  station: i.NearestStation,
+                  walkMinutes: i.TimeToNearestStation,
+                  price: Math.round(
+                    parseFloat(i.TradePrice.replace(/,/g, "")) / 10000,
+                  ),
+                  area: i.Area ? parseFloat(i.Area) : null,
+                  buildYear: i.BuildingYear,
+                  structure: i.Structure,
+                  period: i.Period,
+                }))
+                .slice(0, 200); // bounded cache snapshot, refreshed wholesale, not appended to
+              await ctx.runMutation(internal.marketCache.saveMlitCache, {
+                ward: args.ward,
+                year,
+                comparables: items,
+                fetchedAt: Date.now(),
+              });
+            }
+            yearData[String(year)] = items.filter((i) => i.type === targetType);
           }
+
           const lines = [];
           const allPrices = [];
-          for (const [year, data] of Object.entries(yearData)) {
-            if (data.count > 0) {
-              allPrices.push(...data.prices);
+          const allItems = [];
+          for (const [year, items] of Object.entries(yearData)) {
+            if (items.length > 0) {
+              const prices = items.map((i) => i.price);
+              allPrices.push(...prices);
+              allItems.push(...items);
               const avg = Math.round(
-                data.prices.reduce((a, b) => a + b, 0) / data.count,
+                prices.reduce((a, b) => a + b, 0) / prices.length,
               );
-              const min = Math.round(Math.min(...data.prices));
-              const max = Math.round(Math.max(...data.prices));
+              const min = Math.round(Math.min(...prices));
+              const max = Math.round(Math.max(...prices));
               lines.push(
-                `・${year}年: ${data.count}件の取引 | 平均価格: ${avg.toLocaleString()}万円 (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
+                `・${year}年: ${items.length}件の取引（${targetType}）| 平均価格: ${avg.toLocaleString()}万円 (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
               );
             }
           }
@@ -234,12 +345,48 @@ export const evaluateListing = action({
           }
           if (lines.length > 0) {
             historicalInfo =
-              `\n\n【${args.ward}における国土交通省の実取引相場データ】\n` +
+              `\n\n【${args.ward}における国土交通省の実取引相場データ（${targetType}）】\n` +
               lines.join("\n");
           }
+
+          // Similar sold properties, closest in size to this listing, so a
+          // human (and the model) can see *which* comps back the price call
+          // instead of just a single averaged number.
+          const targetArea = args.landSize || args.area;
+          if (allItems.length > 0) {
+            comparables = allItems
+              .filter((i) => i.area != null)
+              .sort((a, b) =>
+                targetArea
+                  ? Math.abs(a.area - targetArea) - Math.abs(b.area - targetArea)
+                  : b.price - a.price,
+              )
+              .slice(0, 5);
+          }
+          if (allItems.length === 0) {
+            dataWarnings.push(
+              `「${args.ward}」の直近2年の${targetType}取引データが見つからず、市場価格との比較なしで評価されています。`,
+            );
+          }
+
+          if (comparables.length > 0) {
+            const compLines = comparables.map((cItem) => {
+              const areaTxt = cItem.area != null ? `${cItem.area}㎡` : "面積不明";
+              const stationTxt = cItem.station
+                ? `${cItem.station}駅${cItem.walkMinutes ? ` 徒歩${cItem.walkMinutes}分` : ""}`
+                : "最寄駅不明";
+              return `・${cItem.period || ""} ${cItem.district || ""} | ${cItem.price.toLocaleString()}万円 | ${areaTxt} | 築${cItem.buildYear || "不明"} | ${stationTxt}`;
+            });
+            historicalInfo +=
+              `\n\n【類似取引事例（面積が近い順・上位${comparables.length}件）】\n` +
+              compLines.join("\n");
+          }
+        } catch (e) {
+          console.error("[MLIT API] Error:", e);
+          dataWarnings.push(
+            "国土交通省の取引相場データの取得に失敗したため、この項目は評価から除外されています。",
+          );
         }
-      } catch (e) {
-        console.error("[MLIT API] Error:", e);
       }
     }
 
@@ -317,11 +464,13 @@ ${verdictBrief}
             ],
             temperature: 0.7,
             max_tokens: 2500,
+            stream: false,
           }),
         },
       );
 
-      const data = await response.json();
+      const raw = await response.text();
+      const data = parseChatCompletion(raw);
       if (data.error) {
         console.error("[Rax AI] API error:", data.error);
         return { error: data.error.message || JSON.stringify(data.error) };
@@ -360,6 +509,19 @@ ${verdictBrief}
         }),
       );
 
+      const scoreDetail = {
+        fitPct: assessment.fitPct,
+        marketPct: assessment.marketPct,
+        completeness: assessment.completeness,
+        disqualifiers: assessment.disqualifiers,
+        unverified: assessment.unverified,
+        breakdown: assessment.breakdown,
+        marketAvgPrice,
+        amenityCount: nearbyTotalCount,
+        comparables,
+        dataWarnings,
+      };
+
       // Save to DB if matchId provided
       if (args.matchId) {
         try {
@@ -370,6 +532,10 @@ ${verdictBrief}
           await ctx.runMutation(api.matching.saveScore, {
             matchId: args.matchId,
             score,
+          });
+          await ctx.runMutation(api.matching.saveScoreDetail, {
+            matchId: args.matchId,
+            scoreDetail,
           });
         } catch (dbErr) {
           console.error("[Rax AI] DB save failed:", dbErr);
@@ -382,22 +548,17 @@ ${verdictBrief}
         model: data.model,
         // Surfaced so the UI can show *why* a listing scored as it did, and so
         // regressions are diagnosable without re-running the model.
-        scoreDetail: {
-          fitPct: assessment.fitPct,
-          marketPct: assessment.marketPct,
-          completeness: assessment.completeness,
-          disqualifiers: assessment.disqualifiers,
-          unverified: assessment.unverified,
-          breakdown: assessment.breakdown,
-          marketAvgPrice,
-          amenityCount: nearbyTotalCount,
-        },
+        scoreDetail,
       };
     } catch (err) {
       console.error("[Rax AI] Request failed:", err);
       // The score no longer depends on the model, so return it even when the
       // narrative call fails — a listing without prose still ranks correctly.
-      return { error: err instanceof Error ? err.message : String(err), score };
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        score,
+        scoreDetail: { marketAvgPrice, comparables, dataWarnings },
+      };
     }
   },
 });

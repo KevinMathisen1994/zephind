@@ -20,6 +20,7 @@ import type * as ingest from "../ingest.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as listings from "../listings.js";
+import type * as marketCache from "../marketCache.js";
 import type * as matching from "../matching.js";
 import type * as orders from "../orders.js";
 import type * as properties from "../properties.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "lib/authz": typeof lib_authz;
   "lib/scoring": typeof lib_scoring;
   listings: typeof listings;
+  marketCache: typeof marketCache;
   matching: typeof matching;
   orders: typeof orders;
   properties: typeof properties;

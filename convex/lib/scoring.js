@@ -135,6 +135,20 @@ export function wardCityCode(rawWard) {
   return name ? WARD_CODE_MAP[name] : null;
 }
 
+/**
+ * Maps a listing's free-text propertyType to the MLIT XIT001 "Type" bucket it
+ * should be compared against. Averaging land trades in with condo trades (the
+ * old behavior) produced a market price meaningless for either.
+ */
+export function mlitTypeForListing(propertyType) {
+  const t = propertyType || "";
+  if (t.includes("マンション")) return "中古マンション等";
+  if (["土地", "用地", "宅地"].some((x) => t.includes(x)) && !t.includes("戸建")) {
+    return "宅地(土地)";
+  }
+  return "宅地(土地と建物)";
+}
+
 // A specified-but-unconfirmable requirement is a risk, not a pass and not a
 // failure. It lands mid-scale and is reported separately in `unverified`.
 const UNVERIFIED = 0.5;

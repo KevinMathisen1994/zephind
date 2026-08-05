@@ -45,6 +45,27 @@ import type { Doc, Id } from "../../convex/_generated/dataModel";
 const GMAPS_KEY = import.meta.env
   .VITE_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string;
 
+// Mirrors the comp shape built in convex/evaluate.js (MLIT XIT001 fields,
+// normalized). Kept loose (`scoreDetail` is stored as `v.any()`) since it's
+// diagnostic data, not something the app branches on.
+type ComparableTrade = {
+  price: number;
+  area?: number | null;
+  district?: string;
+  station?: string;
+  walkMinutes?: string;
+  buildYear?: string;
+  period?: string;
+};
+
+type EvaluationScoreDetail = {
+  marketAvgPrice?: number | null;
+  amenityCount?: number | null;
+  comparables?: ComparableTrade[];
+  dataWarnings?: string[];
+  [key: string]: unknown;
+};
+
 // Every source cli.ts knows about (scraper-service/src/services/scraperRegistry.ts
 // KNOWN_SOURCES). Sent as the workflow's `sources` input for 一括取得; leaving it
 // empty would fall through to the workflow's curated 6-source default instead.
@@ -201,6 +222,9 @@ export default function OrdersPage() {
     });
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
+  const [scoreDetails, setScoreDetails] = useState<
+    Record<string, EvaluationScoreDetail>
+  >({});
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
   const [scrapingOrderId, setScrapingOrderId] = useState<string | null>(null);
@@ -284,6 +308,12 @@ export default function OrdersPage() {
         ...prev,
         [matchId]: result.evaluation || result.error || "評価エラー",
       }));
+      if (result.scoreDetail) {
+        setScoreDetails((prev) => ({
+          ...prev,
+          [matchId]: result.scoreDetail as EvaluationScoreDetail,
+        }));
+      }
     } catch (err) {
       setEvaluations((prev) => ({
         ...prev,
@@ -336,7 +366,7 @@ export default function OrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoEvalOrderId, matches, listings, orders, scrapingOrderId, evaluatingOrderId]);
 
-  const handleBatchEvaluate = async (order: Doc<"orders">) => {
+  const handleBatchEvaluate = async (order: Doc<"orders">, force = false) => {
     setEvaluatingOrderId(order._id);
     const orderMatchList =
       matches?.filter((m) => m.orderId === order._id) ?? [];
@@ -347,7 +377,7 @@ export default function OrdersPage() {
 
     const unevaluatedMatches = orderMatchList.filter((m) => {
       const listing = listings?.find((l) => l._id === m.listingId);
-      return listing && !evaluations[m._id] && !m.evaluation;
+      return listing && (force || (!evaluations[m._id] && !m.evaluation));
     });
 
     setEvalProgress((prev) => ({
@@ -395,6 +425,12 @@ export default function OrdersPage() {
                 setEvaluations((prev) => ({
                   ...prev,
                   [m._id]: result.evaluation,
+                }));
+              }
+              if (result?.scoreDetail) {
+                setScoreDetails((prev) => ({
+                  ...prev,
+                  [m._id]: result.scoreDetail as EvaluationScoreDetail,
                 }));
               }
             } catch (err) {
@@ -1166,31 +1202,29 @@ export default function OrdersPage() {
                         <CardTitle>
                           {order.name || `オーダー #${order._id.slice(0, 6)}`}
                         </CardTitle>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            const nextStatus =
+                        {(order.status === "completed" || matchCount === 0) && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const nextStatus =
+                                order.status === "completed"
+                                  ? "pending"
+                                  : "completed";
+                              await updateOrder({
+                                id: order._id,
+                                status: nextStatus,
+                              });
+                            }}
+                            className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
                               order.status === "completed"
-                                ? "pending"
-                                : "completed";
-                            await updateOrder({
-                              id: order._id,
-                              status: nextStatus,
-                            });
-                          }}
-                          className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
-                            order.status === "completed"
-                              ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
-                              : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
-                          }`}
-                          title="クリックで完了/未完了を切り替えます"
-                        >
-                          {order.status === "completed"
-                            ? "✓ 完了"
-                            : matchCount > 0
-                              ? "未完了"
-                              : "未検索"}
-                        </button>
+                                ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
+                                : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
+                            }`}
+                            title="クリックで完了/未完了を切り替えます"
+                          >
+                            {order.status === "completed" ? "✓ 完了" : "未検索"}
+                          </button>
+                        )}
                         {/* Per-card scrape state. The dispatch sets
                             scrapingStatus="dispatched"; combining that with a
                             live GitHub run means "this order's scrape is running
@@ -1373,6 +1407,31 @@ export default function OrdersPage() {
                                 )}
                               </Button>
 
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-9 text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg"
+                                onClick={() => handleBatchEvaluate(order, true)}
+                                title="評価済みの物件も含め、この注文の全物件を評価し直します。"
+                                disabled={evaluatingOrderId === order._id}
+                              >
+                                {evaluatingOrderId === order._id ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                                    評価中
+                                    {evalProgress[order._id] &&
+                                    evalProgress[order._id].total > 0
+                                      ? ` (${evalProgress[order._id].current}/${evalProgress[order._id].total})`
+                                      : "..."}
+                                  </>
+                                ) : (
+                                  <>
+                                    <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                    全て再評価
+                                  </>
+                                )}
+                              </Button>
+
                               {/* Disabled until something is ticked: opening the
                                   modal with an empty selection just showed an
                                   empty proposal, so the button promised an action
@@ -1464,6 +1523,11 @@ export default function OrdersPage() {
                                evaluations[m._id] !== undefined
                                  ? evaluations[m._id]
                                  : m.evaluation;
+                            const scoreDetail: EvaluationScoreDetail | undefined =
+                              scoreDetails[m._id] ??
+                              (m as Doc<"matching"> & {
+                                scoreDetail?: EvaluationScoreDetail;
+                              }).scoreDetail;
 
                         // Extract score from DB score or from evaluation text string
                         const extractedScore =
@@ -1738,6 +1802,61 @@ export default function OrdersPage() {
                                       <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed font-sans">
                                         {hasEvaluation}
                                       </div>
+
+                                      {scoreDetail?.comparables &&
+                                        scoreDetail.comparables.length > 0 && (
+                                          <div className="mt-2 rounded-lg border border-emerald-100 bg-white/70 p-3">
+                                            <div className="text-[11px] font-bold text-emerald-900 mb-1.5">
+                                              類似取引事例（国交省データ・面積が近い順）
+                                              {scoreDetail.marketAvgPrice != null && (
+                                                <span className="ml-2 font-normal text-slate-500">
+                                                  平均{" "}
+                                                  {scoreDetail.marketAvgPrice.toLocaleString()}
+                                                  万円
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="space-y-1">
+                                              {scoreDetail.comparables.map(
+                                                (comp, i) => (
+                                                  <div
+                                                    key={i}
+                                                    className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600"
+                                                  >
+                                                    <span className="font-semibold text-slate-800">
+                                                      {comp.price.toLocaleString()}
+                                                      万円
+                                                    </span>
+                                                    <span>
+                                                      {comp.area != null
+                                                        ? `${comp.area}㎡`
+                                                        : "面積不明"}
+                                                    </span>
+                                                    <span>{comp.district || ""}</span>
+                                                    <span>
+                                                      {comp.station
+                                                        ? `${comp.station}駅${comp.walkMinutes ? ` 徒歩${comp.walkMinutes}分` : ""}`
+                                                        : ""}
+                                                    </span>
+                                                    <span>築{comp.buildYear || "不明"}</span>
+                                                    <span className="text-slate-400">
+                                                      {comp.period || ""}
+                                                    </span>
+                                                  </div>
+                                                ),
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                      {scoreDetail?.dataWarnings &&
+                                        scoreDetail.dataWarnings.length > 0 && (
+                                          <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-0.5">
+                                            {scoreDetail.dataWarnings.map((w, i) => (
+                                              <div key={i}>⚠ {w}</div>
+                                            ))}
+                                          </div>
+                                        )}
                                     </div>
                                   ) : (
                                     <Button

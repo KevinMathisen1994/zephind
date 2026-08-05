@@ -167,8 +167,21 @@ export default defineSchema({
         avgPrice: v.optional(v.number()),
         avgArea: v.optional(v.number()),
         transactionCount: v.optional(v.number()),
+        // Cache of the MLIT reinfolib response for this ward+year, so repeat
+        // evaluations don't re-hit the external API. `comparables` is capped
+        // to a bounded snapshot per (ward, year), not an append-only list.
+        comparables: v.optional(v.array(v.any())),
+        fetchedAt: v.optional(v.number()),
     })
         .index("by_ward_year", ["ward", "year"]),
+    // Cache of Google Places lookups, keyed by the listing address queried.
+    placesCache: defineTable({
+        address: v.string(),
+        nearbyTotalCount: v.optional(v.number()),
+        nearbyInfo: v.optional(v.string()),
+        fetchedAt: v.number(),
+    })
+        .index("by_address", ["address"]),
     criteria: defineTable({
         orderId: v.optional(v.string()),
         userId: v.optional(v.string()),
@@ -211,6 +224,10 @@ export default defineSchema({
         score: v.optional(v.number()),
         status: v.optional(v.string()),
         evaluation: v.optional(v.string()),
+        // Market comps + score breakdown behind the evaluation narrative
+        // (comparables, marketAvgPrice, dataWarnings, etc.) — kept alongside
+        // so the report UI can render them without re-running the model.
+        scoreDetail: v.optional(v.any()),
     })
         .index("by_order", ["orderId"])
         .index("by_user", ["userId"]),
