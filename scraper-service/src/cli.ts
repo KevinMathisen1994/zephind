@@ -234,15 +234,19 @@ async function main(): Promise<number> {
   const failedSources: string[] = [];
   const okSources: string[] = [];
 
-  for (const source of sources) {
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
     const label = SOURCE_LABELS[source] || source;
     let sourceOk = 0;
     let sourceFailed = 0;
 
+    const progressTag = sources.length > 1 ? `[${i + 1}/${sources.length}] ` : "";
+    const statusText = `${progressTag}${label} を検索中...`;
+
     await client.updateProgress({
       source,
       orderId: onlyOrderId || undefined,
-      statusText: `${label} を検索中...`,
+      statusText,
     });
 
     // SEQUENTIAL, deliberately. Concurrent Chrome launches exhaust memory on

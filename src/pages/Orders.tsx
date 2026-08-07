@@ -273,20 +273,23 @@ export default function OrdersPage() {
   const getOrderSiteLabel = (order: Doc<"orders">) => {
     if (
       order.scrapingStatus &&
-      order.scrapingStatus !== "dispatched" &&
       order.scrapingStatus !== "completed" &&
       order.scrapingStatus !== "failed" &&
-      order.scrapingStatus !== "cancelled"
+      order.scrapingStatus !== "cancelled" &&
+      order.scrapingStatus !== "dispatched"
     ) {
       return order.scrapingStatus;
     }
-    if (order.activeSource) {
-      return `${SOURCE_LABELS[order.activeSource] || order.activeSource} を検索中...`;
+    if (order.activeSource && order.activeSource !== "all") {
+      const src = order.activeSource;
+      const label = SOURCE_LABELS[src] || src;
+      return `${label} を検索中...`;
     }
     if (activeScrapeSites[order._id]) {
-      return activeScrapeSites[order._id];
+      const s = activeScrapeSites[order._id];
+      return s.includes("検索中") ? s : `${s} を検索中...`;
     }
-    return null;
+    return "ポータルを順に検索中...";
   };
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
@@ -305,17 +308,7 @@ export default function OrdersPage() {
     Record<string, { kind: "ok" | "error"; text: string }>
   >({});
 
-  // There is no in-flight browser request to abort any more. This is now purely
-  // an escape hatch for an order left with isScraping=true by an older build (or
-  // by a tab closed mid-dispatch), so the card stops claiming to be busy.
-  const handleCancelScrape = async (order: Doc<"orders">) => {
-    await updateOrder({
-      id: order._id,
-      isScraping: false,
-      scrapingStatus: "cancelled",
-    });
-    setScrapingOrderId(null);
-  };
+
 
   const toggleExpand = (id: string) => {
     setExpandedMatch(expandedMatch === id ? null : id);
@@ -594,7 +587,8 @@ export default function OrdersPage() {
       await updateOrder({
         id: order._id,
         isScraping: false,
-        scrapingStatus: "dispatched",
+        scrapingStatus: `${siteLabel} を検索中...`,
+        activeSource: sources.length === 1 ? sources[0] : "all",
       });
 
       // The effect above deliberately waits for this order's matches to show up
@@ -1079,7 +1073,7 @@ export default function OrdersPage() {
                         before this still work via propertyTypeMatches() in
                         scraper-service/src/services/propertyMatcher.ts. */}
                     <div className="flex flex-wrap gap-3">
-                      {["土地", "一戸建て", "マンション"].map(
+                      {["土地", "一戸建て", "マンション", "ビル"].map(
                         (t) => {
                           const isSelected = propertyTypes.includes(t);
                           return (
@@ -1211,28 +1205,20 @@ export default function OrdersPage() {
         <h2 className="text-lg font-extrabold text-[var(--text-primary)]">一覧</h2>
 
         {/* Live GitHub Actions run banner */}
-        {activeRun && (orders ?? []).some(isMyRun) && (() => {
-          const myRunningOrder = (orders ?? []).find(isMyRun);
-          const siteLabel = myRunningOrder ? getOrderSiteLabel(myRunningOrder) : null;
-          return (
-            <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)] shadow-xs">
-              <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-bold text-[#14532d] flex items-center flex-wrap gap-2">
-                  <span>
-                    {activeRun.status === "queued"
-                      ? "物件検索の実行を待機中です..."
-                      : siteLabel || "物件検索を実行中です..."}
-                  </span>
-                </div>
-                <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                  完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
-                  {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
-                </div>
+        {activeRun && (orders ?? []).some(isMyRun) && (
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)] shadow-xs">
+            <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold text-[#14532d]">
+                {activeRun.status === "queued" ? "物件検索の実行を待機中です" : "物件検索を実行中です"}
+              </div>
+              <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
+                {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
               </div>
             </div>
-          );
-        })()}
+          </div>
+        )}
 
         {orders === undefined ? (
           <div className="space-y-3">
@@ -1296,39 +1282,10 @@ export default function OrdersPage() {
                           </button>
                         )}
                         {isMyRun(order) && (
-                          <span className="inline-flex items-center gap-1.5 shrink-0">
-                            <Badge variant="brand" className="gap-1.5 font-bold py-1 px-2.5">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>
-                                {activeRun?.status === "queued"
-                                  ? "取得待機中"
-                                  : getOrderSiteLabel(order) || "取得中..."}
-                              </span>
-                            </Badge>
-                            <button
-                              onClick={async () => {
-                                setCancellingOrderId(order._id);
-                                try {
-                                  const r = (await cancelScrape({ orderId: order._id })) as
-                                    | { ok?: boolean; error?: string }
-                                    | undefined;
-                                  setScrapeNotice((prev) => ({
-                                    ...prev,
-                                    [order._id]: r?.error
-                                      ? r.error
-                                      : "検索を中止しました。",
-                                  }));
-                                } finally {
-                                  setCancellingOrderId(null);
-                                }
-                              }}
-                              disabled={cancellingOrderId === order._id}
-                              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 cursor-pointer hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50"
-                              title="GitHub Actions の実行を中止します"
-                            >
-                              {cancellingOrderId === order._id ? "中止中..." : "中止"}
-                            </button>
-                          </span>
+                          <Badge variant="brand" className="gap-1.5 font-bold py-1 px-2.5 shrink-0">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>{activeRun?.status === "queued" ? "取得待機中" : "取得中"}</span>
+                          </Badge>
                         )}
                         {matchCount > 0 && (
                           <Badge className="font-extrabold">
@@ -1376,25 +1333,54 @@ export default function OrdersPage() {
 
                     {/* Action Controls */}
                     <div className="flex flex-wrap items-center gap-2">
-                      {scrapingOrderId === order._id || order.isScraping || order.scrapingStatus === "scraping" ? (
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--brand-soft)] text-[#14532d] text-xs font-bold rounded-xl animate-pulse border border-[var(--brand-border)]">
-                            <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
-                            {scrapingOrderId === order._id
-                              ? `取得リクエストを送信中 (${activeScrapeSites[order._id] || "選択サイト"})...`
-                              : `ポータル検索中 (${activeScrapeSites[order._id] || "対象サイト"})...`}
+                      {isMyRun(order) ||
+                      scrapingOrderId === order._id ||
+                      order.isScraping ||
+                      (order.scrapingStatus &&
+                        order.scrapingStatus.includes("検索中")) ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-2 px-3.5 py-2 bg-emerald-50 text-emerald-900 text-xs font-bold rounded-xl border border-emerald-200 shadow-xs">
+                            <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
+                            <span>{getOrderSiteLabel(order) || "物件検索中..."}</span>
                           </div>
-                          {/* Only reachable for an order left flagged by an older
-                              build — the dispatch itself finishes in a second. */}
+
                           <Button
-                            variant="outline"
+                            variant="destructive"
                             size="sm"
-                            onClick={() => handleCancelScrape(order)}
-                            className="h-9 px-3 text-xs font-bold text-red-600 border-red-200 hover:bg-red-50 rounded-xl gap-1"
-                            title="「実行中」表示を解除します（GitHub Actions 側の処理は停止しません）"
+                            disabled={cancellingOrderId === order._id}
+                            onClick={async () => {
+                              setCancellingOrderId(order._id);
+                              try {
+                                const r = (await cancelScrape({
+                                  orderId: order._id,
+                                })) as { ok?: boolean; error?: string } | undefined;
+                                setScrapeNotice((prev) => ({
+                                  ...prev,
+                                  [order._id]: {
+                                    kind: r?.error ? "error" : "ok",
+                                    text: r?.error
+                                      ? r.error
+                                      : "物件検索を中止し、GitHub Actions の実行を停止しました。",
+                                  },
+                                }));
+                              } finally {
+                                setCancellingOrderId(null);
+                              }
+                            }}
+                            className="h-9 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                            title="GitHub Actions で実行中のスクレイピング処理を停止します"
                           >
-                            <X className="w-3.5 h-3.5" />
-                            表示をリセット
+                            {cancellingOrderId === order._id ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                中止処理中...
+                              </>
+                            ) : (
+                              <>
+                                <X className="w-3.5 h-3.5" />
+                                検索を中止
+                              </>
+                            )}
                           </Button>
                         </div>
                       ) : (

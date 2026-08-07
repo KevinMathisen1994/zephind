@@ -13,25 +13,19 @@ const CATEGORY_MAP: Record<string, string> = {
 
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", `
-    var items = Array.from(document.querySelectorAll("a")).filter(function(a) {
-      return (a.textContent && a.textContent.includes("詳細")) || (a.href && (a.href.includes("/buyers/") || a.href.includes("/detail/")));
-    }).map(function(a) {
-      var p = a.parentElement;
-      while (p && p.tagName !== "BODY") {
-        if (p.textContent.includes("万円") || p.textContent.includes("億")) return p;
-        p = p.parentElement;
-      }
-      return null;
-    }).filter(Boolean);
-
-    items = items.filter(function(item, pos) { return items.indexOf(item) === pos; });
+    // The site renders one <div class="bukkenItemBox"> per listing on the
+    // final /list/ results page. Earlier this walked up from any "詳細"/
+    // "/buyers/" anchor looking for an ancestor containing "万円" — but the
+    // ward-level URL (without the trailing /list/) is actually an
+    // intermediate "choose a town" filter page, not results, so that walk
+    // matched nav/breadcrumb links instead and returned garbage (e.g. the
+    // "エリアから探す" link text as a fake address, "#main" as the url).
+    var items = Array.from(document.querySelectorAll(".bukkenItemBox"));
     var results = [];
 
     items.forEach(function(el) {
       if (!el) return;
-      var linkEl = Array.from(el.querySelectorAll("a")).find(function(a) {
-        return (a.textContent && a.textContent.includes("詳細")) || (a.href && a.href.includes("/buyers/"));
-      });
+      var linkEl = el.querySelector('a[href^="/buyers/property/"]');
       var url = linkEl ? linkEl.getAttribute("href") : null;
       if (url && !url.startsWith("http")) url = "https://www.mizuho-re.co.jp" + (url.startsWith("/") ? "" : "/") + url;
 
@@ -134,27 +128,27 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Pr
       let hasNextPage = true;
 
       while (hasNextPage) {
-        // e.g. https://www.mizuho-re.co.jp/buyers/search/area/type_Tochi/pref_13/city_13106/
-        const url = `https://www.mizuho-re.co.jp/buyers/search/area/type_${typePath}/pref_13/city_${areaCode}/${currentPage > 1 ? '?page=' + currentPage : ''}`;
+        // The bare .../city_<code>/ URL is an intermediate "choose a town"
+        // filter page (title says the right ward, but it's a chooser, not
+        // results — it always carries a hidden "no listings" template in the
+        // DOM, and the real detail links live behind a client-side form
+        // submit). The actual results page needs a trailing /list/, and
+        // limit_value=60 asks for the max page size so most wards resolve in
+        // one request instead of walking a JS-only "次へ" control.
+        const url = `https://www.mizuho-re.co.jp/buyers/search/area/type_${typePath}/pref_13/city_${areaCode}/list/?page=${currentPage}&limit_value=60`;
         logger.info(`[Mizuho Scraper] Fetching: ${url}`);
 
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
         await new Promise((r) => setTimeout(r, 1500));
 
-        const isNoResult = await page.evaluate(() => {
-          const text = document.body.textContent || "";
-          return text.includes("該当する物件") || text.includes("条件に一致する物件は見つかりませんでした");
-        });
-
-        if (isNoResult) {
-          logger.info(`[Mizuho Scraper] Explicit no result message on page ${currentPage}`);
+        const itemCount = await page.evaluate(() => document.querySelectorAll(".bukkenItemBox").length);
+        if (itemCount === 0) {
+          logger.info(`[Mizuho Scraper] No listings on page ${currentPage}`);
           break;
         }
 
         const listings = await extractListings(page, type);
         logger.info(`[Mizuho Scraper] Extracted ${listings.length} listings from page ${currentPage}`);
-
-        if (listings.length === 0) break;
 
         let addedCount = 0;
         for (const item of listings) {
@@ -168,14 +162,17 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Pr
 
         if (addedCount === 0) break;
 
-        const nextButtonVisible = await page.evaluate(() => {
+        // The "次へ" link is always present in the paging markup, even on the
+        // last page — there it renders with no href (just a style attribute)
+        // so a real next page must have one to follow.
+        const hasNextHref = await page.evaluate(() => {
           const next = Array.from(document.querySelectorAll("a")).find(
             (a) => a.textContent && a.textContent.includes("次へ")
           );
-          return !!next;
+          return !!(next && next.getAttribute("href"));
         });
 
-        if (nextButtonVisible && currentPage < config.maxPagesPerSite) {
+        if (hasNextHref && currentPage < config.maxPagesPerSite) {
           currentPage++;
         } else {
           hasNextPage = false;

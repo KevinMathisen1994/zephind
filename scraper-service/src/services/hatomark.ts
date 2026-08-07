@@ -73,6 +73,18 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         }
       });
 
+      // Building floor area (ビル listings show this instead of/alongside 土地面積)
+      var floorArea = null;
+      detailRows.forEach(function(titleEl) {
+        if (titleEl.textContent?.trim() === "建物延面積") {
+          var valEl = titleEl.closest(".col")?.querySelector(".room-detail-value");
+          if (valEl) {
+            var m = valEl.textContent?.trim().match(/([\\d,.]+)㎡/);
+            if (m) floorArea = parseFloat(m[1].replace(/,/g, ""));
+          }
+        }
+      });
+
       // BCR / FAR from "建・容率"
       var bcr = null;
       var far = null;
@@ -113,8 +125,9 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         address: address,
         ward: ward,
         price: price || 0,
-        area: area || 0,
+        area: area || floorArea || 0,
         landSize: area || 0,
+        floorArea: floorArea || undefined,
         source: "hatomark",
         station: station || undefined,
         walkMinutes: walkMinutes ?? undefined,
@@ -145,10 +158,15 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[]): 
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
+    // "office" is hatomark's for-sale building category (事務所・店舗・ビル) —
+    // confirmed against the site's own nav, which uses "office" under buy/ and
+    // reserves "biz/office" for the separate rent/ section. Its search results
+    // title reads "〜の売事務所の検索結果".
     const catMap: Record<string, string> = {
       land: "土地",
       house: "一戸建て",
-      mansion: "マンション"
+      mansion: "マンション",
+      office: "ビル",
     };
     const categories = filterTypes && filterTypes.length > 0
       ? Object.entries(catMap).filter(([, label]) => filterTypes.includes(label)).map(([key]) => key)
@@ -173,8 +191,12 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[]): 
         try {
           await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
         } catch {
-          logger.warn(`[Hatomark Scraper] Page ${p} failed to load`);
-          break;
+          // Some categories (e.g. office/ビル) keep a network connection open
+          // past networkidle2's quiet window — the navigation call reports a
+          // timeout, but the DOM has already rendered by then. Don't bail
+          // here; fall through to the selector wait below, which is the real
+          // signal for "did content actually show up".
+          logger.warn(`[Hatomark Scraper] goto reported timeout on page ${p}, checking DOM anyway`);
         }
 
         try {

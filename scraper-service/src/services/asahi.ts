@@ -11,27 +11,36 @@ const CATEGORY_MAP: Record<string, string> = {
   "収益物件": "mansion",
 };
 
+// asahi-jutaku.co.jp keys its area search by romanized ward/city slug, not by
+// JIS code (e.g. .../tokyo/shinjuku-city, not .../tokyo/13104). The old code
+// put the numeric areaCode straight into that path segment, which the site
+// doesn't recognize — it silently falls back to a prefecture-wide generic
+// page that also carries a "similar properties from anywhere in Japan"
+// recommendation module. That module is where the previous garbage came from
+// (e.g. a Kobe-area listing/alert() string surfacing as a fake Tokyo listing).
+const CODE_TO_SLUG: Record<string, string> = {
+  "13101": "chiyoda-city", "13102": "chuo-city", "13103": "minato-city",
+  "13104": "shinjuku-city", "13105": "bunkyo-city", "13106": "taito-city",
+  "13107": "sumida-city", "13108": "koto-city", "13109": "shinagawa-city",
+  "13110": "meguro-city", "13111": "ota-city", "13112": "setagaya-city",
+  "13113": "shibuya-city", "13114": "nakano-city", "13115": "suginami-city",
+  "13116": "toshima-city", "13117": "kita-city", "13118": "arakawa-city",
+  "13119": "itabashi-city", "13120": "nerima-city", "13121": "adachi-city",
+  "13122": "katsushika-city", "13123": "edogawa-city",
+};
+
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", `
-    var items = Array.from(document.querySelectorAll("a")).filter(function(a) {
-      return (a.textContent && a.textContent.includes("詳細")) || (a.href && (a.href.includes("/buy/") || a.href.includes("/detail/")));
-    }).map(function(a) {
-      var p = a.parentElement;
-      while (p && p.tagName !== "BODY") {
-        if (p.textContent.includes("万円") || p.textContent.includes("億")) return p;
-        p = p.parentElement;
-      }
-      return null;
-    }).filter(Boolean);
-
-    items = items.filter(function(item, pos) { return items.indexOf(item) === pos; });
+    // Each listing renders as its own <table> of "cellNN" <td>s inside
+    // .SearchResult — one <tr> per property, not a repeating card class.
+    var items = Array.from(document.querySelectorAll(".SearchResult tr")).filter(function(tr) {
+      return tr.querySelector(".cell03");
+    });
     var results = [];
 
     items.forEach(function(el) {
       if (!el) return;
-      var linkEl = Array.from(el.querySelectorAll("a")).find(function(a) {
-        return (a.textContent && a.textContent.includes("詳細")) || (a.href && (a.href.includes("/buy/") || a.href.includes("/detail/")));
-      });
+      var linkEl = el.querySelector('.cell03 a[href*="/buy/detail/"]');
       var url = linkEl ? linkEl.getAttribute("href") : null;
       if (url && !url.startsWith("http")) url = "https://www.asahi-jutaku.co.jp" + (url.startsWith("/") ? "" : "/") + url;
 
@@ -124,6 +133,12 @@ export async function scrapeAsahi(areaCode: string, filterTypes?: string[]): Pro
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
+    const slug = CODE_TO_SLUG[areaCode];
+    if (!slug) {
+      logger.info(`[Asahi Scraper] No known area slug for code ${areaCode}, skipping (asahi only covers Tokyo's 23 wards)`);
+      return { listings: [], source: "asahi", areaCode, scrapedAt: Date.now(), count: 0 };
+    }
+
     const typesToScrape = filterTypes?.length ? filterTypes : ["土地"];
 
     for (const type of typesToScrape) {
@@ -134,26 +149,24 @@ export async function scrapeAsahi(areaCode: string, filterTypes?: string[]): Pro
       let hasNextPage = true;
 
       while (hasNextPage) {
-        const url = `https://www.asahi-jutaku.co.jp/buy/${typePath}/area/tokyo/${areaCode}/${currentPage > 1 ? '?page=' + currentPage : ''}`;
+        // Path-based pagination (.../{slug}/2, .../{slug}/3, ...), not a query
+        // string — and limit=100 covers every ward we've seen (well under 100
+        // listings per type), so this loop rarely needs to go past page 1.
+        const pagePart = currentPage > 1 ? `/${currentPage}` : "";
+        const url = `https://www.asahi-jutaku.co.jp/buy/search_area/${typePath}/tokyo/${slug}${pagePart}?limit=100`;
         logger.info(`[Asahi Scraper] Fetching: ${url}`);
 
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
         await new Promise((r) => setTimeout(r, 1500));
 
-        const isNoResult = await page.evaluate(() => {
-          const bodyText = document.body.textContent || "";
-          return bodyText.includes("該当する物件") || bodyText.includes("お探しの条件に一致する物件は見つかりませんでした");
-        });
-
-        if (isNoResult) {
-          logger.info(`[Asahi Scraper] Explicit no results found message on page ${currentPage}`);
+        const rowCount = await page.evaluate(() => document.querySelectorAll(".SearchResult tr").length);
+        if (rowCount === 0) {
+          logger.info(`[Asahi Scraper] No listings on page ${currentPage}`);
           break;
         }
 
         const listings = await extractListings(page, type);
         logger.info(`[Asahi Scraper] Extracted ${listings.length} listings from page ${currentPage}`);
-
-        if (listings.length === 0) break;
 
         let addedCount = 0;
         for (const item of listings) {
@@ -167,14 +180,15 @@ export async function scrapeAsahi(areaCode: string, filterTypes?: string[]): Pro
 
         if (addedCount === 0) break;
 
-        const nextButtonVisible = await page.evaluate(() => {
-          const next = Array.from(document.querySelectorAll("a")).find(
-            (a) => a.textContent && a.textContent.includes("次へ")
-          );
-          return !!next;
-        });
+        // The "次へ" control is a JS-driven <input type="button">, not an
+        // <a> — a text search over anchors (the old check) never matched it.
+        // The numbered pager links are real anchors, so look for one
+        // pointing at the next page instead.
+        const hasNextPageLink = await page.evaluate((next) => {
+          return Array.from(document.querySelectorAll(".pager_view a")).some((a) => a.textContent?.trim() === String(next));
+        }, currentPage + 1);
 
-        if (nextButtonVisible && currentPage < config.maxPagesPerSite) {
+        if (hasNextPageLink && currentPage < config.maxPagesPerSite) {
           currentPage++;
         } else {
           hasNextPage = false;

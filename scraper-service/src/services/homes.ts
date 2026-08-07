@@ -160,10 +160,19 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         var td = row.querySelector("td");
         if (!th || !td) return;
         var label = th.textContent.replace(/\\s+/g, "");
-        var val = td.textContent.trim();
         if (label.includes("交通") || label.includes("所在地")) {
-          // Format: "路線 駅名駅 徒歩N分\\n東京都..."
-          var lines = val.split("\\n").map(function(s) { return s.trim(); }).filter(Boolean);
+          // Format: "路線 駅名駅 徒歩N分<br>東京都..." — a newer card template
+          // combines 交通 and 所在地 into one th/td pair, separated by a <br>.
+          // td.textContent drops <br> entirely (it contributes zero characters,
+          // unlike innerText), so splitting textContent on "\\n" never found a
+          // boundary here and the traffic+address text fell through as one
+          // blob into the address branch — station/walkMinutes were never
+          // extracted at all, and the ward regex saw a string that doesn't
+          // start with "東京都" and produced no ward.
+          var lines = td.innerHTML
+            .split(/<br\\s*\\/?>/i)
+            .map(function(s) { return s.replace(/<[^>]+>/g, "").trim(); })
+            .filter(Boolean);
           lines.forEach(function(line) {
             if (line.includes("東京都") || line.match(/区/)) {
               address = address || line;
@@ -321,6 +330,7 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Pro
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const allListings: PropertyListing[] = [];
+  const scrapeErrors: string[] = [];
   const seenSignatures = new Set<string>();
 
   try {
@@ -328,12 +338,18 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Pro
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Determine which categories to scrape
-    const catKeys = filterTypes && filterTypes.length > 0
-      ? Object.entries(CATEGORY_MAP)
-          .filter(([, { label }]) => filterTypes.includes(label))
-          .map(([key]) => key)
-      : Object.keys(CATEGORY_MAP);
+    // Determine which categories to scrape. "マンション" and "収益物件" both
+    // resolve to the same mansion/chuko path — dedupe by path so a caller
+    // that wants both doesn't fetch (and pay the rate-limit cost for) the
+    // identical URL twice.
+    const seenPaths = new Set<string>();
+    const catKeys = (
+      filterTypes && filterTypes.length > 0
+        ? Object.entries(CATEGORY_MAP).filter(([, { label }]) => filterTypes.includes(label))
+        : Object.entries(CATEGORY_MAP)
+    )
+      .filter(([, { path }]) => (seenPaths.has(path) ? false : (seenPaths.add(path), true)))
+      .map(([key]) => key);
 
     if (catKeys.length === 0) {
       logger.info(`[Homes Scraper] No matching categories for ${wardName}, skipping`);
@@ -342,6 +358,7 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Pro
 
     const MAX_PAGES = 10;
 
+    categoryLoop:
     for (const catKey of catKeys) {
       const { path, label } = CATEGORY_MAP[catKey];
       logger.info(`[Homes Scraper] Category ${label} for ${wardName}...`);
@@ -350,11 +367,28 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Pro
         const url = `https://www.homes.co.jp/${path}/tokyo/${slug}/list/?page=${p}`;
         logger.info(`[Homes Scraper] Loading page ${p} (${label}) for ${wardName}...`);
 
+        let response;
         try {
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-        } catch {
-          logger.warn(`[Homes Scraper] Page ${p} failed to load`);
+          response = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+        } catch (err) {
+          logger.warn(`[Homes Scraper] Page ${p} failed to load: ${(err as Error).message}`);
+          scrapeErrors.push(`${label}/page${p}: ${(err as Error).message}`);
           break;
+        }
+
+        // homes.co.jp answers repeated rapid requests with an Akamai
+        // "Human Verification" challenge (HTTP 405, no listings in the DOM).
+        // Without this check that reads exactly like "0 listings" — the
+        // ward-count check below can't tell a bot-block from real empty
+        // inventory, and a whole scrape night could silently record zero
+        // stock for every remaining ward once the block kicks in.
+        const status = response?.status();
+        const title = await page.title().catch(() => "");
+        if (status === 405 || title.includes("Human Verification") || title.includes("認証")) {
+          const msg = `Blocked by bot-check (status=${status}, title="${title}") on ${label}/page${p}`;
+          logger.error(`[Homes Scraper] ${msg}`);
+          scrapeErrors.push(msg);
+          break categoryLoop;
         }
 
         // Check for listing items
@@ -397,7 +431,14 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Pro
       );
     });
 
-    return { listings: allListings, source: "homes", areaCode, scrapedAt: Date.now(), count: allListings.length };
+    return {
+      listings: allListings,
+      source: "homes",
+      areaCode,
+      scrapedAt: Date.now(),
+      count: allListings.length,
+      errors: scrapeErrors.length > 0 ? scrapeErrors : undefined,
+    };
   } finally {
     await browser.close();
     logger.info(`[Homes Scraper] Browser closed`);
