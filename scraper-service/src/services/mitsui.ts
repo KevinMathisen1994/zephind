@@ -9,6 +9,10 @@ const CATEGORY_MAP: Record<string, string> = {
   "一戸建て": "ikkodate",
   "マンション": "mansion",
   "収益物件": "mansion",
+  // "投資・事業用不動産" (investment/business real estate) — confirmed live at
+  // rehouse.co.jp/buy/tohshi/... ; card structure and /bkdetail/ detail links
+  // are identical to the other categories, so no extraction changes needed.
+  "ビル": "tohshi",
 };
 
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
