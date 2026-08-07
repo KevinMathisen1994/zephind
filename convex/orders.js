@@ -69,6 +69,35 @@ export const remove = mutation({
     args: { id: v.id("orders") },
     handler: async (ctx, args) => {
         await requireOwned(ctx, "オーダー", args.id);
+
+        // Deleting the order alone left its matches (and the listings they
+        // point at) as permanent orphans — nothing else ever cleaned them up.
+        const matches = await ctx.db
+            .query("matching")
+            .withIndex("by_order", (q) => q.eq("orderId", args.id))
+            .collect();
+
+        const listingIds = new Set();
+        for (const match of matches) {
+            if (match.listingId) listingIds.add(match.listingId);
+            await ctx.db.delete(match._id);
+        }
+
+        // `listings` is shared, unscoped inventory (see convex/ingest.js) — the
+        // same scraped property can be matched to several orders. Only delete
+        // it once THIS was the last match pointing at it, using by_listing
+        // rather than a full-table scan (matches for this order are already
+        // gone above, so any row still found here belongs to another order).
+        for (const listingId of listingIds) {
+            const stillReferenced = await ctx.db
+                .query("matching")
+                .withIndex("by_listing", (q) => q.eq("listingId", listingId))
+                .first();
+            if (!stillReferenced) {
+                await ctx.db.delete(listingId);
+            }
+        }
+
         await ctx.db.delete(args.id);
     },
 });

@@ -245,11 +245,12 @@ export default function OrdersPage() {
 
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
-  // Whole-card accordion: collapses the matched-listings section, keeping
-  // just the header (title/criteria/actions) visible. Expanded by default.
-  const [collapsedOrders, setCollapsedOrders] = useState<Set<string>>(new Set());
-  const toggleOrderCollapsed = (orderId: string) =>
-    setCollapsedOrders((prev) => {
+  // Whole-card accordion: hides the matched-listings section behind a bottom
+  // toggle bar, keeping just the header (title/criteria/actions) visible.
+  // Closed by default — a card with a name in the set is the expanded one.
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
+  const toggleOrderExpanded = (orderId: string) =>
+    setExpandedOrders((prev) => {
       const next = new Set(prev);
       next.has(orderId) ? next.delete(orderId) : next.add(orderId);
       return next;
@@ -1254,7 +1255,7 @@ export default function OrdersPage() {
             const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
               selectedForProposal.has(m._id),
             ).length;
-            const isCardCollapsed = collapsedOrders.has(order._id);
+            const isCardExpanded = expandedOrders.has(order._id);
 
             return (
               <Card
@@ -1265,18 +1266,6 @@ export default function OrdersPage() {
                   <div className="flex flex-col gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleOrderCollapsed(order._id)}
-                          className="shrink-0 rounded-lg p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] transition-colors"
-                          title={isCardCollapsed ? "展開" : "折りたたむ"}
-                        >
-                          {isCardCollapsed ? (
-                            <ChevronRight className="w-4 h-4" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4" />
-                          )}
-                        </button>
                         <CardTitle>
                           {order.name || `オーダー #${order._id.slice(0, 6)}`}
                         </CardTitle>
@@ -1556,7 +1545,7 @@ export default function OrdersPage() {
                 </CardHeader>
 
                 {/* Matched Listings Drawer */}
-                {!isCardCollapsed && matchCount > 0 && orderMatchList && (
+                {isCardExpanded && matchCount > 0 && orderMatchList && (
                   <CardContent className="p-5 space-y-2">
                     <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                       抽出物件一覧 ({matchCount}件)
@@ -2072,6 +2061,29 @@ export default function OrdersPage() {
                       );
                     })()}
                   </CardContent>
+                )}
+
+                {/* Bottom accordion toggle — always the last thing in the card,
+                    whether collapsed (button to reveal) or expanded (button to
+                    hide again), so it stays reachable at the bottom either way. */}
+                {matchCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => toggleOrderExpanded(order._id)}
+                    className="w-full flex items-center justify-center gap-1.5 py-3 text-xs font-bold text-[var(--brand)] hover:bg-[var(--brand-soft)] border-t border-[var(--border-subtle)] transition-colors"
+                  >
+                    {isCardExpanded ? (
+                      <>
+                        <ChevronUp className="w-4 h-4" />
+                        物件一覧を閉じる
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-4 h-4" />
+                        物件一覧を表示 ({matchCount}件) — クリックして物件を見る
+                      </>
+                    )}
+                  </button>
                 )}
               </Card>
             );

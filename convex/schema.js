@@ -228,7 +228,10 @@ export default defineSchema({
         scoreDetail: v.optional(v.any()),
     })
         .index("by_order", ["orderId"])
-        .index("by_user", ["userId"]),
+        .index("by_user", ["userId"])
+        // Lets order deletion check "does any OTHER order still match this
+        // listing" without a full table scan before deleting the listing.
+        .index("by_listing", ["listingId"]),
     propertySources: defineTable({
         name: v.optional(v.string()),
         url: v.optional(v.string()),
