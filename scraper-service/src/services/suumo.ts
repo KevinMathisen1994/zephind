@@ -120,8 +120,12 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         address: address,
         ward: ward,
         price: price || 0,
-        area: area || 0,
-        landSize: area || 0,
+        // Was defaulting to 0 when unparsed. hardFilter's landSizeMin/
+        // buildingSizeMin checks only skip on null/undefined, not 0, so an
+        // unparsed size read as "confirmed 0m²" and was hard-rejected by
+        // any such filter instead of being treated as unknown.
+        area: area || undefined,
+        landSize: area || undefined,
         url: url || undefined,
         source: "suumo",
         station: station || undefined,

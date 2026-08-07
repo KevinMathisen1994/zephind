@@ -162,7 +162,10 @@ export async function scrapeRakuten(areaCode: string, filterTypes?: string[]): P
 
             return {
               address: address || ward, ward: derivedWard || ward,
-              price: price || 0, landSize: landSize || 0, area: landSize || 0,
+              // landSize/area used to default to 0 when unparsed. hardFilter's
+              // landSizeMin/buildingSizeMin checks only skip on null/undefined,
+              // not 0, so that read as "confirmed 0m²" and was hard-rejected.
+              price: price || 0, landSize: landSize || undefined, area: landSize || undefined,
               buildingCoverageRatio: bcr, floorAreaRatio: far,
               station: station || undefined, walkMinutes: walkMinutes ?? undefined,
               source: "rakuten", url: fullUrl,

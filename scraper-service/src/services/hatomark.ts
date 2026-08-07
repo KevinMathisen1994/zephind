@@ -125,8 +125,13 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         address: address,
         ward: ward,
         price: price || 0,
-        area: area || floorArea || 0,
-        landSize: area || 0,
+        // Was defaulting to 0 when neither field parsed. 0 is not "unknown"
+        // to hardFilter (landSizeMin/buildingSizeMin skip only on null/
+        // undefined, not 0) — a building listing with no 土地面積 row (most
+        // of them; they report 建物延面積 instead) was getting hard-rejected
+        // by any landSizeMin filter as if its land were confirmed to be 0m².
+        area: area || floorArea || undefined,
+        landSize: area || undefined,
         floorArea: floorArea || undefined,
         source: "hatomark",
         station: station || undefined,

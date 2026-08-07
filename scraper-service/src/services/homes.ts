@@ -302,8 +302,12 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         address: address,
         ward: ward,
         price: price || 0,
-        area: landSize || 0,
-        landSize: landSize || 0,
+        // Was defaulting to 0 when unparsed (common for ビル/office cards,
+        // which often show 建物面積 with no 土地面積 row at all). hardFilter's
+        // landSizeMin/buildingSizeMin checks only skip on null/undefined,
+        // not 0, so that read as "confirmed 0m²" and got hard-rejected.
+        area: landSize || undefined,
+        landSize: landSize || undefined,
         source: "homes",
         url: url || undefined,
         station: station || undefined,

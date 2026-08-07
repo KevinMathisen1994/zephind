@@ -116,7 +116,12 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
         detailUrl = href.startsWith("http") ? href : "https://www.athome.co.jp" + href;
       }
 
-      results.push({ address: address, ward: ward, price: price, area: area || 0, landSize: area || 0, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined });
+      // area/landSize used to default to 0 when unparsed. hardFilter's
+      // landSizeMin/buildingSizeMin checks only skip on null/undefined, not
+      // 0, so an unparsed size (common for buy_other/ビル cards, which often
+      // have no 土地面積 row) read as "confirmed 0m²" and got hard-rejected
+      // by any such filter instead of being treated as unknown.
+      results.push({ address: address, ward: ward, price: price, area: area || undefined, landSize: area || undefined, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined });
       if (detailUrl) urls.push(detailUrl);
     });
     return JSON.stringify({ listings: results, detailUrls: urls });
