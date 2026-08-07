@@ -55,6 +55,11 @@ export interface IngestClient {
     listings: unknown[];
     matches: IngestMatch[];
   }): Promise<IngestSummary>;
+  updateProgress(input: {
+    source: string;
+    orderId?: string;
+    statusText?: string;
+  }): Promise<void>;
 }
 
 /**
@@ -92,6 +97,18 @@ export function createIngestClient(): IngestClient {
         listings: input.listings,
         matches: input.matches,
       })) as IngestSummary;
+    },
+    async updateProgress(input) {
+      try {
+        await client.mutation(anyApi.ingest.updateProgress, {
+          secret,
+          source: input.source,
+          orderId: input.orderId,
+          statusText: input.statusText,
+        });
+      } catch {
+        /* non-fatal progress update error */
+      }
     },
   };
 }

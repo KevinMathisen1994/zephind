@@ -50,6 +50,7 @@ export const create = mutation({
         customerId: v.optional(v.string()),
         isScraping: v.optional(v.boolean()),
         scrapingStatus: v.optional(v.string()),
+        activeSource: v.optional(v.string()),
         scrapeRunId: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
@@ -107,6 +108,7 @@ export const update = mutation({
         customerId: v.optional(v.string()),
         isScraping: v.optional(v.boolean()),
         scrapingStatus: v.optional(v.string()),
+        activeSource: v.optional(v.string()),
         scrapeRunId: v.optional(v.number()),
     },
     handler: async (ctx, args) => {

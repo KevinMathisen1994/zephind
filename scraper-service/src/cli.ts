@@ -239,6 +239,12 @@ async function main(): Promise<number> {
     let sourceOk = 0;
     let sourceFailed = 0;
 
+    await client.updateProgress({
+      source,
+      orderId: onlyOrderId || undefined,
+      statusText: `${label} を検索中...`,
+    });
+
     // SEQUENTIAL, deliberately. Concurrent Chrome launches exhaust memory on
     // this machine and on constrained CI runners; do not "optimise" this into
     // Promise.all.

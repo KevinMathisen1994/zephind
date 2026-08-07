@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -91,15 +91,34 @@ const ALL_SCRAPE_SOURCES = [
   "asahi",
 ];
 
+const SOURCE_LABELS: Record<string, string> = {
+  athome: "At Home",
+  suumo: "SUUMO",
+  homes: "LIFULL HOME'S",
+  hatomark: "鳩マーク",
+  kenbiya: "健美家",
+  rakuten: "楽天不動産",
+  nomu: "ノムコム",
+  nomu_pro: "ノムコム・プロ",
+  mitsui: "三井のリハウス",
+  stepon: "住友不動産ステップ",
+  tokyu: "東急リバブル",
+  mizuho: "みずほ不動産販売",
+  mitsubishi_ufj: "三菱UFJ不動産販売",
+  odakyu: "小田急不動産仲介",
+  keio: "京王不動産仲介",
+  asahi: "朝日住宅",
+  haseko: "長谷工の仲介",
+  daikyo: "大京穴吹不動産",
+  tokyotatemono: "東京建物不動産販売",
+};
+
 // All 23 special wards, used when an order names no area at all.
 const ALL_TOKYO_WARD_CODES = [
   "13101", "13102", "13103", "13104", "13105", "13106", "13107", "13108",
   "13109", "13110", "13111", "13112", "13113", "13114", "13115", "13116",
   "13117", "13118", "13119", "13120", "13121", "13122", "13123",
 ];
-
-const SCRAPE_STARTED_MESSAGE =
-  "検索を開始しました。完了まで数分かかります。結果は自動で表示されます。";
 
 // Some orders store requirements in the nested `criteria` blob rather than as
 // top-level columns (e.g. { criteria: { walkMinutes: 15 } }). Reading only the
@@ -143,13 +162,30 @@ function buildOrderCriteria(order: Doc<"orders"> | null | undefined) {
 export default function OrdersPage() {
   const navigate = useNavigate();
   const orders = useQuery(api.orders.list);
-  const listings = useQuery(api.listings.list, {});
   const customers = useQuery(api.customers.list);
   const createOrder = useMutation(api.orders.create);
   const deleteOrder = useMutation(api.orders.remove);
   const saveScore = useMutation(api.matching.saveScore);
   const updateOrder = useMutation(api.orders.update);
   const matches = useQuery(api.matching.list);
+
+  const matchListingIds = useMemo(() => {
+    if (!matches) return [];
+    return Array.from(
+      new Set(matches.map((m) => m.listingId).filter((id): id is string => Boolean(id)))
+    );
+  }, [matches]);
+
+  const fetchedListings = useQuery(
+    api.listings.getByIds,
+    matchListingIds.length > 0 ? { ids: matchListingIds } : "skip"
+  );
+
+  const listings = useMemo(() => {
+    if (!matches) return undefined;
+    if (matchListingIds.length === 0) return [];
+    return fetchedListings;
+  }, [matches, matchListingIds.length, fetchedListings]);
   const evaluateListing = useAction(api.evaluate.evaluateListing);
   // Scraping no longer happens in the browser — see convex/scrapeTrigger.js.
   const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
@@ -232,6 +268,26 @@ export default function OrdersPage() {
     null,
   );
   const [scrapeSource, setScrapeSource] = useState<Record<string, string>>({});
+  const [activeScrapeSites, setActiveScrapeSites] = useState<Record<string, string>>({});
+
+  const getOrderSiteLabel = (order: Doc<"orders">) => {
+    if (
+      order.scrapingStatus &&
+      order.scrapingStatus !== "dispatched" &&
+      order.scrapingStatus !== "completed" &&
+      order.scrapingStatus !== "failed" &&
+      order.scrapingStatus !== "cancelled"
+    ) {
+      return order.scrapingStatus;
+    }
+    if (order.activeSource) {
+      return `${SOURCE_LABELS[order.activeSource] || order.activeSource} を検索中...`;
+    }
+    if (activeScrapeSites[order._id]) {
+      return activeScrapeSites[order._id];
+    }
+    return null;
+  };
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({});
@@ -488,6 +544,12 @@ export default function OrdersPage() {
    */
   const dispatchScrape = async (order: Doc<"orders">, sources: string[]) => {
     setScrapingOrderId(order._id);
+    const siteLabel =
+      sources.length > 1
+        ? "すべてのサイト (全19サイト)"
+        : SOURCE_LABELS[sources[0]] || sources[0];
+    setActiveScrapeSites((prev) => ({ ...prev, [order._id]: siteLabel }));
+
     setScrapeNotice((prev) => {
       const next = { ...prev };
       delete next[order._id];
@@ -522,7 +584,10 @@ export default function OrdersPage() {
 
       setScrapeNotice((prev) => ({
         ...prev,
-        [order._id]: { kind: "ok", text: SCRAPE_STARTED_MESSAGE },
+        [order._id]: {
+          kind: "ok",
+          text: `「${siteLabel}」からの検索リクエストを送信しました。完了まで数分かかります。`,
+        },
       }));
       // "dispatched", not "scraping". The run lives on GitHub; a "scraping" flag
       // written here would be a spinner with nothing left to clear it.
@@ -1146,20 +1211,28 @@ export default function OrdersPage() {
         <h2 className="text-lg font-extrabold text-[var(--text-primary)]">一覧</h2>
 
         {/* Live GitHub Actions run banner */}
-        {activeRun && (orders ?? []).some(isMyRun) && (
-          <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)]">
-            <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-[#14532d]">
-                {activeRun.status === "queued" ? "検索の実行を待機中です" : "検索を実行中です"}
-              </div>
-              <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
-                {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
+        {activeRun && (orders ?? []).some(isMyRun) && (() => {
+          const myRunningOrder = (orders ?? []).find(isMyRun);
+          const siteLabel = myRunningOrder ? getOrderSiteLabel(myRunningOrder) : null;
+          return (
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)] shadow-xs">
+              <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-bold text-[#14532d] flex items-center flex-wrap gap-2">
+                  <span>
+                    {activeRun.status === "queued"
+                      ? "物件検索の実行を待機中です..."
+                      : siteLabel || "物件検索を実行中です..."}
+                  </span>
+                </div>
+                <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                  完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
+                  {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {orders === undefined ? (
           <div className="space-y-3">
@@ -1183,9 +1256,6 @@ export default function OrdersPage() {
           orders.map((order) => {
             const orderMatchList = orderMatches(order._id);
             const matchCount = orderMatchList?.length ?? 0;
-            // selectedForProposal is keyed by matchId across every card, so count
-            // only the ones belonging to THIS order — otherwise ticking on one
-            // card would enable the proposal button on all of them.
             const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
               selectedForProposal.has(m._id),
             ).length;
@@ -1225,16 +1295,15 @@ export default function OrdersPage() {
                             {order.status === "completed" ? "✓ 完了" : "未検索"}
                           </button>
                         )}
-                        {/* Per-card scrape state. The dispatch sets
-                            scrapingStatus="dispatched"; combining that with a
-                            live GitHub run means "this order's scrape is running
-                            right now" and it survives reload, since both halves
-                            come from outside this component. */}
                         {isMyRun(order) && (
                           <span className="inline-flex items-center gap-1.5 shrink-0">
-                            <Badge variant="brand" className="gap-1">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              {activeRun?.status === "queued" ? "取得待機中" : "取得中"}
+                            <Badge variant="brand" className="gap-1.5 font-bold py-1 px-2.5">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>
+                                {activeRun?.status === "queued"
+                                  ? "取得待機中"
+                                  : getOrderSiteLabel(order) || "取得中..."}
+                              </span>
                             </Badge>
                             <button
                               onClick={async () => {
@@ -1312,8 +1381,8 @@ export default function OrdersPage() {
                           <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--brand-soft)] text-[#14532d] text-xs font-bold rounded-xl animate-pulse border border-[var(--brand-border)]">
                             <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
                             {scrapingOrderId === order._id
-                              ? "取得リクエストを送信中..."
-                              : "ポータル一括検索中..."}
+                              ? `取得リクエストを送信中 (${activeScrapeSites[order._id] || "選択サイト"})...`
+                              : `ポータル検索中 (${activeScrapeSites[order._id] || "対象サイト"})...`}
                           </div>
                           {/* Only reachable for an order left flagged by an older
                               build — the dispatch itself finishes in a second. */}

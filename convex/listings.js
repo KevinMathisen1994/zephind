@@ -6,13 +6,15 @@ export const list = query({
         ward: v.optional(v.string()),
         priceMin: v.optional(v.number()),
         priceMax: v.optional(v.number()),
+        limit: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         let q = ctx.db.query("listings").withIndex("by_ward");
         if (args.ward) {
             q = q.filter((q) => q.eq(q.field("ward"), args.ward));
         }
-        const results = await q.collect();
+        const maxLimit = Math.min(args.limit || 1000, 8000);
+        const results = await q.take(maxLimit);
         return results.filter((listing) => {
             if (args.priceMin && listing.price && listing.price < args.priceMin)
                 return false;
@@ -20,6 +22,25 @@ export const list = query({
                 return false;
             return true;
         });
+    },
+});
+export const getByIds = query({
+    args: { ids: v.array(v.union(v.id("listings"), v.string())) },
+    handler: async (ctx, args) => {
+        if (!args.ids || args.ids.length === 0) return [];
+        const results = [];
+        for (const idStr of args.ids) {
+            try {
+                const normalized = ctx.db.normalizeId("listings", idStr);
+                if (normalized) {
+                    const doc = await ctx.db.get(normalized);
+                    if (doc) results.push(doc);
+                }
+            } catch (e) {
+                // Ignore invalid ID format if any
+            }
+        }
+        return results;
     },
 });
 export const get = query({

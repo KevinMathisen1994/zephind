@@ -73,9 +73,7 @@ export default defineSchema({
         customerId: v.optional(v.string()),
         isScraping: v.optional(v.boolean()),
         scrapingStatus: v.optional(v.string()),
-        // GitHub Actions run id for this order's most recent dispatch. Runs are
-        // global to the repo, so this is what tells one account's scrape apart
-        // from another's instead of "any run is live".
+        activeSource: v.optional(v.string()),
         scrapeRunId: v.optional(v.number()),
     })
         .index("by_status", ["status"])

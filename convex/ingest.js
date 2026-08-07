@@ -274,3 +274,24 @@ export const ingestScrape = mutation({
     };
   },
 });
+
+export const updateProgress = mutation({
+  args: {
+    secret: v.string(),
+    source: v.string(),
+    orderId: v.optional(v.string()),
+    statusText: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    assertSecret(args.secret);
+    if (args.orderId) {
+      const orderId = ctx.db.normalizeId("orders", args.orderId);
+      if (orderId) {
+        await ctx.db.patch(orderId, {
+          activeSource: args.source,
+          scrapingStatus: args.statusText || `${args.source} を検索中...`,
+        });
+      }
+    }
+  },
+});
