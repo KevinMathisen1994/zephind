@@ -119,6 +119,10 @@ const CATEGORY_MAP: Record<string, { path: string; label: string }> = {
   "一戸建て": { path: "kodate/chuko", label: "一戸建て" },
   "マンション": { path: "mansion/chuko", label: "マンション" },
   "収益物件": { path: "mansion/chuko", label: "マンション" },
+  // 事務所・オフィスの購入 (offices/buildings for sale) — confirmed live at
+  // homes.co.jp/office/tokyo/{slug}/list/, same URL shape and card markup as
+  // the other categories.
+  "ビル": { path: "office", label: "ビル" },
 };
 
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {

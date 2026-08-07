@@ -40,7 +40,13 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
   const raw = await page.evaluate(new Function("ward", "pt", `
     var results = [];
     var urls = [];
-    document.querySelectorAll(".card-box-inner").forEach(function(card) {
+    // "買う > 事業用" (/buy_other/, ビル・一棟売マンション・他) renders a
+    // slightly different template — .card-box instead of .card-box-inner.
+    // Everything below already falls back to regex-over-text when a specific
+    // sub-selector is missing, so no other changes were needed for it.
+    var cardEls = document.querySelectorAll(".card-box-inner");
+    if (cardEls.length === 0) cardEls = document.querySelectorAll(".card-box");
+    cardEls.forEach(function(card) {
       var cardText = card.textContent || "";
 
       var titleEl = card.querySelector(".title-wrap__title-text");
@@ -158,7 +164,8 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[]): Pr
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    const allCategories: Record<string, string> = { tochi: "土地", kodate: "一戸建て", mansion: "マンション" };
+    // buy_other = 売ビル・一棟売マンション・他 (事業用の不動産購入), confirmed live.
+    const allCategories: Record<string, string> = { tochi: "土地", kodate: "一戸建て", mansion: "マンション", buy_other: "ビル" };
     const categories = filterTypes && filterTypes.length > 0
       ? Object.entries(allCategories).filter(([, label]) => filterTypes.includes(label)).map(([key]) => key)
       : Object.keys(allCategories);
@@ -185,10 +192,11 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[]): Pr
         break;
       }
 
+      const cardSelector = ".card-box-inner, .card-box";
       if (p === 1) {
-        try { await page.waitForSelector(".card-box-inner", { timeout: 20000 }); } catch { logger.warn(`[At Home Scraper] No .card-box-inner on page 1`); }
+        try { await page.waitForSelector(cardSelector, { timeout: 20000 }); } catch { logger.warn(`[At Home Scraper] No card found on page 1`); }
       } else {
-        try { await page.waitForSelector(".card-box-inner", { timeout: 15000 }); } catch { logger.warn(`[At Home Scraper] No .card-box-inner on page ${p}, assuming end`); break; }
+        try { await page.waitForSelector(cardSelector, { timeout: 15000 }); } catch { logger.warn(`[At Home Scraper] No card found on page ${p}, assuming end`); break; }
       }
       await new Promise(r => setTimeout(r, 2000));
 

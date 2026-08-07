@@ -16,8 +16,20 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
     var rows = Array.prototype.slice.call(document.querySelectorAll(".kokoku-list-data"));
     var results = [];
 
+    // This page is never filtered by type server-side — the same URL always
+    // returns every genre mixed together (土地/戸建/マンション/...), and the old
+    // code just stamped every row with whatever type the CALLER asked for.
+    // Asking for one type meant every OTHER genre on the page got mislabelled
+    // as it too. Each row carries its real genre in .genre span; read that
+    // instead of trusting the request.
+    var GENRE_MAP = { "戸建": "一戸建て", "土地": "土地", "マンション": "マンション" };
+
     rows.forEach(function(data) {
       if (!data) return;
+
+      var genreEl = data.querySelector(".genre span");
+      var genreText = genreEl ? genreEl.textContent.trim() : "";
+      var realType = GENRE_MAP[genreText] || genreText || propertyType;
 
       // Price and the detail link live in a sibling .kokoku-list-condition
       // block; the nearest shared ancestor is <article class="data">.
@@ -101,7 +113,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
-      var area = propertyType === "mansion" ? (floorArea || 0) : (landSize || floorArea || 0);
+      // Was comparing against the literal string "mansion", which never
+      // equals the Japanese labels actually passed in (or read as realType
+      // above) — always fell through to the landSize/floorArea branch.
+      var area = realType === "マンション" ? (floorArea || 0) : (landSize || floorArea || 0);
 
       if (address && price) {
         results.push({
@@ -116,7 +131,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           url: url || undefined,
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
-          propertyType: propertyType,
+          propertyType: realType,
           layout: layout || undefined,
         });
       }
@@ -141,10 +156,14 @@ export async function scrapeKeio(areaCode: string, filterTypes?: string[]): Prom
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    const typesToScrape = filterTypes?.length ? filterTypes : ["土地"];
+    // The URL below carries no type filter at all — one request always
+    // returns every genre mixed together, and extractListings now reads each
+    // row's real genre off the page (see GENRE_MAP) rather than trusting
+    // whatever was requested. So there is exactly one page to walk here,
+    // regardless of how many types were asked for.
     const shortCityCode = areaCode.length === 5 ? areaCode.substring(2) : areaCode;
 
-    for (const type of typesToScrape) {
+    {
       let currentPage = 1;
       let hasNextPage = true;
 
@@ -166,7 +185,9 @@ export async function scrapeKeio(areaCode: string, filterTypes?: string[]): Prom
           break;
         }
 
-        const listings = await extractListings(page, type);
+        // Fallback label only, for the rare row whose .genre text doesn't
+        // match GENRE_MAP — real rows get their propertyType from the page.
+        const listings = await extractListings(page, "土地");
         logger.info(`[Keio Scraper] Extracted ${listings.length} listings from page ${currentPage}`);
 
         if (listings.length === 0) break;
