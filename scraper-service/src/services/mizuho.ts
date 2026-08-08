@@ -11,6 +11,22 @@ const CATEGORY_MAP: Record<string, string> = {
   "収益物件": "Mansion",
 };
 
+// ビル (投資用・事業用) lives on a SEPARATE URL namespace, /investors/ instead
+// of /buyers/, with its own area code scheme that has NO relation to the JIS
+// municipality codes used everywhere else in this codebase (including this
+// file's own /buyers/ URLs two lines below) — e.g. area_13 here is 港区, not
+// "all Tokyo" the way JIS code 13 (the Tokyo prefecture code) would suggest.
+// Every one of these 23 codes was verified individually against the live
+// site's own page title (not guessed/pattern-matched) before being wired up.
+const INVESTORS_WARD_CODE: Record<string, string> = {
+  "13101": "11", "13102": "12", "13103": "13", "13104": "18",
+  "13105": "19", "13106": "1a", "13107": "2b", "13108": "2c",
+  "13109": "14", "13110": "16", "13111": "15", "13112": "26",
+  "13113": "17", "13114": "24", "13115": "25", "13116": "1b",
+  "13117": "21", "13118": "28", "13119": "22", "13120": "23",
+  "13121": "27", "13122": "29", "13123": "2a",
+};
+
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", `
     // The site renders one <div class="bukkenItemBox"> per listing on the
@@ -25,7 +41,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
 
     items.forEach(function(el) {
       if (!el) return;
-      var linkEl = el.querySelector('a[href^="/buyers/property/"]');
+      // /buyers/property/... for the residential categories, but
+      // /investors/property/... for ビル (see scrapeMizuho's investors/
+      // branch) — same card template, different section prefix.
+      var linkEl = el.querySelector('a[href^="/buyers/property/"]') || el.querySelector('a[href^="/investors/property/"]');
       var url = linkEl ? linkEl.getAttribute("href") : null;
       if (url && !url.startsWith("http")) url = "https://www.mizuho-re.co.jp" + (url.startsWith("/") ? "" : "/") + url;
 
@@ -119,6 +138,57 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Pr
     await page.setViewport({ width: 1280, height: 800 });
 
     const typesToScrape = filterTypes?.length ? filterTypes : ["土地"];
+
+    if (typesToScrape.includes("ビル")) {
+      const investorsCode = INVESTORS_WARD_CODE[areaCode];
+      if (!investorsCode) {
+        logger.info(`[Mizuho Scraper] No /investors/ area mapping for ${areaCode} (only the 23 special wards are covered), skipping ビル`);
+      } else {
+        let currentPage = 1;
+        let hasNextPage = true;
+
+        while (hasNextPage) {
+          const url = `https://www.mizuho-re.co.jp/investors/search/area/all_building/area_${investorsCode}/list/?page=${currentPage}&limit_value=60`;
+          logger.info(`[Mizuho Scraper] Fetching (investors/ビル): ${url}`);
+
+          await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+          await new Promise((r) => setTimeout(r, 1500));
+
+          const itemCount = await page.evaluate(() => document.querySelectorAll(".bukkenItemBox").length);
+          if (itemCount === 0) {
+            logger.info(`[Mizuho Scraper] No ビル listings on page ${currentPage}`);
+            break;
+          }
+
+          const listings = await extractListings(page, "ビル");
+          logger.info(`[Mizuho Scraper] Extracted ${listings.length} ビル listings from page ${currentPage}`);
+
+          let addedCount = 0;
+          for (const item of listings) {
+            const sig = `${item.address}-${item.price}-${item.area}`;
+            if (!seenSignatures.has(sig)) {
+              seenSignatures.add(sig);
+              allListings.push(item);
+              addedCount++;
+            }
+          }
+          if (addedCount === 0) break;
+
+          const hasNextHref = await page.evaluate(() => {
+            const next = Array.from(document.querySelectorAll("a")).find(
+              (a) => a.textContent && a.textContent.includes("次へ")
+            );
+            return !!(next && next.getAttribute("href"));
+          });
+
+          if (hasNextHref && currentPage < config.maxPagesPerSite) {
+            currentPage++;
+          } else {
+            hasNextPage = false;
+          }
+        }
+      }
+    }
 
     for (const type of typesToScrape) {
       const typePath = CATEGORY_MAP[type];
