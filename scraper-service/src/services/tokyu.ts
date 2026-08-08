@@ -21,6 +21,99 @@ const CARD_SELECTORS = [
   "[class*='propertyInfoContainer']",
 ];
 
+/**
+ * ビル (事業用不動産) lives on a completely different vertical — /jigyo/ —
+ * from the residential /kounyu/{tochi,mansion,kodate}/ used below. Its
+ * type+area filter is a client-side-only checkbox with no shareable URL (the
+ * page URL never changes when toggling filters; only an XHR fires), so there
+ * is no "ビル-only" URL to construct the way the other categories work.
+ *
+ * Instead this fetches the UNFILTERED area page — which, being a Next.js app,
+ * embeds its full result set as JSON in a <script id="__NEXT_DATA__"> tag —
+ * and lets hardFilter narrow by type downstream, the same pattern kenbiya.ts
+ * and nomu_pro.ts already use for sites that don't category-filter by URL.
+ * Each listing already carries its real type in labelList[0].detailText
+ * (e.g. "ビル一棟", "アパート一棟売") — canonicalPropertyType() in
+ * propertyMatcher.ts already matches any string containing "ビル", so no
+ * mapping table is needed here.
+ */
+async function extractJigyoListings(page: any): Promise<{ listings: PropertyListing[]; totalCount: number }> {
+  const html: string = await page.content();
+  const match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!match) return { listings: [], totalCount: 0 };
+
+  let data: any;
+  try {
+    data = JSON.parse(match[1]);
+  } catch {
+    return { listings: [], totalCount: 0 };
+  }
+
+  const pageProps = data?.props?.pageProps;
+  const propertyList = pageProps?.propertyList;
+  const totalCount = Number(pageProps?.searchedResultCounts) || 0;
+  if (!Array.isArray(propertyList)) return { listings: [], totalCount };
+
+  const results: PropertyListing[] = [];
+  for (const p of propertyList) {
+    const address: string = p.address || p.propertyName || "";
+    const priceYen = p?.priceModel?.price;
+    const price = typeof priceYen === "number" ? priceYen / 10000 : 0;
+    if (!address || !price) continue;
+
+    let station: string | undefined;
+    let walkMinutes: number | undefined;
+    const accessLines: string[] = Array.isArray(p.access) ? p.access : [];
+    if (accessLines.length > 0) {
+      const line = accessLines[0];
+      const stM = line.match(/「([^」]+)」駅/) || line.match(/([^\s「」]+駅)/);
+      if (stM) station = stM[1].endsWith("駅") ? stM[1] : `${stM[1]}駅`;
+      const wkM = line.match(/徒歩(\d+)分/);
+      if (wkM) walkMinutes = parseInt(wkM[1], 10);
+    }
+
+    let landSize: number | undefined;
+    let floorArea: number | undefined;
+    let buildYear: number | undefined;
+    const details: string[] = Array.isArray(p.propertyDetail) ? p.propertyDetail : [];
+    for (const raw of details) {
+      // Area figures carry a literal "<sup>2</sup>" for the m² superscript.
+      const plain = raw.replace(/<[^>]+>/g, "");
+      const landM = plain.match(/^土地\s*([\d,.]+)\s*m/);
+      if (landM) landSize = parseFloat(landM[1].replace(/,/g, ""));
+      const bldM = plain.match(/^建物\s*([\d,.]+)\s*m/);
+      if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
+      const yearM = plain.match(/(\d{4})年\d{1,2}月築/);
+      if (yearM) buildYear = parseInt(yearM[1], 10);
+    }
+
+    let ward = "";
+    const wm = address.match(/([^都道府県]{2,4}[区市])/);
+    if (wm) ward = wm[1];
+
+    let url: string | undefined;
+    if (typeof p.detailUrl === "string" && p.detailUrl) {
+      url = p.detailUrl.startsWith("http") ? p.detailUrl : `https://www.livable.co.jp${p.detailUrl}`;
+    }
+
+    results.push({
+      address,
+      ward,
+      price,
+      area: landSize || floorArea || 0,
+      landSize: landSize || undefined,
+      floorArea: floorArea || undefined,
+      buildYear: buildYear || undefined,
+      source: "tokyu",
+      url,
+      station,
+      walkMinutes,
+      propertyType: p?.labelList?.[0]?.detailText || "ビル",
+    });
+  }
+  return { listings: results, totalCount };
+}
+
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", "cardSelectors", `
     // Structured extraction, verified against the live PC layout of
@@ -201,8 +294,49 @@ export async function scrapeTokyu(areaCode: string, filterTypes?: string[]): Pro
     await page.setViewport({ width: 1280, height: 800 });
 
     const typesToScrape = filterTypes?.length ? filterTypes : ["土地"];
-    const prefCode = areaCode.substring(0, 2); 
+    const prefCode = areaCode.substring(0, 2);
     const cityCode = areaCode.substring(2);
+
+    if (typesToScrape.includes("ビル")) {
+      let currentPage = 1;
+      let fetchedSoFar = 0;
+      let hasNextPage = true;
+
+      while (hasNextPage) {
+        const pageParam = currentPage > 1 ? `?page=${currentPage}` : "";
+        const url = `https://www.livable.co.jp/jigyo/tatemono-tokyo-select-area/a${areaCode}/${pageParam}`;
+        logger.info(`[Tokyu Scraper] Fetching (jigyo): ${url}`);
+
+        try {
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        } catch {
+          logger.warn(`[Tokyu Scraper] jigyo page ${currentPage} failed to load`);
+          break;
+        }
+
+        const { listings, totalCount } = await extractJigyoListings(page);
+        logger.info(`[Tokyu Scraper] jigyo page ${currentPage}: ${listings.length} listings (total known: ${totalCount})`);
+
+        if (listings.length === 0) break;
+
+        let addedCount = 0;
+        for (const item of listings) {
+          const sig = `${item.address}-${item.price}-${item.area}`;
+          if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            allListings.push(item);
+            addedCount++;
+          }
+        }
+        fetchedSoFar += listings.length;
+
+        if (addedCount === 0 || fetchedSoFar >= totalCount || currentPage >= config.maxPagesPerSite) {
+          hasNextPage = false;
+        } else {
+          currentPage++;
+        }
+      }
+    }
 
     for (const type of typesToScrape) {
       let typePath = CATEGORY_MAP[type];
