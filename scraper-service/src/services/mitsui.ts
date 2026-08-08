@@ -88,6 +88,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var area = 0;
       var landSize = null;
       var floorArea = null;
+      // propertyType here is always the caller's Japanese label ("マンション"),
+      // never the English "mansion" CATEGORY_MAP value — that comparison
+      // never matched, so floor area for every actual mansion listing was
+      // silently stored as landSize instead of floorArea.
+      var isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
       var bcr = null;
       var far = null;
       var layout = "";
@@ -117,7 +122,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           var aM = text.match(/([\\d,.]+)\\s*(?:㎡|m)/);
           if (aM) {
             var parsed = parseFloat(aM[1].replace(/,/g, ""));
-            if (propertyType === "mansion") floorArea = parsed;
+            if (isMansion) floorArea = parsed;
             else landSize = parsed;
           }
           var bM = text.match(/建ぺい率(\\d+)%/);
@@ -154,7 +159,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         if (w) address = w[1];
       }
 
-      area = propertyType === "mansion" ? (floorArea || 0) : (landSize || 0);
+      area = isMansion ? (floorArea || 0) : (landSize || 0);
 
       if (address && price) {
         results.push({

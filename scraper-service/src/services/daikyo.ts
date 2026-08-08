@@ -73,10 +73,20 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var floor = null;
       var totalUnits = null;
 
+      // Some rows (e.g. 間取り + 専有面積 together on mansion cards) pack TWO
+      // label/value pairs into one <li>, each in its own .info-column div.
+      // querySelector() (singular) on the <li> only ever returns the FIRST
+      // title/data pair in the whole subtree, so the second column's data —
+      // 専有面積 on every mansion card — was silently dropped every time.
+      // Iterate the columns individually when present, else treat the <li>
+      // itself as a single pair (the shape 価格/住所/交通/... already use).
       var rows = Array.prototype.slice.call(card.querySelectorAll(".card-props-detail__info-item"));
       rows.forEach(function(row) {
-        var label = clean(row.querySelector(".card-props-detail__info-title"));
-        var value = clean(row.querySelector(".card-props-detail__info-data"));
+        var columns = Array.prototype.slice.call(row.querySelectorAll(".card-props-detail__info-column"));
+        var groups = columns.length ? columns : [row];
+        groups.forEach(function(group) {
+        var label = clean(group.querySelector(".card-props-detail__info-title"));
+        var value = clean(group.querySelector(".card-props-detail__info-data"));
         if (!label || !value) return;
 
         if (label.indexOf("価格") >= 0) {
@@ -113,6 +123,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           var tuM = value.match(/(\\d+)戸/);
           if (tuM) totalUnits = parseInt(tuM[1], 10);
         }
+        });
       });
 
       // Fall back to the card heading, which repeats the address.
@@ -129,10 +140,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var wm = address.match(/([^都道府県]{2,4}[区市])/);
       if (wm) ward = wm[1];
 
-      // Daikyo's mansion result cards publish 価格/住所/交通/間取り/築年/所在階/総戸数
-      // and NO 専有面積, so area legitimately stays 0 for マンション here; the
-      // figure only exists on the detail page. Land and house cards do carry
-      // 土地面積 / 建物面積.
+      // Mansion cards DO carry 専有面積 (see the .info-column fix above) —
+      // it just used to get silently dropped by the single-pair-per-row
+      // extraction.
       var isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
       var area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);
 

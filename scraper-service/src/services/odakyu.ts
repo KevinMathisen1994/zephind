@@ -63,10 +63,15 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var wkM = text.match(/徒歩(\\d+)分/);
       if (wkM) walkMinutes = parseInt(wkM[1], 10);
 
+      // propertyType here is always the caller's Japanese label ("マンション"),
+      // never the English "mansion" CATEGORY_MAP value — that comparison
+      // never matched, so floor area for every actual mansion listing was
+      // silently stored as landSize instead of floorArea.
+      var isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
       var aM = text.match(/([\\d,.]+)\\s*(?:㎡|m)/);
       if (aM) {
         var parsed = parseFloat(aM[1].replace(/,/g, ""));
-        if (propertyType === "mansion") floorArea = parsed;
+        if (isMansion) floorArea = parsed;
         else landSize = parsed;
       }
 
@@ -86,7 +91,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
-      area = propertyType === "mansion" ? (floorArea || 0) : (landSize || 0);
+      area = isMansion ? (floorArea || 0) : (landSize || 0);
 
       if (address && price) {
         results.push({

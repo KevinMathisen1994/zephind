@@ -103,7 +103,12 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
-      area = propertyType === "tochi" ? (landSize || 0) : (floorArea || 0);
+      // propertyType here is always the caller's Japanese label ("土地"),
+      // never the English "tochi" CATEGORY_MAP value — that comparison never
+      // matched, so area for every 土地/一戸建て listing fell to floorArea
+      // (always null here, so area silently came out 0). That 0 fails the
+      // "!listing.area" benchmark-scoring guard in propertyMatcher.ts outright.
+      area = (propertyType === "土地" || propertyType === "tochi") ? (landSize || 0) : (floorArea || 0);
 
       if (address && price) {
         results.push({

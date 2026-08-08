@@ -119,6 +119,15 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         }
       }
 
+      // propertyType here is always the caller's Japanese label ("マンション" /
+      // "一戸建て" / ...), never the English CATEGORY_MAP value ("mansion" /
+      // "kodate") — those bare comparisons never matched, so floor area for
+      // every actual mansion listing was silently stored as landSize instead
+      // of floorArea, and the age/layout parsing below never ran for house
+      // listings either.
+      var isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
+      var isKodate = propertyType === "一戸建て" || propertyType === "kodate";
+
       var areaTd = tds[3];
       var landSize = 0;
       var floorArea = 0;
@@ -126,7 +135,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         var areaText = areaTd.textContent.trim();
         var aM = areaText.match(/([\\d,.]+)\\s*m/);
         if (aM) {
-          if (propertyType === "mansion") floorArea = parseFloat(aM[1].replace(/,/g, ""));
+          if (isMansion) floorArea = parseFloat(aM[1].replace(/,/g, ""));
           else landSize = parseFloat(aM[1].replace(/,/g, ""));
         }
       }
@@ -145,7 +154,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           far = parseFloat(pcts[1]);
         }
         
-        if (propertyType === "mansion" || propertyType === "kodate") {
+        if (isMansion || isKodate) {
            var ageMatch = statsText.match(/(\\d{4}年\\d+月)/);
            if (ageMatch) age = ageMatch[1];
            var layoutMatch = areaTd.textContent.match(/([\\d]+[LDKS]+)/);
@@ -157,7 +166,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         address: address,
         ward: ward,
         price: price || 0,
-        area: propertyType === "mansion" ? floorArea : landSize,
+        area: isMansion ? floorArea : landSize,
         landSize: landSize || undefined,
         floorArea: floorArea || undefined,
         source: "nomu",
