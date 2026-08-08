@@ -148,6 +148,19 @@ async function extractListings(
 
       var area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);
 
+      // The business listing page (/buyers/business/tod_13/) is not
+      // URL-filtered by type at all — it mixes every business property type
+      // on one page — so each card carries its own real type in
+      // .category .label (e.g. "ビル", "建物（一棟）", plus a "NEW" badge).
+      // Read that instead of trusting the caller's propertyType, the same
+      // fix keio.ts needed for the same reason. On the residential category
+      // pages (already URL-filtered) this label matches what was requested
+      // anyway, so it is a no-op there.
+      var catLabels = Array.prototype.slice.call(row.querySelectorAll(".category .label"))
+        .map(function(e) { return txt(e); })
+        .filter(function(t) { return t && t !== "NEW"; });
+      var realType = catLabels.length ? catLabels[0] : propertyType;
+
       if (address && price) {
         results.push({
           address: address,
@@ -163,7 +176,7 @@ async function extractListings(
           url: url || undefined,
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
-          propertyType: propertyType,
+          propertyType: realType,
           layout: layout || undefined,
           floor: floor !== null ? floor : undefined,
           structureType: structureType || undefined,
@@ -199,6 +212,39 @@ export async function scrapeSumai1(areaCode: string, filterTypes?: string[]): Pr
     // site's own ward navigation links to /buyers/tochi/tod_13/shik_115/.
     const prefCode = areaCode.length === 5 ? areaCode.substring(0, 2) : "13";
     const shortCityCode = areaCode.length === 5 ? areaCode.substring(2) : areaCode;
+
+    // 事業用物件 (ビル/一棟/事務所/etc.) lives on a separate /buyers/business/
+    // vertical, and — unlike the residential categories above — its area
+    // filter has no ward-level granularity at all: the finest the site's own
+    // UI offers is "東京23区" (tod_131) as one combined bucket or "東京都市部"
+    // (tod_132) as another (confirmed via its area-picker modal). So there is
+    // no per-ward URL to build here; fetch the one bucket covering this
+    // areaCode and let hardFilter narrow to the actual ward, same pattern as
+    // the other sites that can't category/area-filter by URL.
+    if (typesToScrape.includes("ビル")) {
+      const codeNum = Number(areaCode);
+      const is23Ku = codeNum >= 13101 && codeNum <= 13123;
+      const bucketCd = is23Ku ? "131" : "132"; // 東京23区 vs 東京都市部
+      const url = `${BASE}/buyers/business/tod_${bucketCd}/`;
+      logger.info(`[Sumai1 Scraper] Fetching (business): ${url}`);
+
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await new Promise((r) => setTimeout(r, 1500));
+        const listings = await extractListings(page, "ビル", "business");
+        logger.info(`[Sumai1 Scraper] Extracted ${listings.length} business listings`);
+        for (const item of listings) {
+          const sig = `${item.address}-${item.price}-${item.area}`;
+          if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            allListings.push(item);
+          }
+        }
+      } catch (err) {
+        logger.warn(`[Sumai1 Scraper] business fetch failed: ${(err as Error).message}`);
+        scrapeErrors.push(`business: ${(err as Error).message}`);
+      }
+    }
 
     for (const type of typesToScrape) {
       const typePath = CATEGORY_MAP[type];
