@@ -82,7 +82,13 @@ export default function AdminPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [runsError, setRunsError] = useState<string>("");
   const [isLoadingRuns, setIsLoadingRuns] = useState(false);
-  const listings = useQuery(api.listings.list, {});
+  // Capped well below the 8000 the backend allows: this is a reactive
+  // subscription on a shared table the nightly scraper writes to constantly,
+  // so Convex re-sends the WHOLE result set on every insert anywhere in
+  // `listings`, not just ones relevant to this page. Uncapped, that made this
+  // one admin page (likely left open) a major driver of Database I/O usage —
+  // enough to exceed the free-plan limit and get the deployment disabled.
+  const listings = useQuery(api.listings.list, { limit: 300 });
   const orders = useQuery(api.orders.list);
   const deleteListing = useMutation(api.listings.remove);
   // Scraping runs on GitHub Actions now — see convex/scrapeTrigger.js.
