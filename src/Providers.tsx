@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { jaJP } from "@clerk/localizations";
-import { ConvexClientProvider } from "./components/ConvexClientProvider";
+import { ApiProvider } from "./components/ApiProvider";
 
 const clerkPubKey = import.meta.env.VITE_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY as string;
 const hasValidClerkKey =
@@ -16,13 +16,13 @@ const hasValidClerkKey =
 export const isClerkEnabled = Boolean(hasValidClerkKey);
 
 export function Providers({ children }: { children: ReactNode }) {
-  // withClerk must match the branch below: ConvexProviderWithClerk calls
-  // useAuth(), which throws unless a ClerkProvider is an ancestor.
+  // withClerk must match the branch below: the token bridge calls useAuth(),
+  // which throws unless a ClerkProvider is an ancestor.
   let content = (
     <BrowserRouter>
-      <ConvexClientProvider withClerk={hasValidClerkKey}>
+      <ApiProvider withClerk={hasValidClerkKey}>
         {children}
-      </ConvexClientProvider>
+      </ApiProvider>
     </BrowserRouter>
   );
 

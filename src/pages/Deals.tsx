@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
+import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
 import {
@@ -21,8 +20,10 @@ import {
   Phone,
   Mail,
   Award,
+  RotateCcw,
 } from "lucide-react";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Id } from "../lib/dataModel";
+import { formatJaDate } from "../lib/dateFormat";
 
 export default function DealsPage() {
   const deals = useQuery(api.deals.list);
@@ -82,49 +83,54 @@ export default function DealsPage() {
 
   return (
     <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm">
+      {/* ── Page Header ── */}
+      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
-            <Handshake className="w-4 h-4 text-emerald-600" />
-            成約トラッキング
+          <div className="eyebrow-pill mb-2.5">
+            <Handshake className="w-3.5 h-3.5" />
+            成約トラッキング & パイプライン
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
-            案件・提案管理 
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
+            案件・提案管理
           </h1>
-          <p className="text-base text-slate-500 mt-1 leading-relaxed">
+          <p className="text-sm text-[var(--text-muted)] font-medium mt-1 max-w-xl leading-relaxed">
             買主への物件提案履歴、交渉ステータス、成約完了案件を統合管理します
           </p>
         </div>
       </div>
 
-      {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+      {/* ── KPI Financial Bento Grid ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
         {[
-          { icon: Handshake,  color: "var(--brand)",  bg: "var(--brand-soft)", label: "総提案案件数",     value: totalDeals,         loading: deals === undefined },
-          { icon: Clock,      color: "#d97706",       bg: "#fffbeb",           label: "交渉中案件数",     value: negotiatingCount,  loading: deals === undefined },
-          { icon: Award,      color: "var(--brand)",  bg: "#f0f7ed",           label: "成約完了数",       value: closedWonCount,    loading: deals === undefined, highlight: true },
-          { icon: TrendingUp, color: "#7c3aed",       bg: "#f5f3ff",           label: "成約取引金額",     value: `${closedWonVolume.toLocaleString()} 万円`, loading: deals === undefined, valueSmall: true },
+          { icon: Handshake, color: "var(--brand)", bg: "var(--brand-soft)", label: "総提案案件数", value: totalDeals, loading: deals === undefined },
+          { icon: Clock, color: "#d97706", bg: "#fffbeb", label: "交渉中案件数", value: negotiatingCount, loading: deals === undefined },
+          { icon: Award, color: "var(--brand)", bg: "var(--brand-soft)", label: "成約完了数", value: closedWonCount, loading: deals === undefined, highlight: true },
+          { icon: TrendingUp, color: "#4f46e5", bg: "#eef2ff", label: "成約取引総額", value: `${closedWonVolume.toLocaleString()} 万円`, loading: deals === undefined, valueSmall: true },
         ].map((kpi, i) => (
-          <div key={i} className={`kpi-card ${kpi.highlight ? "border-[var(--brand-border)] bg-[var(--brand-soft)]/40" : ""}`}>
-            <div className={`flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-xl shrink-0 ${kpi.highlight ? "bg-[var(--brand)] text-white" : ""}`}
-                 style={kpi.highlight ? {} : { background: kpi.bg, color: kpi.color }}>
-              <kpi.icon className="w-4 h-4 md:w-5 md:h-5" />
+          <div
+            key={i}
+            className={`kpi-card group ${kpi.highlight ? "border-[var(--brand-border)] bg-gradient-to-br from-white to-[var(--brand-soft)]/50" : ""}`}
+          >
+            <div
+              className={`flex items-center justify-center w-11 h-11 rounded-2xl shrink-0 shadow-xs transition-transform group-hover:scale-105 ${kpi.highlight ? "bg-[var(--brand)] text-white shadow-[0_2px_8px_rgba(22,101,3,0.3)]" : ""}`}
+              style={kpi.highlight ? {} : { background: kpi.bg, color: kpi.color }}
+            >
+              <kpi.icon className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className={`text-[10px] md:text-[11px] font-semibold uppercase tracking-wide ${kpi.highlight ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>
+              <div className={`text-[11px] font-bold tracking-wider uppercase ${kpi.highlight ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>
                 {kpi.label}
               </div>
-              <div className={`${kpi.valueSmall ? "text-sm md:text-base" : "text-lg md:text-xl"} font-extrabold text-[var(--text-primary)] font-data tracking-tight`}>
-                {kpi.loading ? <Skeleton className="h-6 w-10" /> : kpi.value}
+              <div className={`${kpi.valueSmall ? "text-base md:text-lg" : "text-xl md:text-2xl"} font-extrabold text-[var(--text-primary)] font-data tracking-tight mt-0.5`}>
+                {kpi.loading ? <Skeleton className="h-7 w-14 rounded-lg" /> : kpi.value}
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── Filter tabs + search ── */}
-      <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-3 rounded-2xl border border-[var(--border-subtle)]" style={{ boxShadow: "var(--shadow-xs)" }}>
+      {/* ── Filter Island & Search ── */}
+      <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-3.5 rounded-2xl border border-[var(--border-subtle)] shadow-[0_1px_3px_rgba(0,0,0,0.02),inset_0_1px_1px_rgba(255,255,255,0.9)]">
         <div className="pill-group w-full md:w-auto">
           {[
             { key: "all", label: `全件 (${totalDeals})` },
@@ -136,43 +142,41 @@ export default function DealsPage() {
             <button
               key={tab.key}
               onClick={() => setActiveStage(tab.key)}
-              className={`pill ${activeStage === tab.key ? (tab.key === "closed_won" ? "pill-active bg-[var(--brand)]! text-white!" : "pill-active") : "pill-inactive"}`}
+              className={`pill cursor-pointer ${activeStage === tab.key ? (tab.key === "closed_won" ? "bg-[var(--brand)] text-white shadow-xs" : "pill-active") : "pill-inactive"}`}
             >
               {tab.label}
             </button>
           ))}
         </div>
-        <div className="relative w-full md:w-64">
-          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+        <div className="relative w-full md:w-72 md:ml-auto">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="件名・顧客名で検索..."
-            className="w-full pl-9 pr-4 py-2 bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] rounded-xl text-sm font-medium focus:outline-none focus:border-[var(--brand)] transition-all"
+            className="w-full pl-10 pr-4 py-2 bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl text-sm font-semibold text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_rgba(22,101,3,0.15)] transition-all"
           />
         </div>
       </div>
 
       {/* Deal Cards List */}
       {deals === undefined ? (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {[1, 2].map((n) => (
-            <Skeleton key={n} className="h-36 w-full rounded-2xl" />
+            <Skeleton key={n} className="h-44 w-full rounded-3xl" />
           ))}
         </div>
       ) : filteredDeals.length === 0 ? (
-        <Card className="border border-slate-200/80 rounded-2xl bg-white">
-          <CardContent className="p-12 text-center">
-            <Handshake className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-base font-bold text-slate-700">
-              該当する提案案件がありません
-            </p>
-            <p className="text-sm text-slate-400 mt-1">
-              買主オーダー画面から「顧客へ物件を提案・メール送信」を行うと提案案件が自動登録されます。
-            </p>
-          </CardContent>
-        </Card>
+        <div className="p-16 border border-[var(--border-subtle)] rounded-3xl bg-white text-center shadow-xs">
+          <Handshake className="w-12 h-12 text-[var(--text-muted)]/30 mx-auto mb-4" />
+          <p className="text-base font-bold text-[var(--text-secondary)]">
+            該当する提案案件がありません
+          </p>
+          <p className="text-xs text-[var(--text-muted)] mt-1.5 font-medium">
+            買主オーダー画面から「顧客へ物件を提案・メール送信」を行うと提案案件が自動登録されます。
+          </p>
+        </div>
       ) : (
         <div className="space-y-4">
           {filteredDeals.map((deal) => {
@@ -180,45 +184,52 @@ export default function DealsPage() {
             const listings = deal.listings || [];
             const isWon = deal.status === "closed_won";
             return (
-              <Card
+              <div
                 key={deal._id}
-                className={`overflow-hidden transition-all duration-150 ${isWon ? "border-[var(--brand-border)] bg-[var(--brand-soft)]/30" : "hover:border-[var(--border-strong)]"}`}
+                className={`bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-4 shadow-xs hover:border-[var(--border-default)] hover:shadow-sm transition-all duration-200 ${
+                  isWon ? "border-[var(--brand-border)] bg-gradient-to-br from-white to-[var(--brand-soft)]/20" : ""
+                }`}
               >
-                <CardHeader className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)]">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CardTitle>{deal.title}</CardTitle>
-                        {/* Stage Badge */}
+                  {/* Top Row: Title + Customer + Actions */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[var(--border-subtle)]">
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <h3 className="text-base md:text-lg font-extrabold text-[var(--text-primary)] tracking-tight">
+                          {deal.title}
+                        </h3>
                         {deal.status === "closed_won" ? (
-                          <Badge className="font-extrabold gap-1"><Award className="w-3 h-3" />成約完了</Badge>
+                          <Badge variant="emerald" className="font-extrabold gap-1 py-1 px-3">
+                            <Award className="w-3.5 h-3.5" />成約完了
+                          </Badge>
                         ) : deal.status === "negotiating" ? (
-                          <Badge variant="brand" className="font-extrabold gap-1"><Clock className="w-3 h-3" />交渉中</Badge>
+                          <Badge variant="amber" className="font-extrabold gap-1 py-1 px-3">
+                            <Clock className="w-3.5 h-3.5" />交渉中
+                          </Badge>
                         ) : deal.status === "closed_lost" ? (
-                          <Badge variant="neutral">見送り</Badge>
+                          <Badge variant="neutral" className="py-1 px-3">見送り</Badge>
                         ) : (
-                          <Badge variant="brand">提案中</Badge>
+                          <Badge variant="brand" className="font-bold py-1 px-3">提案中</Badge>
                         )}
-                        <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                          {deal.createdAt ? new Date(deal.createdAt).toLocaleDateString("ja-JP") : "日付不明"} 提案
+                        <span className="text-[11px] font-semibold text-[var(--text-muted)] font-data">
+                          {deal.createdAt ? formatJaDate(deal.createdAt) : "日付不明"} 提案
                         </span>
                       </div>
 
-                      {/* Customer Info */}
-                      <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-700">
-                        <span className="flex items-center gap-1">
-                          <Users className="w-3.5 h-3.5 text-emerald-700" />
+                      {/* Customer info pills */}
+                      <div className="flex flex-wrap items-center gap-3.5 text-xs font-bold text-[var(--text-secondary)]">
+                        <span className="flex items-center gap-1.5 bg-[var(--bg-page-subtle)] px-2.5 py-1 rounded-lg border border-[var(--border-subtle)]">
+                          <Users className="w-3.5 h-3.5 text-[var(--brand)]" />
                           顧客: {deal.customerName || "お客様"}
                         </span>
                         {deal.customerPhone && (
-                          <span className="flex items-center gap-1 text-slate-600 font-semibold">
-                            <Phone className="w-3 h-3 text-slate-400" />
+                          <span className="flex items-center gap-1.5 font-semibold text-[var(--text-muted)]">
+                            <Phone className="w-3.5 h-3.5" />
                             {deal.customerPhone}
                           </span>
                         )}
                         {deal.customerEmail && (
-                          <span className="flex items-center gap-1 text-slate-600 font-semibold">
-                            <Mail className="w-3 h-3 text-slate-400" />
+                          <span className="flex items-center gap-1.5 font-semibold text-[var(--text-muted)]">
+                            <Mail className="w-3.5 h-3.5" />
                             {deal.customerEmail}
                           </span>
                         )}
@@ -231,7 +242,7 @@ export default function DealsPage() {
                         <Button
                           size="sm"
                           onClick={() => handleStatusChange(deal._id, "closed_won")}
-                          className="h-9 px-4 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-md shadow-emerald-700/20 gap-1.5"
+                          className="h-9 px-4 text-xs font-extrabold gap-1.5 shadow-[0_2px_10px_rgba(22,101,3,0.2)]"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           成約完了にする
@@ -243,7 +254,7 @@ export default function DealsPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleStatusChange(deal._id, "negotiating")}
-                          className="h-9 px-3 text-xs font-bold border-amber-200 text-amber-800 hover:bg-amber-50 rounded-xl gap-1"
+                          className="h-9 px-3 text-xs font-bold border-amber-300 text-amber-900 bg-amber-50/60 hover:bg-amber-100 gap-1.5"
                         >
                           <Clock className="w-3.5 h-3.5 text-amber-600" />
                           交渉中にする
@@ -255,111 +266,111 @@ export default function DealsPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleStatusChange(deal._id, "proposed")}
-                          className="h-9 px-3 text-xs font-bold border-slate-200 text-slate-700 rounded-xl"
+                          className="h-9 px-3 text-xs font-bold text-[var(--text-secondary)] gap-1.5"
                         >
+                          <RotateCcw className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                           ステータスを戻す
                         </Button>
                       )}
 
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => handleDelete(deal._id)}
-                        className="p-2 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-slate-100"
+                        className="h-9 w-9 rounded-xl text-[var(--text-muted)] hover:text-red-600 hover:bg-red-50"
                         title="削除"
                       >
                         <Trash2 className="w-4 h-4" />
-                      </button>
+                      </Button>
                     </div>
                   </div>
-                </CardHeader>
 
-                <CardContent className="p-6 space-y-4">
-                  {/* Agent Notes / Custom Message */}
-                  {deal.customMessage && (
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 text-xs font-medium text-slate-700 leading-relaxed whitespace-pre-wrap">
-                      <FileText className="w-3.5 h-3.5 text-emerald-700 inline mr-1.5" />
-                      {deal.customMessage}
-                    </div>
-                  )}
-
-                  {/* Proposed Properties Accordion */}
-                  <div>
-                    <div
-                      onClick={() => toggleExpand(deal._id)}
-                      className="flex items-center justify-between cursor-pointer py-2 text-xs font-extrabold text-slate-600 hover:text-slate-900 border-b border-slate-100"
-                    >
-                      <span>
-                        提案物件一覧 ({listings.length}件)
-                      </span>
-                      <div className="flex items-center gap-1 text-slate-400">
-                        {isExpanded ? (
-                          <>
-                            折りたたむ
-                            <ChevronUp className="w-4 h-4" />
-                          </>
-                        ) : (
-                          <>
-                            表示する
-                            <ChevronDown className="w-4 h-4" />
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {isExpanded && (
-                      <div className="pt-3 space-y-2.5 animate-in fade-in duration-200">
-                        {listings.map((l: { address?: string; price?: number; landSize?: number; walkMinutes?: number; propertyType?: string; score?: number; url?: string }, idx: number) => (
-                          <div
-                            key={idx}
-                            className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                          >
-                            <div className="space-y-1">
-                              <div className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-                                <MapPin className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                                {l.address}
-                              </div>
-                              <div className="text-slate-500 font-semibold flex flex-wrap items-center gap-3">
-                                {l.price && (
-                                  <span className="font-black text-slate-900 font-data">
-                                    {l.price.toLocaleString()} 万円
-                                  </span>
-                                )}
-                                {l.landSize && <span>{l.landSize} ㎡</span>}
-                                {l.walkMinutes !== undefined && (
-                                  <span>徒歩{l.walkMinutes}分</span>
-                                )}
-                                {l.propertyType && (
-                                  <span className="px-2 py-0.5 rounded-md bg-slate-200 text-slate-700">
-                                    {l.propertyType}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 shrink-0">
-                              {l.score !== undefined && (
-                                <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-300 font-black text-xs">
-                                  評価 {l.score}点
-                                </Badge>
-                              )}
-                              {l.url && (
-                                <a
-                                  href={l.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 font-bold hover:bg-emerald-100 transition-colors"
-                                >
-                                  ポータル
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                  {/* Body Content */}
+                  <div className="pt-4 space-y-4">
+                    {deal.customMessage && (
+                      <div className="p-4 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                        <FileText className="w-3.5 h-3.5 text-[var(--brand)] inline mr-1.5" />
+                        {deal.customMessage}
                       </div>
                     )}
+
+                    {/* Proposed Properties Accordion */}
+                    <div>
+                      <button
+                        onClick={() => toggleExpand(deal._id)}
+                        className="w-full flex items-center justify-between cursor-pointer py-2 text-xs font-extrabold text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-b border-[var(--border-subtle)] transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          提案物件一覧 ({listings.length}件)
+                        </span>
+                        <div className="flex items-center gap-1 text-[var(--text-muted)]">
+                          {isExpanded ? (
+                            <>
+                              <span>折りたたむ</span>
+                              <ChevronUp className="w-4 h-4" />
+                            </>
+                          ) : (
+                            <>
+                              <span>詳細を表示</span>
+                              <ChevronDown className="w-4 h-4" />
+                            </>
+                          )}
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="pt-3.5 space-y-3 animate-in fade-in duration-200">
+                          {listings.map((l: { address?: string; price?: number; landSize?: number; walkMinutes?: number; propertyType?: string; score?: number; url?: string }, idx: number) => (
+                            <div
+                              key={idx}
+                              className="p-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                            >
+                              <div className="space-y-1 min-w-0">
+                                <div className="font-extrabold text-[var(--text-primary)] text-sm flex items-center gap-2 truncate">
+                                  <MapPin className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
+                                  {l.address}
+                                </div>
+                                <div className="text-[var(--text-muted)] font-semibold flex flex-wrap items-center gap-3">
+                                  {l.price && (
+                                    <span className="font-black text-[var(--text-primary)] font-data text-sm">
+                                      {l.price.toLocaleString()} 万円
+                                    </span>
+                                  )}
+                                  {l.landSize && <span>{l.landSize} ㎡</span>}
+                                  {l.walkMinutes !== undefined && (
+                                    <span>徒歩{l.walkMinutes}分</span>
+                                  )}
+                                  {l.propertyType && (
+                                    <Badge variant="neutral">{l.propertyType}</Badge>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                {l.score !== undefined && (
+                                  <Badge variant="brand" className="font-black font-data px-2.5 py-1">
+                                    評価 {l.score}点
+                                  </Badge>
+                                )}
+                                {l.url && (
+                                  <a
+                                    href={l.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[var(--border-default)] text-[var(--brand)] text-xs font-bold shadow-xs hover:bg-[var(--brand-soft)] transition-colors"
+                                  >
+                                    ポータル
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
             );
           })}
         </div>

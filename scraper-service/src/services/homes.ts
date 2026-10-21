@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -124,6 +124,294 @@ const CATEGORY_MAP: Record<string, { path: string; label: string }> = {
   // the other categories.
   "ビル": { path: "office", label: "ビル" },
 };
+
+// 賃貸 (chintai) category map. Confirmed live via homes.co.jp's own nav
+// (links to /chintai/kodate/ and /chintai/office/ from the /chintai/ page):
+// unlike the buy side's single mansion/tochi/kodate split, homes keeps
+// マンション and アパート chintai together under the bare /chintai/ path — a
+// 港区 sample returned only "賃貸マンション" bType cards there, so no separate
+// アパート path is needed. 一戸建て and 事務所/店舗(ビル) each need their own path.
+const CHINTAI_CATEGORY_MAP: Record<string, { path: string; label: string }> = {
+  "マンション": { path: "chintai", label: "マンション" },
+  "一戸建て": { path: "chintai/kodate", label: "一戸建て" },
+  "ビル": { path: "chintai/office", label: "ビル" },
+};
+
+/**
+ * 賃貸 cards are a building-with-units template, same shape as suumo's
+ * chintai cards: `[class*="mod-mergeBuilding--rent"]` is one BUILDING,
+ * `tr.prg-room` inside it is one rentable UNIT (data-href on the row itself).
+ *
+ * Two different sub-templates were confirmed live:
+ *  - residential (マンション/一戸建て, table.unitResidenceSummary): one
+ *    combined `td.price` holds "RENT万円/MGMT円<br>DEPOSIT/KEYMONEY/GUARANTEE/
+ *    SHIKIBIKI" — in that order (敷金/礼金/保証/敷引・償却 per the header).
+ *  - office (ビル, table.unitSummary): rent/mgmt and the deposit block are
+ *    SEPARATE cells (`td.price` vs `td.cost`), and `td.cost`'s order is
+ *    敷金/保証金/礼金/敷引・償却 — keyMoney is the THIRD slot here, not the
+ *    second. Passing `isOffice` picks the right slot instead of assuming one
+ *    fixed order for both templates.
+ *
+ * Each deposit/keyMoney slot is itself one of three real conventions seen
+ * live: "無" (explicitly zero), "Xヶ月" (a multiple of the unit's own rent —
+ * convert to an absolute amount), or a bare "X万円"/"X,XXX円" (already
+ * absolute). "-" means not disclosed/not applicable, kept as undefined
+ * rather than 0 so it doesn't read as "confirmed no deposit".
+ */
+async function extractChintaiListings(page: any, propertyType: string, isOffice: boolean): Promise<PropertyListing[]> {
+  const raw = await page.evaluate(new Function("propertyType", "isOffice", `
+    var parseDepositSlot = function(text, rentMan) {
+      if (!text) return undefined;
+      var t = text.trim();
+      if (!t || t === "-" || t === "ー" || t === "―") return undefined;
+      if (t === "無") return 0;
+      var monthM = t.match(/([\\d.]+)\\s*ヶ月/);
+      if (monthM) return parseFloat(monthM[1]) * rentMan;
+      var manM = t.match(/([\\d,.]+)\\s*万円/);
+      if (manM) return parseFloat(manM[1].replace(/,/g, ""));
+      var yenM = t.match(/([\\d,]+)\\s*円/);
+      if (yenM) return parseFloat(yenM[1].replace(/,/g, "")) / 10000;
+      return undefined;
+    };
+
+    var results = [];
+    var buildings = document.querySelectorAll('[class*="mod-mergeBuilding--rent"]');
+
+    buildings.forEach(function(building) {
+      var specTable = building.querySelector(".bukkenSpec table");
+      var address = "";
+      var rows = specTable ? specTable.querySelectorAll("tr") : [];
+      rows.forEach(function(row) {
+        var th = row.querySelector("th");
+        var td = row.querySelector("td");
+        if (!th || !td) return;
+        var label = th.textContent.trim();
+        if (label === "所在地") address = td.textContent.trim();
+      });
+      if (!address) return;
+
+      var ward = "";
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        .replace(/^[^\\s]{1,4}郡/, "")
+        .match(/^(.{1,6}?[市区])/)
+        || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+      if (wm) ward = wm[1];
+
+      var station = "";
+      var walkMinutes = null;
+      rows.forEach(function(row) {
+        var th = row.querySelector("th");
+        var td = row.querySelector("td");
+        if (!th || !td) return;
+        if (th.textContent.trim() === "交通") {
+          var lines = td.innerHTML.split(/<br\\s*\\/?>/i).map(function(s) { return s.replace(/<[^>]+>/g, "").trim(); }).filter(Boolean);
+          if (lines.length > 0) {
+            var stM = lines[0].match(/([^\\s]+駅)/);
+            if (stM) station = stM[1];
+            var wkM = lines[0].match(/徒歩\\s*(\\d+)\\s*分/);
+            if (wkM) walkMinutes = parseInt(wkM[1], 10);
+          }
+        }
+      });
+
+      var buildYear = null;
+      rows.forEach(function(row) {
+        var th = row.querySelector("th");
+        var td = row.querySelector("td");
+        if (!th || !td) return;
+        var label = th.textContent.trim();
+        if (label.indexOf("築年数") === 0) {
+          var ageM = td.textContent.match(/(\\d+)\\s*年/);
+          if (ageM) buildYear = new Date().getFullYear() - parseInt(ageM[1], 10);
+          else if (/新築/.test(td.textContent)) buildYear = new Date().getFullYear();
+        }
+      });
+
+      var unitRows = building.querySelectorAll("tr.prg-room");
+      unitRows.forEach(function(row) {
+        var url = row.getAttribute("data-href") || "";
+        if (!url) return;
+
+        var floorEl = row.querySelector("td.floar");
+        var floor = null;
+        if (floorEl) {
+          var floorM = floorEl.textContent.match(/(\\d+)\\s*階/);
+          if (floorM) floor = parseInt(floorM[1], 10);
+        }
+
+        var priceEl = row.querySelector("td.price");
+        var priceHtml = priceEl ? priceEl.innerHTML : "";
+        var priceLines = priceHtml.split(/<br\\s*\\/?>/i).map(function(s) { return s.replace(/<[^>]+>/g, "").trim(); });
+        var rentMgmtText = priceLines[0] || "";
+
+        var rentM = rentMgmtText.match(/([\\d.]+)\\s*万円/);
+        if (!rentM) return; // no rent = not a real listing row
+        var rent = parseFloat(rentM[1]);
+        var mgmtM = rentMgmtText.match(/\\/\\s*([\\d,]+)\\s*円/);
+        var managementFee = mgmtM ? parseFloat(mgmtM[1].replace(/,/g, "")) / 10000 : undefined;
+
+        var deposit, keyMoney;
+        if (isOffice) {
+          // office template: deposit block lives in its own td.cost, order
+          // 敷金/保証金/礼金/敷引・償却 — keyMoney is slot index 2, not 1.
+          var costEl = row.querySelector("td.cost");
+          var costParts = (costEl ? costEl.textContent : "").split("/");
+          deposit = parseDepositSlot(costParts[0], rent);
+          keyMoney = parseDepositSlot(costParts[2], rent);
+        } else {
+          // residential template: deposit block is priceLines[1], order
+          // 敷金/礼金/保証/敷引・償却.
+          var depositParts = (priceLines[1] || "").split("/");
+          deposit = parseDepositSlot(depositParts[0], rent);
+          keyMoney = parseDepositSlot(depositParts[1], rent);
+        }
+
+        var layout = "";
+        var area = null;
+        var layoutEl = row.querySelector("td.layout");
+        if (layoutEl) {
+          var layoutHtml = layoutEl.innerHTML.split(/<br\\s*\\/?>/i).map(function(s) { return s.replace(/<[^>]+>/g, "").trim(); });
+          layout = layoutHtml[0] || "";
+          var areaM = (layoutHtml[1] || "").match(/([\\d.]+)\\s*m/);
+          if (areaM) area = parseFloat(areaM[1]);
+        } else {
+          var spaceEl = row.querySelector("td.space");
+          if (spaceEl) {
+            var areaM2 = spaceEl.textContent.match(/([\\d.]+)\\s*m/);
+            if (areaM2) area = parseFloat(areaM2[1]);
+          }
+        }
+
+        results.push({
+          address: address,
+          ward: ward,
+          price: rent,
+          rent: rent,
+          managementFee: managementFee,
+          deposit: deposit,
+          keyMoney: keyMoney,
+          area: area != null ? area : undefined,
+          floorArea: area != null ? area : undefined,
+          buildYear: buildYear != null ? buildYear : undefined,
+          floor: floor != null ? floor : undefined,
+          layout: layout || undefined,
+          station: station || undefined,
+          walkMinutes: walkMinutes != null ? walkMinutes : undefined,
+          url: url,
+          source: "homes",
+          propertyType: propertyType,
+          dealType: "rent",
+        });
+      });
+    });
+
+    return JSON.stringify(results);
+  `), propertyType, isOffice);
+  return JSON.parse(raw);
+}
+
+async function scrapeHomesChintai(areaCode: string, wardName: string, slug: string, filterTypes?: string[]): Promise<ScrapeResult> {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const allListings: PropertyListing[] = [];
+  const scrapeErrors: string[] = [];
+  const seenUrls = new Set<string>();
+  // Confirmed live: homes.co.jp answers a burst of rapid requests with an
+  // Akamai "Human Verification" block (see bot-check handling below), the
+  // same behavior already fought on the buy side — so pages are paced with a
+  // real wait between loads and the loop bails out the moment it's hit.
+  const MAX_PAGES = 20;
+
+  const catKeys = filterTypes && filterTypes.length > 0
+    ? Object.entries(CHINTAI_CATEGORY_MAP).filter(([, { label }]) => filterTypes.includes(label)).map(([key]) => key)
+    : Object.keys(CHINTAI_CATEGORY_MAP);
+  if (catKeys.length === 0) {
+    logger.info(`[Homes Scraper] No matching chintai categories for ${wardName}, skipping`);
+    return { listings: [], source: "homes", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(config.userAgent);
+    await page.setViewport({ width: 1280, height: 800 });
+
+    categoryLoop:
+    for (const catKey of catKeys) {
+      const { path, label } = CHINTAI_CATEGORY_MAP[catKey];
+      const isOffice = catKey === "ビル";
+      logger.info(`[Homes Scraper] Chintai category ${label} for ${wardName}...`);
+
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const url = `https://www.homes.co.jp/${path}/tokyo/${slug}/list/?page=${p}`;
+        logger.info(`[Homes Scraper] Loading chintai page ${p} (${label}) for ${wardName}...`);
+
+        let response;
+        try {
+          response = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+        } catch (err) {
+          logger.warn(`[Homes Scraper] Chintai page ${p} failed to load: ${(err as Error).message}`);
+          scrapeErrors.push(`${label}/page${p}: ${(err as Error).message}`);
+          break;
+        }
+
+        const status = response?.status();
+        const title = await page.title().catch(() => "");
+        if (status === 405 || status === 202 || title.includes("Human Verification") || title.includes("認証")) {
+          const msg = `Blocked by bot-check (status=${status}, title="${title}") on chintai/${label}/page${p}`;
+          logger.error(`[Homes Scraper] ${msg}`);
+          scrapeErrors.push(msg);
+          break categoryLoop;
+        }
+
+        const hasListings = await page.evaluate(() => {
+          return document.querySelectorAll('[class*="mod-mergeBuilding--rent"]').length > 0;
+        });
+        if (!hasListings) {
+          logger.info(`[Homes Scraper] No chintai listings on page ${p}, stopping`);
+          break;
+        }
+
+        await new Promise((r) => setTimeout(r, 1500));
+
+        const listings = await extractChintaiListings(page, label, isOffice);
+        const newListings = listings.filter((l) => {
+          if (!l.url || seenUrls.has(l.url)) return false;
+          seenUrls.add(l.url);
+          return true;
+        });
+
+        if (newListings.length === 0) {
+          logger.info(`[Homes Scraper] Chintai page ${p}: no new listings, stopping`);
+          break;
+        }
+
+        logger.info(`[Homes Scraper] Chintai page ${p}: ${newListings.length} new listings (total: ${allListings.length + newListings.length})`);
+        allListings.push(...newListings);
+      }
+    }
+
+    logger.info(`[Homes Scraper] Chintai scrape complete: ${allListings.length} listings for ${wardName}`);
+    allListings.slice(0, 5).forEach((l, i) => {
+      logger.info(
+        `[Homes Scraper]   [${i}] ${l.ward} ${l.address} | rent=${l.rent}万円 | mgmt=${l.managementFee ?? "?"}万円 | deposit=${l.deposit ?? "?"} | keyMoney=${l.keyMoney ?? "?"} | type=${l.propertyType}`
+      );
+    });
+
+    return {
+      listings: allListings,
+      source: "homes",
+      areaCode,
+      scrapedAt: Date.now(),
+      count: allListings.length,
+      errors: scrapeErrors.length > 0 ? scrapeErrors : undefined,
+    };
+  } finally {
+    await browser.close();
+    logger.info(`[Homes Scraper] Browser closed`);
+  }
+}
 
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", `
@@ -323,12 +611,16 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
   return JSON.parse(raw);
 }
 
-export async function scrapeHomes(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeHomes(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
   const wardName = CODE_TO_WARD[areaCode] || areaCode;
   const slug = WARD_TO_SLUG[wardName];
   if (!slug) {
     logger.warn(`[Homes Scraper] No slug for ward ${wardName}, skipping`);
     return { listings: [], source: "homes", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
+  if (dealType === "rent") {
+    return await scrapeHomesChintai(areaCode, wardName, slug, filterTypes);
   }
 
   logger.info(`[Homes Scraper] Starting scrape`, { ward: wardName, slug, areaCode });

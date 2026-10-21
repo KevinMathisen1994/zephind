@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -186,7 +186,233 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
   return JSON.parse(raw);
 }
 
-export async function scrapeNomu(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+/**
+ * nomu.com's own 賃貸 nav (footer link "賃貸") doesn't lead to a listing
+ * search on nomu.com at all — it goes to a SEPARATE domain,
+ * nom-rent.com (野村不動産パートナーズの賃貸), Nomu's managed-rental brand
+ * (プラウドフラット etc.). Confirmed live: that domain's area picker
+ * (nom-rent.com/area/) uses the exact same ward/city numeric codes as this
+ * scraper's areaCode ("13103" = 港区, checkbox value="13103"), so no separate
+ * slug table is needed — areaCode is passed straight through as
+ * address[]=<areaCode>. class[]=c1 is a fixed hidden form field on that
+ * site (there is no other class value anywhere in its search form) — the
+ * whole catalog is one managed-rental-apartment product line, confirmed live
+ * (every sample building was a マンション brand, e.g. "プラウドフラット"), so
+ * every listing here is tagged propertyType "マンション" and there's no
+ * filterTypes-driven category split to mirror.
+ *
+ * Cards are a building-with-units template (`ul.mansionList > li` is one
+ * BUILDING, `table.aboutTable tbody tr` inside `.vacancyWrap` is one
+ * rentable UNIT, both confirmed live), with a stable 10-column layout: 階 /
+ * 部屋番号 / 賃料 / 管理費 / 敷金・礼金 / 間取り / 面積 / 入居 / 詳細 / お気に入り.
+ * Unlike suumo/homes/rakuten, 敷金・礼金 here was ALWAYS seen live as
+ * "Xヶ月 / Yヶ月" (a rent multiple for both slots, never an absolute yen
+ * amount or "無") — still run it through the same absolute/month/none
+ * parser as the other sites for safety, in case a ward this wasn't sampled
+ * against uses a different convention.
+ */
+async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
+  const raw = await page.evaluate(new Function(`
+    var toHalfWidth = function(s) {
+      return s.replace(/[\\uFF01-\\uFF5E]/g, function(ch) {
+        return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+      });
+    };
+    var parseDepositSlot = function(text, rentMan) {
+      if (!text) return undefined;
+      var t = text.trim();
+      if (!t || t === "－" || t === "-" || t === "ー" || t === "―") return undefined;
+      if (t === "無") return 0;
+      var monthM = t.match(/([\\d.]+)\\s*ヶ月/);
+      if (monthM) return parseFloat(monthM[1]) * rentMan;
+      var manM = t.match(/([\\d,.]+)\\s*万円/);
+      if (manM) return parseFloat(manM[1].replace(/,/g, ""));
+      var yenM = t.match(/([\\d,]+)\\s*円/);
+      if (yenM) return parseFloat(yenM[1].replace(/,/g, "")) / 10000;
+      return undefined;
+    };
+
+    var results = [];
+    var buildings = document.querySelectorAll("ul.mansionList > li");
+
+    buildings.forEach(function(building) {
+      var gaiyouTables = building.querySelectorAll("table.gaiyou");
+      var address = "";
+      var station = "";
+      var walkMinutes = null;
+      var buildYear = null;
+      var petsAllowed = undefined;
+
+      gaiyouTables.forEach(function(table) {
+        table.querySelectorAll("tr").forEach(function(row) {
+          var th = row.querySelector("th");
+          var td = row.querySelector("td");
+          if (!th || !td) return;
+          var label = th.textContent.trim();
+          var val = td.textContent.trim();
+          if (label === "住所") address = val;
+          else if (label === "交通") {
+            var stM = val.match(/「([^」]+)」\\s*駅/);
+            if (stM) station = stM[1] + "駅";
+            var wkM = val.match(/徒歩\\s*(\\d+)\\s*分/);
+            if (wkM) walkMinutes = parseInt(wkM[1], 10);
+          } else if (label === "築年") {
+            var ageM = val.match(/築(\\d+)年/);
+            if (ageM) buildYear = new Date().getFullYear() - parseInt(ageM[1], 10);
+            else if (/新築/.test(val)) buildYear = new Date().getFullYear();
+          } else if (label === "ペット") {
+            if (val.indexOf("可") !== -1) petsAllowed = true;
+            else if (val.indexOf("不可") !== -1) petsAllowed = false;
+          }
+        });
+      });
+      if (!address) return;
+
+      var ward = "";
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        .replace(/^[^\\s]{1,4}郡/, "")
+        .match(/^(.{1,6}?[市区])/)
+        || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+      if (wm) ward = wm[1];
+
+      var unitRows = building.querySelectorAll(".vacancyWrap table.aboutTable tbody tr");
+      unitRows.forEach(function(row) {
+        var tds = row.querySelectorAll("td");
+        if (tds.length < 9) return;
+
+        var floorM = tds[0].textContent.match(/(\\d+)\\s*階/);
+        var floor = floorM ? parseInt(floorM[1], 10) : null;
+
+        var rentM = tds[2].textContent.replace(/[\\s,]/g, "").match(/([\\d]+)円/);
+        if (!rentM) return; // no rent = not a real listing row
+        var rent = parseFloat(rentM[1]) / 10000;
+
+        var mgmtM = tds[3].textContent.replace(/[\\s,]/g, "").match(/([\\d]+)円/);
+        var managementFee = mgmtM ? parseFloat(mgmtM[1]) / 10000 : undefined;
+
+        var depositParts = tds[4].textContent.split("/").map(function(s) { return s.trim(); });
+        var deposit = parseDepositSlot(depositParts[0], rent);
+        var keyMoney = parseDepositSlot(depositParts[1], rent);
+
+        var layout = toHalfWidth(tds[5].textContent.trim());
+
+        var areaM = tds[6].textContent.match(/([\\d.]+)\\s*m/);
+        var area = areaM ? parseFloat(areaM[1]) : null;
+
+        // Column order: 階/部屋番号/賃料/管理費/敷金・礼金/間取り/面積/入居/詳細/お気に入り
+        // — the detail link lives in the 詳細 cell at index 8, not 7.
+        var linkEl = tds.length > 8 ? tds[8].querySelector("a.viewBtn") : null;
+        var url = linkEl ? linkEl.getAttribute("href") || "" : "";
+        if (url && !url.startsWith("http")) url = "https://www.nom-rent.com" + url;
+        if (!url) return; // no detail link = can't dedupe/match reliably
+
+        results.push({
+          address: address,
+          ward: ward,
+          price: rent,
+          rent: rent,
+          managementFee: managementFee,
+          deposit: deposit,
+          keyMoney: keyMoney,
+          area: area != null ? area : undefined,
+          floorArea: area != null ? area : undefined,
+          buildYear: buildYear != null ? buildYear : undefined,
+          floor: floor != null ? floor : undefined,
+          layout: layout || undefined,
+          station: station || undefined,
+          walkMinutes: walkMinutes != null ? walkMinutes : undefined,
+          petsAllowed: petsAllowed,
+          url: url,
+          source: "nomu",
+          propertyType: "マンション",
+          dealType: "rent",
+        });
+      });
+    });
+
+    return JSON.stringify(results);
+  `));
+  return JSON.parse(raw);
+}
+
+async function scrapeNomuChintai(areaCode: string): Promise<ScrapeResult> {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const allListings: PropertyListing[] = [];
+  const seenUrls = new Set<string>();
+  // Confirmed live: nom-rent.com is a small managed-rental catalog (港区
+  // alone paginated out at 2 pages / ~11 buildings), nothing like suumo's
+  // dense multi-thousand-listing chintai vertical — a modest page cap is
+  // enough to exhaust it and the empty-page break below stops earlier anyway.
+  const MAX_PAGES = 10;
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(config.userAgent);
+    await page.setViewport({ width: 1280, height: 800 });
+
+    for (let p = 1; p <= MAX_PAGES; p++) {
+      const url = `https://www.nom-rent.com/area/result${areaCode}/?address%5B%5D=${areaCode}&class%5B%5D=c1&pg=${p}`;
+      logger.info(`[Nomu Scraper] Loading chintai page ${p} for area ${areaCode}...`);
+
+      try {
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+      } catch {
+        logger.warn(`[Nomu Scraper] Chintai page ${p} failed to load`);
+        break;
+      }
+
+      try {
+        await page.waitForSelector("ul.mansionList > li", { timeout: 15000 });
+      } catch {
+        logger.info(`[Nomu Scraper] No chintai listings on page ${p}, stopping`);
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, 1500));
+
+      const listings = await extractChintaiListings(page);
+      const newListings = listings.filter((l) => {
+        if (!l.url || seenUrls.has(l.url)) return false;
+        seenUrls.add(l.url);
+        return true;
+      });
+
+      if (newListings.length === 0) {
+        logger.info(`[Nomu Scraper] Chintai page ${p}: no new listings, stopping`);
+        break;
+      }
+
+      logger.info(`[Nomu Scraper] Chintai page ${p}: ${newListings.length} new listings (total: ${allListings.length + newListings.length})`);
+      allListings.push(...newListings);
+    }
+
+    logger.info(`[Nomu Scraper] Chintai scrape complete: ${allListings.length} listings for area ${areaCode}`);
+    allListings.slice(0, 5).forEach((l, i) => {
+      logger.info(
+        `[Nomu Scraper]   [${i}] ${l.ward} ${l.address} | rent=${l.rent}万円 | mgmt=${l.managementFee ?? "?"}万円 | deposit=${l.deposit ?? "?"} | keyMoney=${l.keyMoney ?? "?"} | pets=${l.petsAllowed ?? "?"}`
+      );
+    });
+
+    return {
+      listings: allListings,
+      source: "nomu",
+      areaCode,
+      scrapedAt: Date.now(),
+      count: allListings.length,
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function scrapeNomu(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  if (dealType === "rent") {
+    return await scrapeNomuChintai(areaCode);
+  }
+
   const prefAndCode = CODE_TO_PREF_URL[areaCode];
   if (!prefAndCode) {
     logger.warn(`[Nomu Scraper] No mapping for ward code ${areaCode}, skipping`);

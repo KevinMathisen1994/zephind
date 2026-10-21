@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment / secrets. NOTE: the repo already tracks a root .env from before
+# this rule — adding it here does not untrack it (git ignores only apply to
+# untracked files). Anything NEW, such as scraper-service/.env holding
+# SCRAPER_INGEST_SECRET (a write credential for the Convex deployment), stays out.
+.env
+.env.*
+!.env.example
+
+# Convex data export: live OAuth refresh tokens and customer contact details.
+convex-snapshot
+convex-export/
+
+# Supabase CLI temp files
+supabase/.temp/

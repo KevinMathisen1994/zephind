@@ -9,8 +9,10 @@
  */
 
 import type * as adminMaintenance from "../adminMaintenance.js";
+import type * as crons from "../crons.js";
 import type * as customers from "../customers.js";
 import type * as deals from "../deals.js";
+import type * as emailSettings from "../emailSettings.js";
 import type * as evaluate from "../evaluate.js";
 import type * as evaluateGH from "../evaluateGH.js";
 import type * as evaluateGemini from "../evaluateGemini.js";
@@ -18,13 +20,18 @@ import type * as evaluateGroq from "../evaluateGroq.js";
 import type * as http from "../http.js";
 import type * as ingest from "../ingest.js";
 import type * as lib_authz from "../lib/authz.js";
+import type * as lib_hardFilter from "../lib/hardFilter.js";
+import type * as lib_mailParse from "../lib/mailParse.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as listings from "../listings.js";
+import type * as mailIngest from "../mailIngest.js";
+import type * as mailIngestData from "../mailIngestData.js";
 import type * as marketCache from "../marketCache.js";
 import type * as matching from "../matching.js";
 import type * as orders from "../orders.js";
 import type * as properties from "../properties.js";
 import type * as proposals from "../proposals.js";
+import type * as savedListings from "../savedListings.js";
 import type * as scrapeTrigger from "../scrapeTrigger.js";
 import type * as scraperHealth from "../scraperHealth.js";
 
@@ -36,8 +43,10 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   adminMaintenance: typeof adminMaintenance;
+  crons: typeof crons;
   customers: typeof customers;
   deals: typeof deals;
+  emailSettings: typeof emailSettings;
   evaluate: typeof evaluate;
   evaluateGH: typeof evaluateGH;
   evaluateGemini: typeof evaluateGemini;
@@ -45,13 +54,18 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   ingest: typeof ingest;
   "lib/authz": typeof lib_authz;
+  "lib/hardFilter": typeof lib_hardFilter;
+  "lib/mailParse": typeof lib_mailParse;
   "lib/scoring": typeof lib_scoring;
   listings: typeof listings;
+  mailIngest: typeof mailIngest;
+  mailIngestData: typeof mailIngestData;
   marketCache: typeof marketCache;
   matching: typeof matching;
   orders: typeof orders;
   properties: typeof properties;
   proposals: typeof proposals;
+  savedListings: typeof savedListings;
   scrapeTrigger: typeof scrapeTrigger;
   scraperHealth: typeof scraperHealth;
 }>;

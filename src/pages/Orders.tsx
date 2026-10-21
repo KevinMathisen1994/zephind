@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
-import { api } from "../../convex/_generated/api";
+// Aliased so the call sites below read unchanged. useAction and useMutation
+// are the same hook now: both just POST to the backend.
+import {
+  useApiQuery as useQuery,
+  useApiMutation as useMutation,
+  useApiMutation as useAction,
+} from "../hooks/useApi";
+import { api } from "../lib/api";
 import {
   Card,
   CardContent,
@@ -12,9 +18,17 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
+import { RangeSlider } from "../components/ui/range-slider";
+import {
+  formatJaDate,
+  formatJaDateTime,
+  formatJaDateTimeShort,
+  formatJaTime,
+} from "../lib/dateFormat";
 import { TOKYO_WARDS, TOKYO_CITIES, wardLabelToCode } from "../lib/tokyoWards";
 import {
   RefreshCw,
+  Mail,
   Plus,
   X,
   Trash2,
@@ -37,13 +51,60 @@ import {
   ChevronRight,
   Users,
   Send,
+  Clock,
+  Bot,
+  Cloud,
+  Laptop,
+  Star,
+  Paperclip,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 import { ProposalModal } from "../components/ProposalModal";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../lib/dataModel";
 
 const GMAPS_KEY = import.meta.env
   .VITE_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string;
+
+/**
+ * Where the LOCAL scraper service listens (`npm run dev:scraper`).
+ *
+ * Only ever used when the user explicitly picks ローカル execution, which is why
+ * this being a build-time value is fine here — unlike the old code that sent every
+ * user's scrape to their own localhost by default and so was dead everywhere but
+ * one laptop (see dispatchScrape).
+ *
+ * 127.0.0.1, NOT localhost, and deliberately so: "localhost" resolves to ::1
+ * first, so ANY other process holding [::1]:3001 shadows the scraper even though
+ * the scraper is listening on all interfaces. That happened here — an unrelated
+ * webpack dev server on [::1]:3001 swallowed every request and the UI could only
+ * report "Failed to fetch". Pinning IPv4 addresses the actual listener.
+ */
+const LOCAL_SCRAPER_URL =
+  (import.meta.env.VITE_SCRAPER_URL as string) || "http://127.0.0.1:3001";
+
+/** Where a scrape actually executes. */
+type ScrapeRunner = "github" | "local";
+
+/** One row from mailIngest.inspectRecentMail (temporary diagnostic). */
+type InspectedMail = {
+  provider: string;
+  id: string;
+  subject?: string;
+  from?: string;
+  receivedAt?: number;
+  bodyText?: string;
+  attachments?: { id?: string; filename: string; mimeType: string; size: number }[];
+  pdfTexts?: string[];
+  listings?: Record<string, unknown>[];
+  needsLlm?: boolean;
+  reason?: string;
+  filtered?: boolean;
+  filterReason?: string | null;
+  error?: string;
+  /** Which path produced `listings`. Absent unless the AI pass was run. */
+  engine?: "rules" | "gemini" | "groq" | "none" | "stored";
+};
 
 // Mirrors the comp shape built in convex/evaluate.js (MLIT XIT001 fields,
 // normalized). Kept loose (`scoreDetail` is stored as `v.any()`) since it's
@@ -115,10 +176,285 @@ const SOURCE_LABELS: Record<string, string> = {
 
 // All 23 special wards, used when an order names no area at all.
 const ALL_TOKYO_WARD_CODES = [
-  "13101", "13102", "13103", "13104", "13105", "13106", "13107", "13108",
-  "13109", "13110", "13111", "13112", "13113", "13114", "13115", "13116",
-  "13117", "13118", "13119", "13120", "13121", "13122", "13123",
+  "13101",
+  "13102",
+  "13103",
+  "13104",
+  "13105",
+  "13106",
+  "13107",
+  "13108",
+  "13109",
+  "13110",
+  "13111",
+  "13112",
+  "13113",
+  "13114",
+  "13115",
+  "13116",
+  "13117",
+  "13118",
+  "13119",
+  "13120",
+  "13121",
+  "13122",
+  "13123",
 ];
+
+/**
+ * The label scraper-service/src/cli.ts writes as 実行者 for the scheduled sweep.
+ * Must stay in sync with AUTOMATIC_TRIGGER_LABEL there; a mismatch only costs the
+ * badge styling, never the text, so it fails soft.
+ */
+const AUTOMATIC_TRIGGER_LABEL = "自動取得（定期実行）";
+const isAutomaticTrigger = (by: string | undefined) =>
+  by === AUTOMATIC_TRIGGER_LABEL || /自動/.test(by ?? "");
+
+/**
+ * 物件種別, grouped so each row shows what belongs with what: オーナーチェンジ is a
+ * property OF a 区分マンション, and 一棟マンション / アパート / ビル are all
+ * whole-building purchases — a different product from a single unit.
+ */
+const PROPERTY_TYPE_GROUPS: {
+  label: string;
+  types: string[];
+  ownerChangeToggle?: boolean;
+}[] = [
+  { label: "土地・戸建て", types: ["土地", "一戸建て"] },
+  {
+    label: "マンション（区分）",
+    types: ["マンション"],
+    ownerChangeToggle: true,
+  },
+  { label: "一棟・事業用", types: ["ビル", "一棟マンション", "アパート"] },
+];
+
+/**
+ * 借りる's version of the above. 土地/ビル/一棟マンション are for-sale product
+ * shapes (raw land, a whole building bought as an investment) that nobody
+ * searches for as a TENANT, and オーナーチェンジ (賃貸中のまま売却) only means
+ * anything for a SALE — a rental listing is already occupiable, that concept
+ * does not apply to it at all.
+ */
+const RENTAL_PROPERTY_TYPE_GROUPS: typeof PROPERTY_TYPE_GROUPS = [
+  { label: "種別", types: ["一戸建て", "アパート", "マンション"] },
+];
+
+/** Types that are a building someone lives in or rents out (i.e. not raw land). */
+const BUILDING_TYPES = [
+  "一戸建て",
+  "マンション",
+  "一棟マンション",
+  "アパート",
+  "ビル",
+];
+/** Types where a plot size / 建ぺい率 / 容積率 is a meaningful condition. */
+const LAND_TYPES = ["土地", "一戸建て", "ビル", "一棟マンション", "アパート"];
+/** Types bought for rental income, where 利回り applies. */
+const INCOME_TYPES = ["マンション", "一棟マンション", "アパート", "ビル"];
+
+/**
+ * Sort options for the extracted-listings list inside an order card.
+ *
+ * 掲載日 (postedAt) is the portal's own publication date, scraped per listing
+ * (scraper-service/src/services/postedDate.ts). Three portals publish no date at
+ * all and At Home blocks the page that carries it, so it falls back to 取得日時
+ * (`_creationTime`, when this system first saw the listing) — which is also a
+ * sort option in its own right, since "when did we search" is a different
+ * question from "when was it posted".
+ */
+const SORT_OPTIONS = [
+  { key: "score", label: "評価スコア順" },
+  { key: "newest", label: "掲載が新しい順" },
+  { key: "oldest", label: "掲載が古い順" },
+  { key: "foundNewest", label: "取得日時が新しい順" },
+  { key: "priceAsc", label: "価格が安い順" },
+  { key: "priceDesc", label: "価格が高い順" },
+] as const;
+
+type SortKey = (typeof SORT_OPTIONS)[number]["key"];
+
+/**
+ * Quick filters for a long results list, shown as counted chips left of 並び順.
+ *
+ * Each is a predicate over (match, listing) rather than a fixed list of values, so
+ * the chip row can show live counts and hide anything with none — a chip reading
+ * "0件" is just noise, and one that filters to an empty list is a dead end.
+ *
+ * 物件種別 chips are generated from what the results actually contain (see
+ * buildTypeFilters) instead of being hard-coded, so they match the order's own
+ * criteria without a second list to maintain.
+ */
+type ListingFilter = {
+  key: string;
+  label: string;
+  test: (
+    match: Doc<"matching">,
+    listing: Doc<"listings"> | undefined,
+    score?: number,
+  ) => boolean;
+};
+
+/** 14 days, the window the portals themselves treat as 新着. */
+const NEW_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+const BASE_FILTERS: ListingFilter[] = [
+  {
+    key: "highScore",
+    label: "高評価 80点以上",
+    test: (_m, _l, score) => score !== undefined && score >= 80,
+  },
+  {
+    key: "unevaluated",
+    label: "未評価",
+    test: (_m, _l, score) => score === undefined,
+  },
+  {
+    key: "new",
+    label: "新着",
+    // The portal's own badge, or a posted date inside the same window. Discovery
+    // time is deliberately NOT used: everything is "new" on a first sweep.
+    test: (_m, listing) =>
+      Boolean(listing?.isNew) ||
+      (listing?.postedAt != null &&
+        Date.now() - listing.postedAt <= NEW_WINDOW_MS),
+  },
+  {
+    key: "hasPostedDate",
+    label: "掲載日あり",
+    test: (_m, listing) => listing?.postedAt != null,
+  },
+];
+
+/** 掲載日 if the portal published one, else when we first saw the listing. */
+function listingDate(listing: Doc<"listings"> | undefined): number | undefined {
+  return listing?.postedAt ?? listing?._creationTime;
+}
+
+/**
+ * Portals that publish no 掲載日/更新日 at all (verified against their live detail
+ * pages), plus At Home, whose detail pages answer with a bot check. Mirrors
+ * DETAIL_DATE_SOURCES in scraper-service/src/services/postedDate.ts — kept as a
+ * separate list because the frontend cannot import from that package.
+ */
+const SOURCES_WITHOUT_POSTED_DATE = new Set([
+  "stepon",
+  "tokyu",
+  "asahi",
+  "athome",
+]);
+
+/**
+ * The PORTAL's own date for a listing — when it was posted (or last updated).
+ *
+ * Deliberately does NOT fall back to `_creationTime`: that is when our search
+ * found the listing, it is displayed in its own field right next to this one, and
+ * substituting it here printed the same date twice under two different labels.
+ * An unknown posted date stays unknown.
+ */
+function describePostedDate(listing: Doc<"listings"> | undefined): {
+  label: string;
+  value: number | undefined;
+  note: string;
+  missingReason?: "unpublished" | "notFetched";
+} {
+  if (listing?.postedAt == null) {
+    // "The portal never publishes one" and "we have not looked yet" are different
+    // facts, and showing 非公開 for both was simply wrong for the 15 portals that
+    // DO publish a date. A listing found before 掲載日 scraping existed has no
+    // date until a run backfills it.
+    const unpublished = SOURCES_WITHOUT_POSTED_DATE.has(listing?.source ?? "");
+    return {
+      label: "掲載日",
+      value: undefined,
+      missingReason: unpublished ? "unpublished" : "notFetched",
+      note: unpublished
+        ? "この掲載元は掲載日・更新日を公開していないため取得できません（東急リバブル・住友不動産ステップ・朝日住宅・At Home）"
+        : "この物件は掲載日の取得前に登録されました。次回の検索時に掲載元ページから取得します。",
+    };
+  }
+  if (listing.postedDateKind === "updated") {
+    return {
+      label: "情報更新日",
+      value: listing.postedAt,
+      note: "この掲載元が公開しているのは更新日のみです。再掲載・情報更新の日付で、初回掲載日とは異なる場合があります。",
+    };
+  }
+  return {
+    label: "掲載日（情報公開日）",
+    value: listing.postedAt,
+    note: "掲載元が公開している情報公開日です。",
+  };
+}
+
+/**
+ * The chip row for one order's results: すべて, each 物件種別 present, then the
+ * base filters — each with its real count, and only when that count is non-zero.
+ */
+function buildListingFilters(
+  matches: Doc<"matching">[],
+  listingOf: (id: string) => Doc<"listings"> | undefined,
+  scoreOf: (match: Doc<"matching">) => number | undefined,
+): { key: string; label: string; count: number }[] {
+  const rows = matches.map((m) => ({
+    match: m,
+    listing: listingOf(m.listingId ?? ""),
+    score: scoreOf(m),
+  }));
+
+  // 物件種別 chips come from the data: portals emit labels the order never named
+  // (区分マンション, 売地 …), and a hard-coded list would either miss them or show
+  // empty chips.
+  const typeCounts = new Map<string, number>();
+  for (const row of rows) {
+    const type = row.listing?.propertyType;
+    if (type) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+  }
+
+  const chips = [{ key: "all", label: "すべて", count: rows.length }];
+
+  for (const [type, count] of [...typeCounts.entries()].sort(
+    (a, b) => b[1] - a[1],
+  )) {
+    chips.push({ key: `type:${type}`, label: type, count });
+  }
+
+  for (const filter of BASE_FILTERS) {
+    const count = rows.filter((row) =>
+      filter.test(row.match, row.listing, row.score),
+    ).length;
+    if (count > 0) chips.push({ key: filter.key, label: filter.label, count });
+  }
+
+  // One chip that selects everything is not a filter — drop the row entirely.
+  return chips.length > 1 ? chips : [];
+}
+
+/** Does a match pass the chip the user picked? */
+function passesListingFilter(
+  filterKey: string,
+  match: Doc<"matching">,
+  listing: Doc<"listings"> | undefined,
+  score: number | undefined,
+): boolean {
+  if (!filterKey || filterKey === "all") return true;
+  if (filterKey.startsWith("type:")) {
+    return listing?.propertyType === filterKey.slice("type:".length);
+  }
+  const filter = BASE_FILTERS.find((f) => f.key === filterKey);
+  return filter ? filter.test(match, listing, score) : true;
+}
+
+/** Score on a match: the stored value, else parsed out of the evaluation text. */
+function matchScore(
+  match: Doc<"matching">,
+  localEvaluations: Record<string, string>,
+): number | undefined {
+  if (match.score != null) return match.score;
+  const text = match.evaluation || localEvaluations[match._id];
+  const parsed = text?.match(/評価[：:\s]*(\d+)/)?.[1];
+  return parsed ? Number(parsed) : undefined;
+}
 
 // Some orders store requirements in the nested `criteria` blob rather than as
 // top-level columns (e.g. { criteria: { walkMinutes: 15 } }). Reading only the
@@ -134,13 +470,22 @@ function buildOrderCriteria(order: Doc<"orders"> | null | undefined) {
 
   return {
     orderName: order.name as string | undefined,
-    wards:
-      strs("wards") ??
-      (order.ward ? [order.ward] : undefined),
+    wards: strs("wards") ?? (order.ward ? [order.ward] : undefined),
+    dealType: (order.dealType as "buy" | "rent" | undefined) ?? "buy",
     priceMin: num("priceMin"),
     priceMax: num("priceMax"),
-    areaMin: num("areaMin"),
-    areaMax: num("areaMax"),
+    rentMin: num("rentMin"),
+    rentMax: num("rentMax"),
+    maxDeposit: num("maxDeposit"),
+    maxKeyMoney: num("maxKeyMoney"),
+    petsRequired: (order.petsRequired ?? nested.petsRequired) as
+      | boolean
+      | undefined,
+    // 専有面積 is stored as buildingSizeMin/Max; the scorer's field is areaMin/Max
+    // (convex/lib/scoring.js). Without this fallback the buyer's stated unit-size
+    // range never reached the score at all.
+    areaMin: num("areaMin") ?? num("buildingSizeMin"),
+    areaMax: num("areaMax") ?? num("buildingSizeMax"),
     landSizeMin: num("landSizeMin"),
     landSizeMax: num("landSizeMax"),
     minYield: num("minYield"),
@@ -151,16 +496,221 @@ function buildOrderCriteria(order: Doc<"orders"> | null | undefined) {
     structureTypes: strs("structureTypes"),
     maxBuildAge: num("maxBuildAge"),
     minBuildYear: num("minBuildYear"),
-    excludeFirstFloor: (order.excludeFirstFloor ??
-      nested.excludeFirstFloor) as boolean | undefined,
+    ownerChange: (order.ownerChange ?? nested.ownerChange) as
+      | boolean
+      | undefined,
+    excludeFirstFloor: (order.excludeFirstFloor ?? nested.excludeFirstFloor) as
+      | boolean
+      | undefined,
     maxFloor: num("maxFloor"),
     minElevators: num("minElevators"),
     minTotalUnits: num("minTotalUnits"),
   };
 }
 
+function EmailListingDetails({
+  listing,
+  handleOpenAttachment,
+  openingAttachmentId,
+}: {
+  listing: any;
+  handleOpenAttachment: (
+    provider: string,
+    messageId: string,
+    attachment: { id?: string; filename: string; mimeType: string; size?: number },
+  ) => Promise<void>;
+  openingAttachmentId: string | null;
+}) {
+  const getEmailDetails = useAction(api.mailIngest.getEmailDetailsForListing);
+  const [details, setDetails] = useState<{
+    provider: string;
+    messageId: string;
+    subject: string;
+    bodyText: string;
+    attachments: Array<{ id?: string; filename: string; mimeType: string; size: number }>;
+    from?: string;
+    receivedAt?: number;
+  } | null>(() => {
+    if (listing?.emailSubject !== undefined && listing?.emailAttachments !== undefined) {
+      const parts = (listing.url || "").split(":");
+      return {
+        provider: parts[1] || "gmail",
+        messageId: parts[2] || "",
+        subject: listing.emailSubject || "",
+        bodyText: listing.emailBody || "",
+        attachments: listing.emailAttachments || [],
+        from: listing.emailFrom,
+        receivedAt: listing.emailReceivedAt,
+      };
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(false);
+  const [showBody, setShowBody] = useState(false);
+
+  useEffect(() => {
+    if (!details && listing?._id && (listing?.source === "email" || listing?.url?.startsWith("email:"))) {
+      setLoading(true);
+      getEmailDetails({ listingId: listing._id })
+        .then((res) => {
+          if (res) setDetails(res);
+        })
+        .catch((err) => {
+          console.error("Failed to load email details for listing:", err);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [listing?._id, listing?.source, details, getEmailDetails]);
+
+  const provider = details?.provider || (listing?.url || "").split(":")[1] || "gmail";
+  const messageId = details?.messageId || (listing?.url || "").split(":")[2] || "";
+  const subject = details?.subject ?? listing?.emailSubject;
+  const from = details?.from ?? listing?.emailFrom;
+  const receivedAt = details?.receivedAt ?? listing?.emailReceivedAt;
+  const attachments = details?.attachments ?? listing?.emailAttachments ?? [];
+  const bodyText = details?.bodyText ?? listing?.emailBody;
+
+  return (
+    <div className="rounded-xl border border-amber-200/90 bg-amber-50/40 p-3.5 space-y-3">
+      {/* Top row: badge + sender + date */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-bold text-xs shadow-2xs">
+            <Mail className="w-3.5 h-3.5 text-amber-700" />
+            メール連携物件
+          </span>
+          {loading && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800">
+              <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
+              詳細読込中...
+            </span>
+          )}
+        </div>
+        {receivedAt && (
+          <span className="text-[11px] font-medium text-amber-900/80">
+            受信日時: {formatJaDateTime(receivedAt)}
+          </span>
+        )}
+      </div>
+
+      {/* From and Subject */}
+      <div className="space-y-1.5 text-xs bg-white/70 rounded-lg p-2.5 border border-amber-100">
+        {from && (
+          <div className="flex items-start gap-2">
+            <span className="font-bold text-amber-900 shrink-0">送信元:</span>
+            <span className="text-slate-800 font-medium break-all">{from}</span>
+          </div>
+        )}
+        <div className="flex items-start gap-2">
+          <span className="font-bold text-amber-900 shrink-0">件名:</span>
+          <span className="text-slate-900 font-bold break-all">
+            {subject || (loading ? "読込中..." : "(件名なし)")}
+          </span>
+        </div>
+      </div>
+
+      {/* Attachments Section */}
+      {attachments.length > 0 ? (
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+            <Paperclip className="w-3.5 h-3.5 text-amber-700" />
+            添付ファイル ({attachments.length}件)
+            <span className="text-[10px] font-normal text-amber-800/70 ml-1">
+              — クリックすると別タブでプレビューが開きます
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((a: any, i: number) => {
+              const isPdf =
+                a.mimeType === "application/pdf" ||
+                a.filename?.toLowerCase().endsWith(".pdf");
+              const isOpening = openingAttachmentId === a.id;
+              return (
+                <button
+                  key={a.id || i}
+                  type="button"
+                  disabled={isOpening || !a.id}
+                  onClick={() =>
+                    void handleOpenAttachment(provider, messageId, a)
+                  }
+                  className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-white hover:border-amber-400 hover:bg-amber-50/70 transition-all text-left shadow-2xs cursor-pointer"
+                  title={a.id ? "クリックして別タブで開く" : "添付ファイルIDがありません"}
+                >
+                  {isOpening ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                  ) : isPdf ? (
+                    <div className="flex items-center justify-center px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-black text-[10px] shrink-0 border border-rose-200">
+                      PDF
+                    </div>
+                  ) : (
+                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                  )}
+                  <div className="min-w-0 max-w-[220px]">
+                    <span className="block font-bold text-[11px] text-slate-800 group-hover:text-amber-900 truncate">
+                      {a.filename || "(添付ファイル)"}
+                    </span>
+                    <span className="block text-[10px] text-slate-500">
+                      {a.size ? `${Math.round(a.size / 1024)}KB` : isPdf ? "PDF文書" : a.mimeType}
+                    </span>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5 text-amber-700 opacity-60 group-hover:opacity-100 shrink-0 ml-1" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : !loading ? (
+        <div className="text-[11px] text-amber-800/70">
+          ※ 添付ファイルはありません
+        </div>
+      ) : null}
+
+      {/* Body Toggle */}
+      {bodyText && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowBody((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-900 hover:text-amber-950 hover:underline cursor-pointer"
+          >
+            {showBody ? (
+              <>
+                <ChevronUp className="w-3.5 h-3.5" />
+                メール本文を閉じる
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3.5 h-3.5" />
+                メール本文を表示
+              </>
+            )}
+          </button>
+          {showBody && (
+            <pre className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
+              {bodyText}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OrdersPage() {
   const navigate = useNavigate();
+  // Clerk's Convex JWT template does not map the `name` claim by default, so the
+  // SERVER sees only a subject and can only label a search "ログインユーザー". The
+  // browser knows the real name, so it is sent along for display only — see
+  // triggeredByName in convex/scrapeTrigger.js. DashboardNav already calls
+  // useUser() unconditionally, so this adds no new provider requirement.
+  const { user } = useUser();
+  const triggeredByName =
+    user?.fullName ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress ||
+    undefined;
   const orders = useQuery(api.orders.list);
   const customers = useQuery(api.customers.list);
   const createOrder = useMutation(api.orders.create);
@@ -168,17 +718,29 @@ export default function OrdersPage() {
   const saveScore = useMutation(api.matching.saveScore);
   const updateOrder = useMutation(api.orders.update);
   const matches = useQuery(api.matching.list);
+  // Only the ids: the star state for a 500-row list needs nothing else, and the
+  // full snapshots belong to the 保存物件 page.
+  const savedListingIds = useQuery(api.savedListings.savedListingIds);
+  const toggleSaved = useMutation(api.savedListings.toggle);
+  const savedSet = useMemo(
+    () => new Set((savedListingIds ?? []).filter(Boolean) as string[]),
+    [savedListingIds],
+  );
 
   const matchListingIds = useMemo(() => {
     if (!matches) return [];
     return Array.from(
-      new Set(matches.map((m) => m.listingId).filter((id): id is string => Boolean(id)))
+      new Set(
+        matches
+          .map((m) => m.listingId)
+          .filter((id): id is string => Boolean(id)),
+      ),
     );
   }, [matches]);
 
   const fetchedListings = useQuery(
     api.listings.getByIds,
-    matchListingIds.length > 0 ? { ids: matchListingIds } : "skip"
+    matchListingIds.length > 0 ? { ids: matchListingIds } : "skip",
   );
 
   const listings = useMemo(() => {
@@ -187,11 +749,237 @@ export default function OrdersPage() {
     return fetchedListings;
   }, [matches, matchListingIds.length, fetchedListings]);
   const evaluateListing = useAction(api.evaluate.evaluateListing);
+  // Read-only mailbox connection (convex/mailIngest.js) — a DIFFERENT feature
+  // from the removed proposal-SEND integration: this reads broker emails and
+  // matches them against orders, it never sends anything.
+  const mailProviders = useQuery(api.mailIngestData.availableProviders);
+  const mailAccounts = useQuery(api.mailIngestData.myAccounts);
+  const startMailOAuth = useAction(api.mailIngest.startOAuth);
+  const disconnectMailAccount = useMutation(api.mailIngestData.disconnect);
+  const syncMailNow = useAction(api.mailIngest.syncNow);
+  const [connectingMailProvider, setConnectingMailProvider] = useState<
+    string | null
+  >(null);
+  const [syncingMail, setSyncingMail] = useState(false);
+  const [mailNotice, setMailNotice] = useState<string | null>(null);
+
+  // TEMPORARY: inspector for what the mail sync actually saw. A sync only
+  // reports counts, so "物件情報は見つかりませんでした" cannot be told apart from a
+  const inspectRecentMail = useAction(api.mailIngest.inspectRecentMail);
+  const getAttachmentData = useAction(api.mailIngest.getAttachmentData);
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [inspected, setInspected] = useState<InspectedMail[] | null>(null);
+  const [openMailId, setOpenMailId] = useState<string | null>(null);
+  const [filterMatchedOnly, setFilterMatchedOnly] = useState(true);
+
+  const handleOpenAttachment = async (
+    provider: string,
+    messageId: string,
+    attachment: { id?: string; filename: string; mimeType: string },
+  ) => {
+    if (!attachment.id) {
+      setMailNotice("添付ファイルIDが見つかりませんでした");
+      return;
+    }
+
+    // Pre-open a blank tab in the user-initiated click context to bypass popup blockers
+    const newWindow = window.open("about:blank", "_blank");
+    if (newWindow) {
+      newWindow.document.title = attachment.filename || "PDF読込中...";
+    }
+
+    setOpeningAttachmentId(attachment.id);
+    try {
+      const res = await getAttachmentData({
+        provider,
+        messageId,
+        attachmentId: attachment.id,
+        mimeType: attachment.mimeType,
+        filename: attachment.filename,
+      });
+
+      if (res?.base64) {
+        const byteCharacters = atob(res.base64);
+        const byteNumbers = new Uint8Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const blob = new Blob([byteNumbers], { type: res.mimeType || "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        if (newWindow && !newWindow.closed) {
+          newWindow.location.href = blobUrl;
+        } else {
+          window.open(blobUrl, "_blank");
+        }
+      } else {
+        newWindow?.close();
+        setMailNotice("PDFデータの取得に失敗しました");
+      }
+    } catch (err) {
+      newWindow?.close();
+      setMailNotice(
+        `PDFの表示に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setOpeningAttachmentId(null);
+    }
+  };
+
+  // Which incoming mail the sync bothers reading. Each rule list is edited as
+  // one word/address per line — brokers are added and removed often enough
+  // that a tag editor would be more ceremony than the job needs.
+  const ingestSettings = useQuery(api.mailIngestData.getIngestSettings);
+  const saveIngestSettings = useMutation(api.mailIngestData.saveIngestSettings);
+  const [showMailRules, setShowMailRules] = useState(false);
+  const [savingMailRules, setSavingMailRules] = useState(false);
+  const [mailRules, setMailRules] = useState({
+    requiredKeywords: "",
+    blockedKeywords: "",
+    allowedSenders: "",
+    blockedSenders: "",
+    requireAttachment: false,
+  });
+
+  // Seeded from the server row, and re-seeded each time the modal opens so a
+  // cancelled edit does not linger as the next session's starting point.
+  useEffect(() => {
+    if (!showMailRules) return;
+    setMailRules({
+      requiredKeywords: (ingestSettings?.requiredKeywords ?? []).join("\n"),
+      blockedKeywords: (ingestSettings?.blockedKeywords ?? []).join("\n"),
+      allowedSenders: (ingestSettings?.allowedSenders ?? []).join("\n"),
+      blockedSenders: (ingestSettings?.blockedSenders ?? []).join("\n"),
+      requireAttachment: ingestSettings?.requireAttachment ?? false,
+    });
+  }, [showMailRules, ingestSettings]);
+
+  const handleSaveMailRules = async () => {
+    setSavingMailRules(true);
+    try {
+      const lines = (v: string) => v.split("\n").map((x) => x.trim()).filter(Boolean);
+      await saveIngestSettings({
+        requiredKeywords: lines(mailRules.requiredKeywords),
+        blockedKeywords: lines(mailRules.blockedKeywords),
+        allowedSenders: lines(mailRules.allowedSenders),
+        blockedSenders: lines(mailRules.blockedSenders),
+        requireAttachment: mailRules.requireAttachment,
+      });
+      setShowMailRules(false);
+      setMailNotice("取り込み設定を保存しました");
+    } catch (err) {
+      setMailNotice(
+        `設定の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setSavingMailRules(false);
+    }
+  };
+
+  const handleConnectMail = async (provider: string) => {
+    setConnectingMailProvider(provider);
+    setMailNotice(null);
+    try {
+      const { url } = await startMailOAuth({
+        provider,
+        redirectTo: window.location.href,
+      });
+      const popup = window.open(url, "zephind-mail-oauth", "width=520,height=680");
+      if (!popup) window.location.assign(url);
+    } catch (err) {
+      setMailNotice(
+        `メールアカウントの接続を開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setConnectingMailProvider(null);
+    }
+  };
+
+  // The OAuth popup posts back here on completion (see convex/http.js
+  // resultPage) — Convex's own reactivity then refreshes mailAccounts.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "zephind-oauth") {
+        setMailNotice(e.data.ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  const handleInspectMail = async (runAi = false) => {
+    setInspecting(true);
+    try {
+      const rows = (await inspectRecentMail({
+        limit: 100,
+        daysBack: 90,
+        matchingOnly: true,
+        // Runs the same extraction a sync performs — one model call per message
+        // the rules could not read — so it is a deliberate click, not automatic.
+        runAi,
+      })) as InspectedMail[];
+      setInspected(rows);
+      const firstValid = rows.find((r) => !r.filtered && !r.error);
+      setOpenMailId(firstValid?.id ?? rows[0]?.id ?? null);
+    } catch (err) {
+      setMailNotice(
+        `メールの確認に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setInspecting(false);
+    }
+  };
+
+  const handleSyncMailNow = async () => {
+    setSyncingMail(true);
+    setMailNotice(null);
+    try {
+      const results = await syncMailNow({ fullSync: true, daysBack: 90 });
+      // "0 listings found" and "every message failed extraction" (e.g. Rax AI
+      // down) used to look identical — surface message counts and any real
+      // errors so a stuck sync is diagnosable instead of looking like "no new
+      // mail" every time.
+      const lines = results.map((r) => {
+        if (r.error === "REAUTH_REQUIRED") {
+          return `${r.provider}: 認証切れです。再接続してください。`;
+        }
+        const parts = [`${r.provider}: メール${r.synced ?? 0}件を確認`];
+        if ((r.listingsFound ?? 0) > 0) {
+          parts.push(`${r.listingsFound}件の物件情報を抽出`);
+        }
+        if ((r.filteredOut ?? 0) > 0) {
+          parts.push(`${r.filteredOut}件を設定により除外`);
+        }
+        if ((r.messageErrors?.length ?? 0) > 0) {
+          parts.push(`${r.messageErrors.length}件でエラー: ${r.messageErrors[0]}`);
+        }
+        if (
+          (r.synced ?? 0) > 0 &&
+          (r.listingsFound ?? 0) === 0 &&
+          (r.filteredOut ?? 0) === 0 &&
+          (r.messageErrors?.length ?? 0) === 0
+        ) {
+          parts.push("物件情報は見つかりませんでした");
+        }
+        return parts.join(" / ");
+      });
+      setMailNotice(lines.join("\n"));
+    } catch (err) {
+      setMailNotice(
+        `同期に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setSyncingMail(false);
+    }
+  };
+
   // Scraping no longer happens in the browser — see convex/scrapeTrigger.js.
   const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
   const getRecentRuns = useAction(api.scrapeTrigger.getRecentRuns);
   const cancelScrape = useAction(api.scrapeTrigger.cancelScrape);
-  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
+    null,
+  );
 
   // Scrape progress used to live in local React state, so a reload lost it and a
   // 20-minute GitHub run looked like nothing was happening. GitHub is the only
@@ -203,17 +991,26 @@ export default function OrdersPage() {
   // mid-dispatch keeps the indicator to runs this account actually asked for.
   /** True only when the live GitHub run is one THIS account started. */
   const isMyRun = (o: { scrapeRunId?: number }) =>
-    activeRun != null && o.scrapeRunId != null && o.scrapeRunId === activeRun.id;
+    activeRun != null &&
+    o.scrapeRunId != null &&
+    o.scrapeRunId === activeRun.id;
 
   const ordersRef = useRef<typeof orders>(undefined);
   ordersRef.current = orders;
-  const [activeRun, setActiveRun] = useState<{ id: number; status: string; html_url: string; created_at: string } | null>(null);
+  const [activeRun, setActiveRun] = useState<{
+    id: number;
+    status: string;
+    html_url: string;
+    created_at: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = (await getRecentRuns({})) as { runs?: any[]; error?: string } | undefined;
+        const r = (await getRecentRuns({})) as
+          | { runs?: any[]; error?: string }
+          | undefined;
         if (cancelled || !r?.runs) return;
         // queued | in_progress mean a run is live; anything else is finished.
         const live = r.runs.find(
@@ -225,9 +1022,10 @@ export default function OrdersPage() {
         if (!live) {
           for (const o of ordersRef.current ?? []) {
             if (o.scrapingStatus === "dispatched" || o.scrapeRunId != null) {
-              void updateOrder({ id: o._id, scrapingStatus: "completed" }).catch(
-                () => {},
-              );
+              void updateOrder({
+                id: o._id,
+                scrapingStatus: "completed",
+              }).catch(() => {});
             }
           }
         }
@@ -242,7 +1040,6 @@ export default function OrdersPage() {
       clearInterval(id);
     };
   }, [getRecentRuns]);
-
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   // Whole-card accordion: hides the matched-listings section behind a bottom
@@ -277,8 +1074,36 @@ export default function OrdersPage() {
   const [evaluatingOrderId, setEvaluatingOrderId] = useState<string | null>(
     null,
   );
+  /**
+   * GitHub Actions (committed code, works from any device) vs this machine
+   * (working tree, needs the dev server). Remembered per browser: whoever is
+   * developing scrapers wants local every time, and everyone else never does.
+   */
+  const [runner, setRunner] = useState<ScrapeRunner>(
+    () =>
+      (localStorage.getItem("zephind_scrape_runner") as ScrapeRunner) ||
+      "github",
+  );
+  const chooseRunner = (next: ScrapeRunner) => {
+    setRunner(next);
+    localStorage.setItem("zephind_scrape_runner", next);
+  };
+  /** Order whose local run we are waiting on, so its flag can be cleared. */
+  const [localRunOrderId, setLocalRunOrderId] = useState<string | null>(null);
+  /**
+   * Orders whose local run was killed by an explicit cancel click, not a crash.
+   *
+   * The kill (SIGTERM, escalating to SIGKILL — see handleCancelScrape) makes the
+   * child process exit via a signal, not `exit(0)`, so the status poll below
+   * cannot otherwise tell "the user stopped this on purpose" apart from "it
+   * crashed" — both just look like a non-zero exit code from the outside.
+   */
+  const canceledLocalRunsRef = useRef<Set<string>>(new Set());
+
   const [scrapeSource, setScrapeSource] = useState<Record<string, string>>({});
-  const [activeScrapeSites, setActiveScrapeSites] = useState<Record<string, string>>({});
+  const [activeScrapeSites, setActiveScrapeSites] = useState<
+    Record<string, string>
+  >({});
 
   const getOrderSiteLabel = (order: Doc<"orders">) => {
     if (
@@ -304,12 +1129,20 @@ export default function OrdersPage() {
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({});
+  // Per-order sort of the extracted listings. Score-first is the default because
+  // that is what the evaluation exists for; the rest are the orderings someone
+  // actually asks for when scanning a long list.
+  const [sortKey, setSortKey] = useState<Record<string, SortKey>>({});
+  /** Per-order quick filter; absent means すべて. */
+  const [listFilter, setListFilter] = useState<Record<string, string>>({});
   const [evalProgress, setEvalProgress] = useState<
     Record<string, { current: number; total: number }>
   >({});
   const [orderStatus, setOrderStatus] = useState<string>("pending");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
-  const [proposalOrder, setProposalOrder] = useState<Doc<"orders"> | null>(null);
+  const [proposalOrder, setProposalOrder] = useState<Doc<"orders"> | null>(
+    null,
+  );
 
   // Per-order banner explaining that a dispatch was accepted (or why it wasn't).
   // The run itself happens on GitHub Actions, so there is nothing here to poll;
@@ -318,13 +1151,15 @@ export default function OrdersPage() {
     Record<string, { kind: "ok" | "error"; text: string }>
   >({});
 
-
-
   const toggleExpand = (id: string) => {
     setExpandedMatch(expandedMatch === id ? null : id);
   };
 
-  const handleEvaluate = async (matchId: string, listing: Doc<"listings">, order?: Doc<"orders">) => {
+  const handleEvaluate = async (
+    matchId: string,
+    listing: Doc<"listings">,
+    order?: Doc<"orders">,
+  ) => {
     setEvaluatingId(matchId);
     setExpandedMatch(matchId);
 
@@ -356,11 +1191,20 @@ export default function OrdersPage() {
         layout: listing.layout,
         propertyType: listing.propertyType,
         description: listing.description,
-        yield: listing.yield || listing.grossYield || listing.netYield,
-        structure: listing.structure || listing.buildingStructure,
-        floor: listing.floor,
+        yield: listing.yield,
+        structure: listing.structure,
+        // floor / elevators were read off the listing here, but no scraper or
+        // email extractor has ever written them and there is no column for
+        // them — so an order's maxFloor / minElevators / excludeFirstFloor
+        // criteria can never be satisfied from listing data. Left out rather
+        // than passed as a permanent undefined; see the scoring TODO.
         totalUnits: listing.totalUnits,
-        elevators: listing.elevators,
+        dealType: listing.dealType,
+        rent: listing.rent,
+        managementFee: listing.managementFee,
+        deposit: listing.deposit,
+        keyMoney: listing.keyMoney,
+        petsAllowed: listing.petsAllowed,
         orderCriteria,
       });
       setEvaluations((prev) => ({
@@ -384,7 +1228,19 @@ export default function OrdersPage() {
   };
 
   const handleDelete = async (id: Id<"orders">) => {
-    await deleteOrder({ id });
+    try {
+      await deleteOrder({ id });
+    } catch (err) {
+      // Without this, a failed delete (e.g. ownership check) looked
+      // identical to a successful one — the card just silently stayed put.
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [id]: {
+          kind: "error",
+          text: `削除に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      }));
+    }
   };
 
   // Auto-evaluate after a scrape.
@@ -399,13 +1255,15 @@ export default function OrdersPage() {
   // unticks is just noise. NOTE it still only runs while the tab is open — the
   // effect reacts to matches arriving in the browser. Hence the manual fallback.
   const autoEvaluate = true;
-  const [pendingAutoEvalOrderId, setPendingAutoEvalOrderId] = useState<string | null>(null);
-  const autoEvalFired = useRef<Set<string>>(new Set());
+  const [pendingAutoEvalOrderId, setPendingAutoEvalOrderId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!pendingAutoEvalOrderId || !matches || !listings || !orders) return;
     if (scrapingOrderId === pendingAutoEvalOrderId) return; // scrape still running
-    if (evaluatingOrderId) return; // another evaluation in flight
+    if (evaluatingOrderId) return; // another batch already in flight — this
+    // effect re-runs the moment it clears, so a newly-arrived listing is not lost
 
     const orderId = pendingAutoEvalOrderId;
     const pending = matches.filter((m) => {
@@ -413,17 +1271,27 @@ export default function OrdersPage() {
       const listing = listings.find((l) => l._id === m.listingId);
       return listing && !m.evaluation && !evaluations[m._id];
     });
-    if (pending.length === 0) return; // matches not propagated yet — wait for the next update
+    if (pending.length === 0) return; // nothing new to evaluate right now
 
-    const key = `${orderId}:${pending.length}`;
-    if (autoEvalFired.current.has(key)) return;
-    autoEvalFired.current.add(key);
-
+    // Deliberately NOT `setPendingAutoEvalOrderId(null)` here, and no
+    // "fired once" dedup either — a local (or GitHub) sweep across many
+    // sources keeps ingesting new matches for MINUTES after the first batch
+    // shows up. Consuming the flag on the first partial batch used to mean
+    // everything scraped after that point — often most of a large multi-source
+    // sweep — silently never got auto-evaluated, no error, just quietly
+    // "未評価" forever until someone noticed and clicked 評価 by hand. Leaving
+    // the flag armed costs nothing: once nothing is pending, this is a no-op.
     const order = orders.find((o) => o._id === orderId);
-    setPendingAutoEvalOrderId(null);
     if (order) void handleBatchEvaluate(order);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoEvalOrderId, matches, listings, orders, scrapingOrderId, evaluatingOrderId]);
+  }, [
+    pendingAutoEvalOrderId,
+    matches,
+    listings,
+    orders,
+    scrapingOrderId,
+    evaluatingOrderId,
+  ]);
 
   const handleBatchEvaluate = async (order: Doc<"orders">, force = false) => {
     setEvaluatingOrderId(order._id);
@@ -478,6 +1346,12 @@ export default function OrdersPage() {
                 floor: listing.floor,
                 totalUnits: listing.totalUnits,
                 elevators: listing.elevators,
+                dealType: listing.dealType,
+                rent: listing.rent,
+                managementFee: listing.managementFee,
+                deposit: listing.deposit,
+                keyMoney: listing.keyMoney,
+                petsAllowed: listing.petsAllowed,
                 orderCriteria,
               });
               if (result?.evaluation) {
@@ -560,7 +1434,10 @@ export default function OrdersPage() {
     });
 
     const fail = async (text: string) => {
-      setScrapeNotice((prev) => ({ ...prev, [order._id]: { kind: "error", text } }));
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [order._id]: { kind: "error", text },
+      }));
       // Never leave the card claiming to be busy because a dispatch failed.
       await updateOrder({
         id: order._id,
@@ -573,6 +1450,7 @@ export default function OrdersPage() {
       const result = (await triggerScrape({
         areas: areaCodesForOrder(order).join(","),
         sources: sources.join(","),
+        triggeredByName,
         // Lets the action stamp this order with the run it started, so progress
         // is attributed to this order (and therefore this account) precisely.
         orderId: order._id,
@@ -615,22 +1493,384 @@ export default function OrdersPage() {
     }
   };
 
+  // A local run has no GitHub run to poll, so the GitHub poller above will never
+  // clear its badge. Watch the local service instead and clear on completion,
+  // reporting a non-zero exit rather than just going quiet.
+  useEffect(() => {
+    if (!localRunOrderId) return;
+    let cancelled = false;
+    const orderId = localRunOrderId as Id<"orders">;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run/status`);
+        if (!res.ok) return;
+        const status = (await res.json()) as {
+          running?: boolean;
+          exitCode?: number | null;
+          lines?: string[];
+        };
+        if (cancelled) return;
+        if (status.running) {
+          const rawLast = (status.lines ?? []).slice(-1)[0];
+          if (rawLast) {
+            const clean = rawLast.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "").trim();
+            const display = clean.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s*/, "");
+            setScrapeNotice((prev) => ({
+              ...prev,
+              [orderId]: {
+                kind: "ok",
+                text: `ローカル検索を実行中...\n${display}`,
+              },
+            }));
+          }
+          return;
+        }
+
+        // A kill from an explicit cancel click also exits non-zero — that is
+        // not a crash, and handleCancelScrape already posted its own message,
+        // so leave both alone here rather than overwriting them with "異常終了".
+        const wasCanceled = canceledLocalRunsRef.current.delete(orderId);
+        if (wasCanceled) {
+          setLocalRunOrderId(null);
+          return;
+        }
+
+        await updateOrder({
+          id: orderId,
+          isScraping: false,
+          scrapingStatus: status.exitCode === 0 ? "completed" : "failed",
+        });
+        setScrapeNotice((prev) => ({
+          ...prev,
+          [orderId]: {
+            kind: status.exitCode === 0 ? "ok" : "error",
+            text:
+              status.exitCode === 0
+                ? "ローカル検索が完了しました。取得した物件は一覧に反映されています。"
+                : `ローカル検索が異常終了しました (exit ${status.exitCode})。` +
+                  `最後の出力: ${(status.lines ?? []).slice(-2).join(" / ") || "(なし)"}`,
+          },
+        }));
+        setLocalRunOrderId(null);
+      } catch {
+        /* dev server stopped mid-run — leave the badge for the next tick */
+      }
+    };
+
+    void poll();
+    const id = setInterval(poll, 4_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localRunOrderId]);
+
+  /**
+   * Reconcile any OTHER order's stuck "検索中" badge — the poll above only
+   * ever tracks ONE order (`localRunOrderId`), so starting a second local run
+   * for a different order (or reloading the page) abandons tracking of
+   * whichever order was being watched before, and its badge is then stuck
+   * showing its last real progress line forever (confirmed live: two
+   * different orders' cards both frozen on the exact same "[19/19] 朝日住宅"
+   * text — each was simply the last update it received before its own
+   * tracking got abandoned, well after the underlying run had actually
+   * finished).
+   *
+   * The local scraper server enforces ONE run at a time (a second dispatch is
+   * refused with 409 until the first ends), so if the server's own status now
+   * points at a DIFFERENT order (or none), THIS order's local run is
+   * guaranteed to have already ended one way or another — safe to resolve
+   * even though this browser never saw it happen.
+   */
+  useEffect(() => {
+    if (!orders) return;
+    const stuckOrders = orders.filter(
+      (o) =>
+        o._id !== localRunOrderId &&
+        (o.lastScrapeBy ?? "").includes("ローカル実行") &&
+        (o.isScraping ||
+          (o.scrapingStatus && o.scrapingStatus.includes("検索中"))),
+    );
+    if (stuckOrders.length === 0) return;
+    let cancelled = false;
+
+    const reconcile = async () => {
+      try {
+        const res = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run/status`);
+        if (!res.ok || cancelled) return;
+        const status = (await res.json()) as {
+          running?: boolean;
+          orderId?: string | null;
+        };
+        for (const order of stuckOrders) {
+          if (status.orderId === order._id && status.running) continue; // genuinely still running
+          await updateOrder({
+            id: order._id,
+            isScraping: false,
+            scrapingStatus: "completed",
+          });
+        }
+      } catch {
+        // Dev server unreachable — cannot safely tell these apart from "still
+        // running on a machine this tab can't reach", so leave them as-is.
+      }
+    };
+
+    void reconcile();
+    const id = setInterval(reconcile, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, localRunOrderId]);
+
+  /**
+   * Run the scrape on THIS machine (scraper-service) instead of dispatching
+   * GitHub Actions.
+   *
+   * The cloud run executes the repo's COMMITTED code, so an uncommitted scraper
+   * change cannot be tested through the UI at all. This posts to the local
+   * service, which runs the same `npm run scrape:cron` entrypoint from the working
+   * tree and writes to the same Convex deployment — so results appear here
+   * identically, they are just produced by the code on disk.
+   *
+   * Requires `npm run dev:scraper` to be running. Its progress reaches the card
+   * through the CLI's own updateProgress writes; when the run ends, the poll below
+   * clears the flag (nothing else would).
+   */
+  const dispatchLocalScrape = async (
+    order: Doc<"orders">,
+    sources: string[],
+  ) => {
+    setScrapingOrderId(order._id);
+    const siteLabel =
+      sources.length > 1
+        ? "すべてのサイト (全19サイト)"
+        : SOURCE_LABELS[sources[0]] || sources[0];
+    setActiveScrapeSites((prev) => ({ ...prev, [order._id]: siteLabel }));
+    setScrapeNotice((prev) => {
+      const next = { ...prev };
+      delete next[order._id];
+      return next;
+    });
+
+    try {
+      const res = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          areas: areaCodesForOrder(order).join(","),
+          sources: sources.join(","),
+          orderId: order._id,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || body.error) {
+        setScrapeNotice((prev) => ({
+          ...prev,
+          [order._id]: {
+            kind: "error",
+            text:
+              body.error ??
+              `ローカルスクレイパーがエラーを返しました (HTTP ${res.status})`,
+          },
+        }));
+        return;
+      }
+
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [order._id]: {
+          kind: "ok",
+          text: `ローカル（このPC）で「${siteLabel}」の検索を開始しました。ターミナルに進捗が表示されます。`,
+        },
+      }));
+      await updateOrder({
+        id: order._id,
+        isScraping: false,
+        scrapingStatus: `${siteLabel} を検索中... (ローカル)`,
+        activeSource: sources.length === 1 ? sources[0] : "all",
+        lastScrapeAt: Date.now(),
+        // Attribution: the local run has no Convex identity to derive this from,
+        // so the browser records who started it, as it does for the cloud path.
+        lastScrapeBy: triggeredByName
+          ? `${triggeredByName}（ローカル実行）`
+          : "ローカル実行",
+      });
+      setLocalRunOrderId(order._id);
+      if (autoEvaluate) setPendingAutoEvalOrderId(order._id);
+    } catch (err) {
+      // A refused connection is the common case: the dev server is not running.
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [order._id]: {
+          kind: "error",
+          text:
+            `ローカルスクレイパーに接続できませんでした (${LOCAL_SCRAPER_URL})。` +
+            `確認事項: ① 別ターミナルで \`npm run dev:scraper\` が起動しているか。` +
+            `② ポート3001を他のアプリ（別プロジェクトの開発サーバー等）が使っていないか` +
+            `（\`lsof -nP -iTCP:3001 -sTCP:LISTEN\` で確認できます）。` +
+            `（${err instanceof Error ? err.message : String(err)}）`,
+        },
+      }));
+    } finally {
+      setScrapingOrderId(null);
+    }
+  };
+
   const handleScrapeOrder = (order: Doc<"orders">) => {
     // "all" is the default selection, so the single 取得 button covers both the
     // every-portal case and a single-portal case.
     const chosen = scrapeSource[order._id] || "all";
-    return dispatchScrape(order, chosen === "all" ? ALL_SCRAPE_SOURCES : [chosen]);
+    const sources = chosen === "all" ? ALL_SCRAPE_SOURCES : [chosen];
+    return runner === "local"
+      ? dispatchLocalScrape(order, sources)
+      : dispatchScrape(order, sources);
+  };
+
+  /**
+   * Cancel whichever run is actually active for this order.
+   *
+   * A local run has no GitHub Actions run id at all, so calling cancelScrape()
+   * (which cancels via `order.scrapeRunId` over the GitHub API) always finds
+   * nothing to cancel and returns "このオーダーには実行中のスクレイピングが
+   * ありません" — a confusing error for a run that IS visibly in progress, just
+   * not the kind that action knows how to stop.
+   *
+   * `order.scrapingStatus` looks like the obvious way to detect a local run
+   * (dispatchLocalScrape stamps it with a "(ローカル)" suffix) but is NOT
+   * reliable: cli.ts's own per-source progress reporting (convex/ingest.js
+   * `updateProgress`) overwrites that field every few seconds with a generic
+   * "{source} を検索中..." string, on BOTH the local and GitHub-Actions paths —
+   * erasing the marker within seconds of the run actually starting. Branch on
+   * `order.lastScrapeBy` instead: it is set once at dispatch to "ローカル実行"
+   * (or "{name}（ローカル実行）") and `updateProgress` never touches it, so it
+   * stays correct for the whole run — and, being persisted rather than the
+   * in-memory `localRunOrderId`, it survives a page reload too.
+   */
+  const handleCancelScrape = async (order: Doc<"orders">) => {
+    const isLocalRun = (order.lastScrapeBy ?? "").includes("ローカル実行");
+    setCancellingOrderId(order._id);
+    try {
+      if (isLocalRun) {
+        // Mark BEFORE sending the kill, so the status poll (running every 10s
+        // regardless of this click) sees it no matter which of the two fires
+        // first — see the note where this set is declared.
+        canceledLocalRunsRef.current.add(order._id);
+        try {
+          // The local server tracks exactly ONE run at a time, GLOBALLY, not
+          // per order — /scrape-run/cancel kills whatever that is. If this
+          // order's own badge is just stale (its run already finished or was
+          // superseded by a newer dispatch for a DIFFERENT order — confirmed
+          // live: an order's "検索中" can outlive its actual process once this
+          // tab starts tracking a different one), sending the real kill would
+          // cancel someone else's still-genuinely-running scrape instead.
+          // Check ownership first.
+          const statusRes = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run/status`);
+          const status = (await statusRes.json().catch(() => ({}))) as {
+            running?: boolean;
+            orderId?: string | null;
+          };
+          const ownsCurrentRun = status.running && status.orderId === order._id;
+
+          let cancelOk = true;
+          let alreadyFinished = true;
+          if (ownsCurrentRun) {
+            const res = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run/cancel`, {
+              method: "POST",
+            });
+            const body = (await res.json().catch(() => ({}))) as {
+              ok?: boolean;
+              alreadyFinished?: boolean;
+            };
+            cancelOk = res.ok && !!body.ok;
+            alreadyFinished = !!body.alreadyFinished;
+          }
+
+          await updateOrder({
+            id: order._id,
+            isScraping: false,
+            scrapingStatus: "cancelled",
+          });
+          setLocalRunOrderId((prev) => (prev === order._id ? null : prev));
+          setScrapeNotice((prev) => ({
+            ...prev,
+            [order._id]: {
+              kind: "ok",
+              text: !ownsCurrentRun
+                ? "この検索は既に終了していました（表示が古くなっていました）。表示を更新しました。"
+                : cancelOk
+                  ? alreadyFinished
+                    ? "ローカル検索は既に終了していました。表示を更新しました。"
+                    : "ローカル検索を中止しました。"
+                  : "ローカルスクレイパーへの中止要求に失敗しました。表示のみ更新しました。",
+            },
+          }));
+        } catch (err) {
+          // Dev server unreachable — still clear the stuck badge, since
+          // whatever was running is not something this browser can reach.
+          await updateOrder({
+            id: order._id,
+            isScraping: false,
+            scrapingStatus: "cancelled",
+          });
+          setScrapeNotice((prev) => ({
+            ...prev,
+            [order._id]: {
+              kind: "error",
+              text:
+                `ローカルスクレイパーに接続できませんでした (${LOCAL_SCRAPER_URL})が、` +
+                `表示上の「検索中」は解除しました。` +
+                `（${err instanceof Error ? err.message : String(err)}）`,
+            },
+          }));
+        }
+        return;
+      }
+
+      const r = (await cancelScrape({ orderId: order._id })) as
+        | { ok?: boolean; error?: string }
+        | undefined;
+      setScrapeNotice((prev) => ({
+        ...prev,
+        [order._id]: {
+          kind: r?.error ? "error" : "ok",
+          text: r?.error
+            ? r.error
+            : "物件検索を中止し、GitHub Actions の実行を停止しました。",
+        },
+      }));
+    } finally {
+      setCancellingOrderId(null);
+    }
   };
 
   const [showForm, setShowForm] = useState(false);
   const [wards, setWards] = useState<string[]>([]);
+  // 買う/借りる — mutually exclusive, never both. Everything below that only
+  // makes sense for one side (価格 vs 賃料, 利回り, 敷金/礼金) is gated on this.
+  const [dealType, setDealType] = useState<"buy" | "rent">("buy");
   const [priceMin, setPriceMin] = useState("");
   const [orderName, setOrderName] = useState("");
   const [priceMax, setPriceMax] = useState("");
+  const [rentMin, setRentMin] = useState("");
+  const [rentMax, setRentMax] = useState("");
+  const [maxDeposit, setMaxDeposit] = useState("");
+  const [maxKeyMoney, setMaxKeyMoney] = useState("");
+  const [petsRequired, setPetsRequired] = useState(false);
   const [walkMinutes, setWalkMinutes] = useState("");
   const [minBuildingCoverageRatio, setMinBuildingCoverageRatio] = useState("");
   const [minFloorAreaRatio, setMinFloorAreaRatio] = useState("");
   const [propertyTypes, setPropertyTypes] = useState<string[]>([]);
+  // オーナーチェンジ = 賃貸中のマンションをそのまま売却する物件。物件の形ではなく
+  // 売り方なので、種別ボタンではなく マンション の隣のチェックボックスにしている。
+  const [ownerChange, setOwnerChange] = useState(false);
   const [landSizeMin, setLandSizeMin] = useState("");
   const [landSizeMax, setLandSizeMax] = useState("");
   const [buildingSizeMin, setBuildingSizeMin] = useState("");
@@ -648,17 +1888,49 @@ export default function OrdersPage() {
   const [layoutTypes, setLayoutTypes] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [done, setDone] = useState(false);
+  // A failed save used to go to console.error only, so pressing 作成 looked like
+  // it did nothing at all — the mutation travels over Convex's WebSocket, so
+  // there is not even a request in the Network tab to hint otherwise. Any
+  // rejection has to be on screen.
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Which conditions are worth showing for the selected types. No selection means
+  // "any type", so everything is shown rather than nothing.
+  const anyTypeSelected = propertyTypes.length === 0;
+  const hasType = (list: string[]) =>
+    anyTypeSelected || propertyTypes.some((t) => list.includes(t));
+  // 専有面積 applies to a unit inside a building — a 区分マンション. For a whole
+  // building it is 建物/延床面積, matched against the same listing field, so those
+  // types get it too.
+  const showsUnitArea = hasType([
+    "マンション",
+    "一棟マンション",
+    "アパート",
+    "ビル",
+  ]);
+  const showsLandArea = hasType(LAND_TYPES);
+  const showsBuildingAge = hasType(BUILDING_TYPES);
+  const showsYield = hasType(INCOME_TYPES);
+  const showsAnyAreaField = showsUnitArea || showsLandArea;
 
   const resetForm = () => {
     setEditingOrderId(null);
+    setSaveError(null);
     setOrderName("");
     setWards([]);
+    setDealType("buy");
     setPriceMin("");
     setPriceMax("");
+    setRentMin("");
+    setRentMax("");
+    setMaxDeposit("");
+    setMaxKeyMoney("");
+    setPetsRequired(false);
     setWalkMinutes("");
     setMinBuildingCoverageRatio("");
     setMinFloorAreaRatio("");
     setPropertyTypes([]);
+    setOwnerChange(false);
     setLandSizeMin("");
     setLandSizeMax("");
     setBuildingSizeMin("");
@@ -689,8 +1961,18 @@ export default function OrdersPage() {
           ? [order.ward]
           : [],
     );
+    setDealType(order.dealType === "rent" ? "rent" : "buy");
     setPriceMin(order.priceMin !== undefined ? String(order.priceMin) : "");
     setPriceMax(order.priceMax !== undefined ? String(order.priceMax) : "");
+    setRentMin(order.rentMin !== undefined ? String(order.rentMin) : "");
+    setRentMax(order.rentMax !== undefined ? String(order.rentMax) : "");
+    setMaxDeposit(
+      order.maxDeposit !== undefined ? String(order.maxDeposit) : "",
+    );
+    setMaxKeyMoney(
+      order.maxKeyMoney !== undefined ? String(order.maxKeyMoney) : "",
+    );
+    setPetsRequired(!!order.petsRequired);
     setWalkMinutes(
       order.walkMinutes !== undefined
         ? String(order.walkMinutes)
@@ -713,6 +1995,7 @@ export default function OrdersPage() {
           : "",
     );
     setPropertyTypes(order.propertyTypes || []);
+    setOwnerChange(!!order.ownerChange);
     setLandSizeMin(
       order.landSizeMin !== undefined ? String(order.landSizeMin) : "",
     );
@@ -752,9 +2035,21 @@ export default function OrdersPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // These fields are plain <input type="number"> with no slider, and a
+  // browser's `min="0"` only affects the stepper/validity state, not what a
+  // person can actually type — a stray "-" produces a criterion like "徒歩 -7
+  // 分以内" that real listings (walk time is never negative) can essentially
+  // never satisfy, silently starving the search instead of erroring.
+  const nonNegNum = (value: string) => {
+    if (!value) return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, n) : undefined;
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
+    setSaveError(null);
     try {
       const orderParams = {
         name: orderName || undefined,
@@ -762,25 +2057,42 @@ export default function OrdersPage() {
         customerId: selectedCustomerId || undefined,
         ward: wards.length === 1 ? wards[0] : undefined,
         wards: wards.length > 0 ? wards : undefined,
-        priceMin: priceMin ? Number(priceMin) : undefined,
-        priceMax: priceMax ? Number(priceMax) : undefined,
+        dealType,
+        // Only the fields for the SELECTED side are ever sent — an edit that
+        // flips 買う<->借りる has to clear the other side's stale values, not
+        // leave e.g. a rent order still carrying its old priceMax.
+        priceMin: dealType === "buy" && priceMin ? Number(priceMin) : undefined,
+        priceMax: dealType === "buy" && priceMax ? Number(priceMax) : undefined,
+        rentMin: dealType === "rent" && rentMin ? Number(rentMin) : undefined,
+        rentMax: dealType === "rent" && rentMax ? Number(rentMax) : undefined,
+        maxDeposit:
+          dealType === "rent" ? nonNegNum(maxDeposit) : undefined,
+        maxKeyMoney:
+          dealType === "rent" ? nonNegNum(maxKeyMoney) : undefined,
+        // false rather than undefined when not applicable — same reason as
+        // ownerChange below: an edit that flips away from 借りる has to clear
+        // a previously-ticked ペット可のみ, and patch ignores undefined values.
+        petsRequired: dealType === "rent" ? petsRequired : false,
         criteria: {
-          walkMinutes: walkMinutes ? Number(walkMinutes) : undefined,
-          minBuildingCoverageRatio: minBuildingCoverageRatio
-            ? Number(minBuildingCoverageRatio)
-            : undefined,
-          minFloorAreaRatio: minFloorAreaRatio
-            ? Number(minFloorAreaRatio)
-            : undefined,
+          walkMinutes: nonNegNum(walkMinutes),
+          minBuildingCoverageRatio: nonNegNum(minBuildingCoverageRatio),
+          minFloorAreaRatio: nonNegNum(minFloorAreaRatio),
         },
         propertyTypes: propertyTypes.length > 0 ? propertyTypes : undefined,
+        // Sent as `false` rather than undefined when unticked: an edit that turns
+        // the requirement OFF has to clear the stored value, and Convex patch
+        // ignores keys whose value is undefined.
+        // オーナーチェンジ (賃貸中のまま売却) only means something for a SALE —
+        // the toggle itself is hidden for 借りる, but force it false there too
+        // in case it was ticked before switching from 買う.
+        ownerChange: dealType === "buy" && ownerChange,
         landSizeMin: landSizeMin ? Number(landSizeMin) : undefined,
         landSizeMax: landSizeMax ? Number(landSizeMax) : undefined,
         buildingSizeMin: buildingSizeMin ? Number(buildingSizeMin) : undefined,
         buildingSizeMax: buildingSizeMax ? Number(buildingSizeMax) : undefined,
-        maxBuildAge: maxBuildAge ? Number(maxBuildAge) : undefined,
+        maxBuildAge: nonNegNum(maxBuildAge),
         minBuildYear: minBuildYear ? Number(minBuildYear) : undefined,
-        minYield: minYield ? Number(minYield) : undefined,
+        minYield: nonNegNum(minYield),
         maxYield: maxYield ? Number(maxYield) : undefined,
         minRoadWidth: minRoadWidth ? Number(minRoadWidth) : undefined,
         minTotalUnits: minTotalUnits ? Number(minTotalUnits) : undefined,
@@ -809,6 +2121,21 @@ export default function OrdersPage() {
       setTimeout(() => setDone(false), 3000);
     } catch (err) {
       console.error("Failed to save order:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      // Convex's ArgumentValidationError text is long and English; keep it (it
+      // names the offending field, which is the one thing that identifies the
+      // problem) but lead with something actionable.
+      setSaveError(
+        /ArgumentValidationError|Object contains extra field|Unexpected field/i.test(
+          message,
+        )
+          ? "オーダーを保存できませんでした: サーバー側の項目定義が古いため、この条件を受け付けられません。" +
+              "バックエンドの再デプロイが必要です。\n\n" +
+              message
+          : `オーダーを保存できませんでした: ${message}`,
+      );
+      // The form stays open with the entered values intact — closing it here
+      // would discard everything the user just typed.
     } finally {
       setCreating(false);
     }
@@ -858,17 +2185,168 @@ export default function OrdersPage() {
           }}
         >
           {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showForm ? "キャンセル" : "新規オーダー作成"}
+          {showForm ? "キャンセル" : "作成"}
         </Button>
+      </div>
+
+      {/* ── Mail connection: read broker emails (物件紹介) and auto-match them
+          against every order, same as a scraped listing. Read-only — this
+          never sends anything (see ProposalModal for that, unrelated). ── */}
+      <div className="p-4 rounded-2xl bg-white border border-[var(--border-subtle)] shadow-xs space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-[var(--brand)]" />
+            <span className="text-sm font-bold text-[var(--text-primary)]">
+              メール連携
+            </span>
+            <span className="text-xs text-[var(--text-muted)]">
+              仲介会社からの物件紹介メールを自動で抽出・照合します
+            </span>
+          </div>
+          {(mailAccounts?.length ?? 0) > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={syncingMail}
+              onClick={() => void handleSyncMailNow()}
+              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
+            >
+              {syncingMail ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              今すぐ同期
+            </Button>
+          )}
+          {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
+          {(mailAccounts?.length ?? 0) > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={inspecting}
+              onClick={() => void handleInspectMail()}
+              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
+            >
+              {inspecting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Mail className="w-3.5 h-3.5" />
+              )}
+              同期メールを確認
+            </Button>
+          )}
+          {(mailAccounts?.length ?? 0) > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowMailRules(true)}
+              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              取り込み設定
+            </Button>
+          )}
+        </div>
+
+        {mailNotice && (
+          <div className="text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-page-subtle)] rounded-lg px-3 py-2 whitespace-pre-line">
+            {mailNotice}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {(mailAccounts ?? []).map((account) => (
+            <div
+              key={account._id}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+                account.needsReconnect
+                  ? "bg-red-50 border-red-200 text-red-800"
+                  : "bg-emerald-50 border-emerald-200 text-emerald-900"
+              }`}
+            >
+              {account.provider === "gmail" ? "Gmail" : "Outlook"}: {account.email}
+              {account.needsReconnect && "（要再接続）"}
+              <button
+                type="button"
+                onClick={() => void disconnectMailAccount({ id: account._id })}
+                className="text-[11px] underline opacity-70 hover:opacity-100"
+              >
+                解除
+              </button>
+            </div>
+          ))}
+
+          {(mailProviders ?? [])
+            .filter((p) => p.available)
+            .filter((p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider))
+            .map((p) => (
+              <Button
+                key={p.provider}
+                size="sm"
+                variant="outline"
+                disabled={connectingMailProvider === p.provider}
+                onClick={() => void handleConnectMail(p.provider)}
+                className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
+              >
+                {connectingMailProvider === p.provider ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Mail className="w-3.5 h-3.5" />
+                )}
+                {p.label}を接続
+              </Button>
+            ))}
+
+          {(mailProviders ?? [])
+            .filter((p) => !p.available)
+            .map((p) => (
+              <span
+                key={p.provider}
+                className="text-[11px] text-[var(--text-muted)] font-medium"
+                title={p.unavailableReason}
+              >
+                {p.label}: 未設定
+              </span>
+            ))}
+        </div>
       </div>
 
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         {[
-          { icon: FileCheck2,   color: "var(--brand)",        bg: "var(--brand-soft)", label: "登録された依頼数", value: totalOrdersCount,    loading: orders === undefined },
-          { icon: CheckCircle2, color: "#0d9488",              bg: "#f0fdfa",           label: "検索完了",         value: activeOrdersCount,   loading: orders === undefined },
-          { icon: Building2,    color: "#d97706",              bg: "#fffbeb",           label: "全検索結果",       value: totalMatchesCount,   loading: matches === undefined },
-          { icon: FileText,     color: "#7c3aed",              bg: "#f5f3ff",           label: "評価完了数",       value: totalEvaluatedCount, loading: false },
+          {
+            icon: FileCheck2,
+            color: "var(--brand)",
+            bg: "var(--brand-soft)",
+            label: "登録された依頼数",
+            value: totalOrdersCount,
+            loading: orders === undefined,
+          },
+          {
+            icon: CheckCircle2,
+            color: "#0d9488",
+            bg: "#f0fdfa",
+            label: "検索完了",
+            value: activeOrdersCount,
+            loading: orders === undefined,
+          },
+          {
+            icon: Building2,
+            color: "#d97706",
+            bg: "#fffbeb",
+            label: "全検索結果",
+            value: totalMatchesCount,
+            loading: matches === undefined,
+          },
+          {
+            icon: FileText,
+            color: "#7c3aed",
+            bg: "#f5f3ff",
+            label: "評価完了数",
+            value: totalEvaluatedCount,
+            loading: false,
+          },
         ].map((kpi, i) => (
           <div key={i} className="kpi-card">
             <div
@@ -903,6 +2381,54 @@ export default function OrdersPage() {
           </CardHeader>
           <CardContent className="p-6 md:p-8 space-y-6">
             <form onSubmit={handleCreate} className="space-y-6">
+              {/* 買う/借りる — mutually exclusive. Everything below that only
+                  applies to one side (価格 vs 賃料, 利回り, 敷金/礼金, etc.) is
+                  gated on this, and the scraper side hard-rejects any listing
+                  whose own dealType doesn't match (see propertyMatcher.ts). */}
+              <div className="space-y-2">
+                <Label className="text-sm font-bold text-slate-700">
+                  取引種別
+                </Label>
+                <div className="flex gap-2.5">
+                  {(
+                    [
+                      { value: "buy" as const, label: "買う" },
+                      { value: "rent" as const, label: "借りる" },
+                    ]
+                  ).map((opt) => (
+                    <button
+                      type="button"
+                      key={opt.value}
+                      onClick={() => {
+                        setDealType(opt.value);
+                        // Drop any selected type the new mode doesn't offer a
+                        // button for — otherwise it stays selected-but-invisible
+                        // and still gets submitted (e.g. 土地/ビル picked while
+                        // 買う, silently carried into a 借りる order after
+                        // switching, even though its button is now gone).
+                        const validTypes = new Set(
+                          (opt.value === "rent"
+                            ? RENTAL_PROPERTY_TYPE_GROUPS
+                            : PROPERTY_TYPE_GROUPS
+                          ).flatMap((g) => g.types),
+                        );
+                        setPropertyTypes((prev) =>
+                          prev.filter((t) => validTypes.has(t)),
+                        );
+                        if (opt.value === "rent") setOwnerChange(false);
+                      }}
+                      className={`px-5 py-2.5 rounded-xl text-sm font-bold border transition-all duration-150 ${
+                        dealType === opt.value
+                          ? "bg-emerald-700 text-white border-emerald-700 shadow-sm"
+                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Basic Details */}
               <div className="space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
@@ -911,7 +2437,7 @@ export default function OrdersPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
                     <Label className="text-sm font-bold text-slate-700">
-                      案件名 
+                      案件名
                     </Label>
                     <Input
                       placeholder="例: 山田様 渋谷区・港区 商業用地サーチ"
@@ -941,7 +2467,9 @@ export default function OrdersPage() {
                       onChange={(e) => setSelectedCustomerId(e.target.value)}
                       className="w-full h-11 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
                     >
-                      <option value="">-- 顧客を選択しない (指定なし) --</option>
+                      <option value="">
+                        -- 顧客を選択しない (指定なし) --
+                      </option>
                       {(customers || []).map((c) => (
                         <option key={c._id} value={c._id}>
                           👤 {c.name} {c.company ? `(${c.company})` : ""}{" "}
@@ -1021,43 +2549,52 @@ export default function OrdersPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最低価格 (万円)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 1000"
-                      value={priceMin}
-                      onChange={(e) => setPriceMin(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
-                  </div>
+                  <div className="md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6 pt-1">
+                    {dealType === "buy" ? (
+                      <RangeSlider
+                        label="価格"
+                        hint="スライダーの右端を超える金額は、数値を直接入力してください。"
+                        unit="万円"
+                        // 5億 covers ordinary residential and small commercial at a
+                        // 100万 step that is still draggable; above that the number
+                        // box takes over (see the hint).
+                        max={50000}
+                        step={100}
+                        minValue={priceMin}
+                        maxValue={priceMax}
+                        onMinChange={setPriceMin}
+                        onMaxChange={setPriceMax}
+                      />
+                    ) : (
+                      <RangeSlider
+                        label="賃料"
+                        hint="管理費・共益費は別条件（下記）で指定できます。"
+                        unit="万円/月"
+                        max={100}
+                        step={1}
+                        minValue={rentMin}
+                        maxValue={rentMax}
+                        onMinChange={setRentMin}
+                        onMaxChange={setRentMax}
+                      />
+                    )}
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最高価格 (万円)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 50000"
-                      value={priceMax}
-                      onChange={(e) => setPriceMax(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      駅徒歩 (分以内)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 5"
-                      value={walkMinutes}
-                      onChange={(e) => setWalkMinutes(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
+                    {/* Single-bound conditions stay plain inputs: a slider earns
+                        its place when there are two ends to balance against each
+                        other, and is just a slower way to type one number. */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-slate-700">
+                        駅徒歩 (分以内)
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="例: 5"
+                        value={walkMinutes}
+                        onChange={(e) => setWalkMinutes(e.target.value)}
+                        className="h-11 text-base rounded-xl"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1067,24 +2604,40 @@ export default function OrdersPage() {
                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
                   物件種別・面積条件
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  <div className="space-y-2 md:col-span-3">
-                    <Label className="text-sm font-bold text-slate-700">
-                      物件種別
-                    </Label>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-bold text-slate-700">
+                    物件種別
+                  </Label>
+                  {dealType === "buy" && (
                     <p className="text-xs text-slate-500 font-medium -mt-1">
                       収益物件をお探しの場合は、種別ではなく下の「最低利回り」で指定してください。
                     </p>
-                    {/* 収益物件 was removed from this list: it is an investment
-                        CATEGORY (bought for rental income), not a building shape,
-                        so it belongs on a different axis from 土地/一戸建て/マンション.
-                        It also matched nothing — no scraper emits that string — and
-                        minYield already expresses the same intent. Orders created
-                        before this still work via propertyTypeMatches() in
-                        scraper-service/src/services/propertyMatcher.ts. */}
-                    <div className="flex flex-wrap gap-3">
-                      {["土地", "一戸建て", "マンション", "ビル"].map(
-                        (t) => {
+                  )}
+
+                  {/* One row per group, so it is visible which option belongs to
+                      which: オーナーチェンジ modifies マンション (区分), and
+                      一棟マンション / アパート sit with ビル because they are all
+                      whole-building purchases.
+
+                      収益物件 is deliberately absent: it is an investment CATEGORY,
+                      not a building shape, no scraper emits that string, and
+                      minYield already expresses the same intent. Orders created
+                      before this still work via propertyTypeMatches() in
+                      scraper-service/src/services/propertyMatcher.ts. */}
+                  <div className="space-y-2.5">
+                    {(dealType === "rent"
+                      ? RENTAL_PROPERTY_TYPE_GROUPS
+                      : PROPERTY_TYPE_GROUPS
+                    ).map((group) => (
+                      <div
+                        key={group.label}
+                        className="flex flex-wrap items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200"
+                      >
+                        <span className="text-[11px] font-bold text-slate-500 w-full sm:w-28 shrink-0">
+                          {group.label}
+                        </span>
+                        {group.types.map((t) => {
                           const isSelected = propertyTypes.includes(t);
                           return (
                             <button
@@ -1106,102 +2659,221 @@ export default function OrdersPage() {
                               {t}
                             </button>
                           );
-                        },
-                      )}
-                    </div>
+                        })}
+                        {/* Immediately to the right of マンション, in its row. */}
+                        {group.ownerChangeToggle && (
+                          <label
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border cursor-pointer transition-all duration-150 select-none ${
+                              ownerChange
+                                ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                                : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                            }`}
+                            title="賃貸中のマンションをそのまま売却する物件（オーナーチェンジ）のみを抽出します"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={ownerChange}
+                              onChange={(e) => setOwnerChange(e.target.checked)}
+                              className="w-4 h-4 accent-emerald-700 cursor-pointer"
+                            />
+                            オーナーチェンジ
+                          </label>
+                        )}
+                      </div>
+                    ))}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最小土地面積 (㎡)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 30"
-                      value={landSizeMin}
-                      onChange={(e) => setLandSizeMin(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
-                  </div>
+                  {ownerChange && (
+                    <p className="text-xs text-emerald-800 font-semibold bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 leading-relaxed">
+                      オーナーチェンジ（賃貸中のまま売却）の物件のみを抽出します。
+                      各ポータルの掲載文に「オーナーチェンジ」「賃貸中」等の記載があるものを対象とするため、
+                      賃貸状況が詳細ページにしか書かれていない物件は抽出されないことがあります。
+                    </p>
+                  )}
+                </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最大土地面積 (㎡)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 500"
-                      value={landSizeMax}
-                      onChange={(e) => setLandSizeMax(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
-                  </div>
+                {/* Only the conditions that mean something for the chosen types.
+                    専有面積 is meaningless for 土地, 建ぺい率 for a 区分マンション,
+                    利回り for raw land — showing them all invited conditions that
+                    silently match nothing. With no type chosen the order means
+                    "any", so everything is shown. */}
+                {!showsAnyAreaField && (
+                  <p className="text-xs text-slate-500 font-medium">
+                    物件種別を選ぶと、その種別に関係する条件のみが表示されます。
+                  </p>
+                )}
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最低建ぺい率 (%)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 80"
-                      value={minBuildingCoverageRatio}
-                      onChange={(e) =>
-                        setMinBuildingCoverageRatio(e.target.value)
-                      }
-                      className="h-11 text-base rounded-xl"
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
+                  {showsUnitArea && (
+                    <RangeSlider
+                      label="専有面積"
+                      hint="マンションの面積は専有面積（室内の面積）で判定します。"
+                      unit="㎡"
+                      max={200}
+                      step={5}
+                      minValue={buildingSizeMin}
+                      maxValue={buildingSizeMax}
+                      onMinChange={setBuildingSizeMin}
+                      onMaxChange={setBuildingSizeMax}
                     />
-                  </div>
+                  )}
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最低容積率 (%)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 200"
-                      value={minFloorAreaRatio}
-                      onChange={(e) => setMinFloorAreaRatio(e.target.value)}
-                      className="h-11 text-base rounded-xl"
+                  {dealType === "buy" && showsLandArea && (
+                    <RangeSlider
+                      label="土地面積"
+                      unit="㎡"
+                      max={1000}
+                      step={10}
+                      minValue={landSizeMin}
+                      maxValue={landSizeMax}
+                      onMinChange={setLandSizeMin}
+                      onMaxChange={setLandSizeMax}
                     />
-                  </div>
+                  )}
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      築年数以内 (年)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 30"
-                      value={maxBuildAge}
-                      onChange={(e) => setMaxBuildAge(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
-                  </div>
+                  {/* The remaining conditions are single bounds, so they stay
+                      plain number inputs — see the note by 駅徒歩. They are laid
+                      out in their own sub-grid so one-line inputs do not stretch
+                      to the height of a slider block. */}
+                  <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                    {dealType === "buy" && showsLandArea && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-slate-700">
+                          最低建ぺい率 (%)
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="例: 80"
+                          value={minBuildingCoverageRatio}
+                          onChange={(e) =>
+                            setMinBuildingCoverageRatio(e.target.value)
+                          }
+                          className="h-11 text-base rounded-xl"
+                        />
+                      </div>
+                    )}
 
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      最低利回り (%)
-                    </Label>
-                    <Input
-                      type="number"
-                      placeholder="例: 5.5"
-                      value={minYield}
-                      onChange={(e) => setMinYield(e.target.value)}
-                      className="h-11 text-base rounded-xl"
-                    />
+                    {dealType === "buy" && showsLandArea && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-slate-700">
+                          最低容積率 (%)
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="例: 200"
+                          value={minFloorAreaRatio}
+                          onChange={(e) => setMinFloorAreaRatio(e.target.value)}
+                          className="h-11 text-base rounded-xl"
+                        />
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          都心の商業地では 600〜1300% になることもあります。
+                        </p>
+                      </div>
+                    )}
+
+                    {showsBuildingAge && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-slate-700">
+                          築年数以内 (年)
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="例: 30"
+                          value={maxBuildAge}
+                          onChange={(e) => setMaxBuildAge(e.target.value)}
+                          className="h-11 text-base rounded-xl"
+                        />
+                      </div>
+                    )}
+
+                    {dealType === "buy" && showsYield && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-slate-700">
+                          最低利回り (%)
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="例: 5.5"
+                          value={minYield}
+                          onChange={(e) => setMinYield(e.target.value)}
+                          className="h-11 text-base rounded-xl"
+                        />
+                      </div>
+                    )}
+
+                    {dealType === "rent" && (
+                      <>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-bold text-slate-700">
+                            敷金上限 (万円)
+                          </Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="例: 30"
+                            value={maxDeposit}
+                            onChange={(e) => setMaxDeposit(e.target.value)}
+                            className="h-11 text-base rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-bold text-slate-700">
+                            礼金上限 (万円)
+                          </Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="例: 30"
+                            value={maxKeyMoney}
+                            onChange={(e) => setMaxKeyMoney(e.target.value)}
+                            className="h-11 text-base rounded-xl"
+                          />
+                        </div>
+                        <label
+                          className={`flex items-center gap-1.5 h-11 px-3.5 rounded-xl text-sm font-semibold border cursor-pointer transition-all duration-150 select-none self-end ${
+                            petsRequired
+                              ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                              : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={petsRequired}
+                            onChange={(e) => setPetsRequired(e.target.checked)}
+                            className="w-4 h-4 accent-emerald-700 cursor-pointer"
+                          />
+                          ペット可のみ
+                        </label>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Form Buttons */}
+              {saveError && (
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-bold whitespace-pre-wrap leading-relaxed">
+                  {saveError}
+                </div>
+              )}
               <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-subtle)]">
                 <Button type="submit" disabled={creating} size="lg">
-                  {creating ? "保存中..." : editingOrderId ? "変更内容を保存" : "作成"}
+                  {creating
+                    ? "保存中..."
+                    : editingOrderId
+                      ? "変更内容を保存"
+                      : "作成"}
                 </Button>
                 {done && (
                   <span className="text-sm font-bold text-[var(--brand)] flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
-                    {editingOrderId ? "オーダーを更新しました" : "オーダーを作成しました"}
+                    {editingOrderId
+                      ? "オーダーを更新しました"
+                      : "オーダーを作成しました"}
                   </span>
                 )}
               </div>
@@ -1212,7 +2884,9 @@ export default function OrdersPage() {
 
       {/* Orders List Section */}
       <div className="space-y-4">
-        <h2 className="text-lg font-extrabold text-[var(--text-primary)]">一覧</h2>
+        <h2 className="text-lg font-extrabold text-[var(--text-primary)]">
+          一覧
+        </h2>
 
         {/* Live GitHub Actions run banner */}
         {activeRun && (orders ?? []).some(isMyRun) && (
@@ -1220,11 +2894,14 @@ export default function OrdersPage() {
             <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-bold text-[#14532d]">
-                {activeRun.status === "queued" ? "物件検索の実行を待機中です" : "物件検索を実行中です"}
+                {activeRun.status === "queued"
+                  ? "物件検索の実行を待機中です"
+                  : "物件検索を実行中です"}
               </div>
               <div className="text-xs text-[var(--text-muted)] mt-0.5">
                 完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
-                {activeRun.created_at && ` （開始: ${new Date(activeRun.created_at).toLocaleTimeString("ja-JP")}）`}
+                {activeRun.created_at &&
+                  ` （開始: ${formatJaTime(new Date(activeRun.created_at).getTime())}）`}
               </div>
             </div>
           </div>
@@ -1245,8 +2922,12 @@ export default function OrdersPage() {
         ) : orders.length === 0 ? (
           <div className="empty-state">
             <Building2 className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto mb-3" />
-            <p className="text-sm font-bold text-[var(--text-secondary)]">登録済みオーダーがありません</p>
-            <p className="text-xs text-[var(--text-muted)] mt-1">「新規オーダー作成」から希望条件を登録してください。</p>
+            <p className="text-sm font-bold text-[var(--text-secondary)]">
+              登録済みオーダーがありません
+            </p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              「新規オーダー作成」から希望条件を登録してください。
+            </p>
           </div>
         ) : (
           orders.map((order) => {
@@ -1293,15 +2974,25 @@ export default function OrdersPage() {
                           </button>
                         )}
                         {isMyRun(order) && (
-                          <Badge variant="brand" className="gap-1.5 font-bold py-1 px-2.5 shrink-0">
+                          <Badge
+                            variant="brand"
+                            className="gap-1.5 font-bold py-1 px-2.5 shrink-0"
+                          >
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>{activeRun?.status === "queued" ? "取得待機中" : "取得中"}</span>
+                            <span>
+                              {activeRun?.status === "queued"
+                                ? "取得待機中"
+                                : "取得中"}
+                            </span>
                           </Badge>
                         )}
                         {matchCount > 0 && (
                           <Badge className="font-extrabold">
                             {matchCount} 件
                           </Badge>
+                        )}
+                        {order.dealType === "rent" && (
+                          <Badge variant="neutral">借りる</Badge>
                         )}
 
                         {(() => {
@@ -1321,23 +3012,140 @@ export default function OrdersPage() {
 
                       {/* Criteria Details */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-xs font-medium text-[var(--text-secondary)]">
-                        {(order.wards?.length ? order.wards : order.ward ? [order.ward] : []).map((w) => (
-                          <span key={w} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[11px] font-bold whitespace-nowrap">
-                            <MapPin className="w-3 h-3" />{w}
+                        {(order.wards?.length
+                          ? order.wards
+                          : order.ward
+                            ? [order.ward]
+                            : []
+                        ).map((w) => (
+                          <span
+                            key={w}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[11px] font-bold whitespace-nowrap"
+                          >
+                            <MapPin className="w-3 h-3" />
+                            {w}
                           </span>
                         ))}
                         <span className="text-[var(--border-strong)]">·</span>
-                        <span>価格: <strong className="text-[var(--text-primary)]">
-                          {order.priceMin && order.priceMax ? `${order.priceMin.toLocaleString()} 〜 ${order.priceMax.toLocaleString()}`
-                            : order.priceMin ? `${order.priceMin.toLocaleString()} 〜`
-                            : order.priceMax ? `〜 ${order.priceMax.toLocaleString()}`
-                            : "指定なし"} 万円
-                        </strong></span>
-                        {(order.walkMinutes ?? order.criteria?.walkMinutes) && (
-                          <><span className="text-[var(--border-strong)]">·</span><span>徒歩 {order.walkMinutes ?? order.criteria?.walkMinutes} 分以内</span></>
+                        {order.dealType === "rent" ? (
+                          <span>
+                            賃料:{" "}
+                            <strong className="text-[var(--text-primary)]">
+                              {order.rentMin && order.rentMax
+                                ? `${order.rentMin.toLocaleString()} 〜 ${order.rentMax.toLocaleString()}`
+                                : order.rentMin
+                                  ? `${order.rentMin.toLocaleString()} 〜`
+                                  : order.rentMax
+                                    ? `〜 ${order.rentMax.toLocaleString()}`
+                                    : "指定なし"}{" "}
+                              万円/月
+                            </strong>
+                          </span>
+                        ) : (
+                          <span>
+                            価格:{" "}
+                            <strong className="text-[var(--text-primary)]">
+                              {order.priceMin && order.priceMax
+                                ? `${order.priceMin.toLocaleString()} 〜 ${order.priceMax.toLocaleString()}`
+                                : order.priceMin
+                                  ? `${order.priceMin.toLocaleString()} 〜`
+                                  : order.priceMax
+                                    ? `〜 ${order.priceMax.toLocaleString()}`
+                                    : "指定なし"}{" "}
+                              万円
+                            </strong>
+                          </span>
                         )}
-                        {order.propertyTypes && order.propertyTypes.length > 0 && (
-                          <><span className="text-[var(--border-strong)]">·</span><span>{order.propertyTypes.join("・")}</span></>
+                        {(order.walkMinutes ?? order.criteria?.walkMinutes) && (
+                          <>
+                            <span className="text-[var(--border-strong)]">
+                              ·
+                            </span>
+                            <span>
+                              徒歩{" "}
+                              {order.walkMinutes ?? order.criteria?.walkMinutes}{" "}
+                              分以内
+                            </span>
+                          </>
+                        )}
+                        {order.propertyTypes &&
+                          order.propertyTypes.length > 0 && (
+                            <>
+                              <span className="text-[var(--border-strong)]">
+                                ·
+                              </span>
+                              <span>{order.propertyTypes.join("・")}</span>
+                            </>
+                          )}
+                        {order.ownerChange && (
+                          <>
+                            <span className="text-[var(--border-strong)]">
+                              ·
+                            </span>
+                            <span className="font-bold text-emerald-800">
+                              オーナーチェンジ
+                            </span>
+                          </>
+                        )}
+                        {(order.buildingSizeMin || order.buildingSizeMax) && (
+                          <>
+                            <span className="text-[var(--border-strong)]">
+                              ·
+                            </span>
+                            <span>
+                              専有面積:{" "}
+                              <strong className="text-[var(--text-primary)]">
+                                {order.buildingSizeMin && order.buildingSizeMax
+                                  ? `${order.buildingSizeMin} 〜 ${order.buildingSizeMax}`
+                                  : order.buildingSizeMin
+                                    ? `${order.buildingSizeMin} 〜`
+                                    : `〜 ${order.buildingSizeMax}`}{" "}
+                                ㎡
+                              </strong>
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* When the search last ran and who asked for it. Without
+                          this the listings on the card carry no date at all, so
+                          there was no way to tell today's results from a sweep
+                          run weeks ago. */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px] font-semibold text-[var(--text-muted)]">
+                        <Clock className="w-3 h-3" />
+                        {order.lastScrapeAt ? (
+                          <span>
+                            最終検索:{" "}
+                            <strong className="text-[var(--text-secondary)]">
+                              {formatJaDateTimeShort(order.lastScrapeAt)}
+                            </strong>
+                          </span>
+                        ) : (
+                          <span>最終検索: 記録なし</span>
+                        )}
+                        <span className="text-[var(--border-strong)]">·</span>
+                        {/* Always rendered, including the 記録なし case: an absent
+                            row read as "this field does not exist" rather than
+                            "this search predates the attribution". A person's name
+                            for a search someone pressed; the automatic label,
+                            badged, for the scheduled sweep (stamped by
+                            scraper-service/src/cli.ts). */}
+                        {!order.lastScrapeBy ? (
+                          <span title="この検索は実行者を記録する前のものです。次回の検索から記録されます。">
+                            実行者: 記録なし
+                          </span>
+                        ) : isAutomaticTrigger(order.lastScrapeBy) ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef2f7] text-[#475569] text-[11px] font-bold">
+                            <Bot className="w-3 h-3" />
+                            {order.lastScrapeBy}
+                          </span>
+                        ) : (
+                          <span>
+                            実行者:{" "}
+                            <strong className="text-[var(--text-secondary)]">
+                              {order.lastScrapeBy}
+                            </strong>
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1352,34 +3160,22 @@ export default function OrdersPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="flex items-center gap-2 px-3.5 py-2 bg-emerald-50 text-emerald-900 text-xs font-bold rounded-xl border border-emerald-200 shadow-xs">
                             <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
-                            <span>{getOrderSiteLabel(order) || "物件検索中..."}</span>
+                            <span>
+                              {getOrderSiteLabel(order) || "物件検索中..."}
+                            </span>
                           </div>
 
                           <Button
                             variant="destructive"
                             size="sm"
                             disabled={cancellingOrderId === order._id}
-                            onClick={async () => {
-                              setCancellingOrderId(order._id);
-                              try {
-                                const r = (await cancelScrape({
-                                  orderId: order._id,
-                                })) as { ok?: boolean; error?: string } | undefined;
-                                setScrapeNotice((prev) => ({
-                                  ...prev,
-                                  [order._id]: {
-                                    kind: r?.error ? "error" : "ok",
-                                    text: r?.error
-                                      ? r.error
-                                      : "物件検索を中止し、GitHub Actions の実行を停止しました。",
-                                  },
-                                }));
-                              } finally {
-                                setCancellingOrderId(null);
-                              }
-                            }}
+                            onClick={() => void handleCancelScrape(order)}
                             className="h-9 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-                            title="GitHub Actions で実行中のスクレイピング処理を停止します"
+                            title={
+                              (order.lastScrapeBy ?? "").includes("ローカル実行")
+                                ? "このPC上で実行中のローカルスクレイピングを停止します"
+                                : "GitHub Actions で実行中のスクレイピング処理を停止します"
+                            }
                           >
                             {cancellingOrderId === order._id ? (
                               <>
@@ -1439,16 +3235,56 @@ export default function OrdersPage() {
                               size="sm"
                               className="h-9 text-xs font-bold gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-sm"
                               onClick={() => handleScrapeOrder(order)}
-                              title="選択したサイトから物件を取得します"
+                              title={
+                                runner === "local"
+                                  ? "このPCのスクレイパー（作業中のコード）で取得します。別ターミナルで npm run dev:scraper が必要です。"
+                                  : "GitHub Actions（公開済みコード）で取得します。PCを閉じても実行が続きます。"
+                              }
                             >
                               <Play className="w-3.5 h-3.5" />
                               手動検索
                             </Button>
                           </div>
 
+                          {/* Where the scrape runs. GitHub executes the COMMITTED
+                              code and survives closing the laptop; ローカル runs the
+                              working tree, which is the only way to test a scraper
+                              change before pushing it. */}
+                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                            {(
+                              [
+                                { key: "github", label: "GitHub", icon: Cloud },
+                                {
+                                  key: "local",
+                                  label: "ローカル",
+                                  icon: Laptop,
+                                },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => chooseRunner(opt.key)}
+                                title={
+                                  opt.key === "local"
+                                    ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
+                                    : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
+                                }
+                                className={`flex items-center gap-1 px-2.5 h-8 rounded-lg text-[11px] font-bold transition-all ${
+                                  runner === opt.key
+                                    ? "bg-white text-emerald-800 shadow-xs"
+                                    : "text-slate-500 hover:text-slate-800"
+                                }`}
+                              >
+                                <opt.icon className="w-3.5 h-3.5" />
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+
                           {matchCount > 0 && (
                             <>
-                                  <Button
+                              <Button
                                 variant="outline"
                                 size="sm"
                                 className="h-9 text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg"
@@ -1507,12 +3343,22 @@ export default function OrdersPage() {
                               <Button
                                 size="sm"
                                 disabled={selectedCountForOrder === 0}
-                                title={selectedCountForOrder === 0 ? "提案する物件を下の一覧から選択してください" : `選択中の ${selectedCountForOrder} 件を提案します`}
-                                className={selectedCountForOrder === 0 ? "opacity-50" : ""}
+                                title={
+                                  selectedCountForOrder === 0
+                                    ? "提案する物件を下の一覧から選択してください"
+                                    : `選択中の ${selectedCountForOrder} 件を提案します`
+                                }
+                                className={
+                                  selectedCountForOrder === 0
+                                    ? "opacity-50"
+                                    : ""
+                                }
                                 onClick={() => setProposalOrder(order)}
                               >
                                 <Send className="w-3 h-3" />
-                                顧客へ提案・送信{selectedCountForOrder > 0 && ` (${selectedCountForOrder})`}
+                                顧客へ提案・送信
+                                {selectedCountForOrder > 0 &&
+                                  ` (${selectedCountForOrder})`}
                               </Button>
                             </>
                           )}
@@ -1520,11 +3366,27 @@ export default function OrdersPage() {
                       )}
 
                       <div className="flex items-center gap-1.5 ml-auto shrink-0">
-                        <Button variant="ghost" size="sm" onClick={() => handleEditClick(order)} title="このオーダーを編集">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditClick(order)}
+                          title="このオーダーを編集"
+                        >
                           <Edit className="w-3.5 h-3.5" />
                           編集
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(order._id)} title="このオーダーを削除" className="hover:text-red-600 hover:bg-red-50">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const label = order.name || `オーダー #${order._id.slice(0, 6)}`;
+                            if (window.confirm(`「${label}」を削除しますか？\nこの操作は取り消せません。`)) {
+                              handleDelete(order._id);
+                            }
+                          }}
+                          title="このオーダーを削除"
+                          className="hover:text-red-600 hover:bg-red-50"
+                        >
                           <Trash2 className="w-3.5 h-3.5" />
                           削除
                         </Button>
@@ -1533,11 +3395,13 @@ export default function OrdersPage() {
 
                     {/* Scrape notice */}
                     {scrapeNotice[order._id] && (
-                      <div className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed ${
-                        scrapeNotice[order._id].kind === "error"
-                          ? "bg-red-50 text-red-700 border border-red-200"
-                          : "bg-[var(--brand-soft)] text-[#14532d] border border-[var(--brand-border)]"
-                      }`}>
+                      <div
+                        className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed whitespace-pre-line ${
+                          scrapeNotice[order._id].kind === "error"
+                            ? "bg-red-50 text-red-700 border border-red-200"
+                            : "bg-[var(--brand-soft)] text-[#14532d] border border-[var(--brand-border)]"
+                        }`}
+                      >
                         {scrapeNotice[order._id].text}
                       </div>
                     )}
@@ -1547,38 +3411,160 @@ export default function OrdersPage() {
                 {/* Matched Listings Drawer */}
                 {isCardExpanded && matchCount > 0 && orderMatchList && (
                   <CardContent className="p-5 space-y-2">
-                    <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                      抽出物件一覧 ({matchCount}件)
+                    <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                          抽出物件一覧 ({matchCount}件)
+                        </div>
+
+                        {/* Quick filters, with live counts. Built from these
+                            results, so a 477-row list can be cut to "高評価" or a
+                            single 物件種別 without touching the order's criteria. */}
+                        {(() => {
+                          const scoreOf = (m: Doc<"matching">) =>
+                            matchScore(m, evaluations);
+                          const chips = buildListingFilters(
+                            orderMatchList,
+                            matchedListing,
+                            scoreOf,
+                          );
+                          if (chips.length === 0) return null;
+                          const active = listFilter[order._id] ?? "all";
+                          return (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {chips.map((chip) => {
+                                const isActive = active === chip.key;
+                                return (
+                                  <button
+                                    key={chip.key}
+                                    type="button"
+                                    onClick={() => {
+                                      setListFilter((prev) => ({
+                                        ...prev,
+                                        [order._id]: chip.key,
+                                      }));
+                                      // Filtering changes what page 4 even means.
+                                      setCurrentPage((prev) => ({
+                                        ...prev,
+                                        [order._id]: 1,
+                                      }));
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                      isActive
+                                        ? "bg-emerald-700 text-white border-emerald-700 shadow-xs"
+                                        : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                                    }`}
+                                  >
+                                    {chip.label}
+                                    <span
+                                      className={`ml-1 font-black ${isActive ? "text-white/80" : "text-slate-400"}`}
+                                    >
+                                      {chip.count}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--text-muted)]">
+                        並び順
+                        <select
+                          value={sortKey[order._id] || "score"}
+                          onChange={(e) => {
+                            setSortKey((prev) => ({
+                              ...prev,
+                              [order._id]: e.target.value as SortKey,
+                            }));
+                            // Page 1: staying on page 4 of a re-sorted list shows
+                            // a slice the user did not ask to see.
+                            setCurrentPage((prev) => ({
+                              ...prev,
+                              [order._id]: 1,
+                            }));
+                          }}
+                          className="h-8 px-2 bg-white text-slate-800 text-xs font-bold rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
+                        >
+                          {SORT_OPTIONS.map((o) => (
+                            <option key={o.key} value={o.key}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
 
                     {(() => {
                       const pageSize = showLimit[order._id] || 10;
                       const page = currentPage[order._id] || 1;
-                      const sortedMatches = [...orderMatchList].sort((a, b) => {
-                        const aEval = a.evaluation || evaluations[a._id];
-                        const bEval = b.evaluation || evaluations[b._id];
-                        const aScore =
-                          a.score ??
-                          (aEval
-                            ? aEval.match(/評価[：:\s]*(\d+)/)?.[1]
-                              ? Number(aEval.match(/評価[：:\s]*(\d+)/)[1])
-                              : 0
-                            : 0);
-                        const bScore =
-                          b.score ??
-                          (bEval
-                            ? bEval.match(/評価[：:\s]*(\d+)/)?.[1]
-                              ? Number(bEval.match(/評価[：:\s]*(\d+)/)[1])
-                              : 0
-                            : 0);
-                        return bScore - aScore;
+                      const activeSort: SortKey = sortKey[order._id] || "score";
+                      // When a listing lacks the sort field it goes last in every
+                      // ordering rather than being treated as 0 円 / 1970年.
+                      const LAST = Number.POSITIVE_INFINITY;
+                      const activeFilter = listFilter[order._id] ?? "all";
+                      const visibleMatches = orderMatchList.filter((m) =>
+                        passesListingFilter(
+                          activeFilter,
+                          m,
+                          matchedListing(m.listingId ?? ""),
+                          matchScore(m, evaluations),
+                        ),
+                      );
+                      const sortedMatches = [...visibleMatches].sort((a, b) => {
+                        const la = matchedListing(a.listingId ?? "");
+                        const lb = matchedListing(b.listingId ?? "");
+                        // A broker emailed this directly — surface it ahead of
+                        // everything scraped off a public portal, regardless
+                        // of whatever sort the user picked.
+                        const emailRank = (l: Doc<"listings"> | undefined) =>
+                          l?.source === "email" ? 0 : 1;
+                        const rankDiff = emailRank(la) - emailRank(lb);
+                        if (rankDiff !== 0) return rankDiff;
+                        switch (activeSort) {
+                          case "priceAsc":
+                            return (la?.price ?? LAST) - (lb?.price ?? LAST);
+                          case "priceDesc":
+                            return (lb?.price ?? -LAST) - (la?.price ?? -LAST);
+                          case "newest":
+                            return (
+                              (listingDate(lb) ?? -LAST) -
+                              (listingDate(la) ?? -LAST)
+                            );
+                          case "oldest":
+                            return (
+                              (listingDate(la) ?? LAST) -
+                              (listingDate(lb) ?? LAST)
+                            );
+                          case "foundNewest":
+                            return (
+                              (lb?._creationTime ?? -LAST) -
+                              (la?._creationTime ?? -LAST)
+                            );
+                          case "score":
+                          default:
+                            return (
+                              (matchScore(b, evaluations) ?? 0) -
+                              (matchScore(a, evaluations) ?? 0)
+                            );
+                        }
                       });
                       const totalMatches = sortedMatches.length;
-                      const totalPages = Math.max(1, Math.ceil(totalMatches / pageSize));
+                      const totalPages = Math.max(
+                        1,
+                        Math.ceil(totalMatches / pageSize),
+                      );
                       const validPage = Math.min(page, totalPages);
                       const startIndex = (validPage - 1) * pageSize;
-                      const endIndex = Math.min(startIndex + pageSize, totalMatches);
-                      const paginatedMatches = sortedMatches.slice(startIndex, endIndex);
+                      const endIndex = Math.min(
+                        startIndex + pageSize,
+                        totalMatches,
+                      );
+                      const paginatedMatches = sortedMatches.slice(
+                        startIndex,
+                        endIndex,
+                      );
 
                       return (
                         <>
@@ -1586,381 +3572,605 @@ export default function OrdersPage() {
                             const listing = matchedListing(m.listingId ?? "");
                             const isExpanded = expandedMatch === m._id;
                             const hasEvaluation =
-                               evaluations[m._id] !== undefined
-                                 ? evaluations[m._id]
-                                 : m.evaluation;
-                            const scoreDetail: EvaluationScoreDetail | undefined =
+                              evaluations[m._id] !== undefined
+                                ? evaluations[m._id]
+                                : m.evaluation;
+                            const scoreDetail:
+                              | EvaluationScoreDetail
+                              | undefined =
                               scoreDetails[m._id] ??
-                              (m as Doc<"matching"> & {
-                                scoreDetail?: EvaluationScoreDetail;
-                              }).scoreDetail;
+                              (
+                                m as Doc<"matching"> & {
+                                  scoreDetail?: EvaluationScoreDetail;
+                                }
+                              ).scoreDetail;
 
-                        // Extract score from DB score or from evaluation text string
-                        const extractedScore =
-                          m.score ??
-                          (hasEvaluation
-                            ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
-                              ? Number(
-                                  hasEvaluation.match(/評価[：:\s]*(\d+)/)[1],
-                                )
-                              : undefined
-                            : undefined);
+                            // Extract score from DB score or from evaluation text string
+                            const extractedScore =
+                              m.score ??
+                              (hasEvaluation
+                                ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
+                                  ? Number(
+                                      hasEvaluation.match(
+                                        /評価[：:\s]*(\d+)/,
+                                      )[1],
+                                    )
+                                  : undefined
+                                : undefined);
 
-                        return (
-                          <div
-                            key={m._id}
-                            // Selected rows tint very lightly rather than using a
-                            // strong fill: with a long list, a saturated highlight
-                            // competes with the 評価 score and source badges. A
-                            // faint wash plus a slightly firmer border is enough to
-                            // scan which rows are going into the proposal.
-                            className={`border rounded-xl overflow-hidden transition-all duration-150 ${
-                              selectedForProposal.has(m._id)
-                                ? "border-emerald-200 bg-emerald-50/40 hover:border-emerald-300"
-                                : "border-slate-200 bg-slate-50/30 hover:border-slate-300"
-                            }`}
-                          >
-                            {/* Header Row */}
-                            <div
-                              className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 cursor-pointer select-none"
-                              onClick={() => toggleExpand(m._id)}
-                            >
-                              <div className="flex flex-wrap items-center gap-2.5 min-w-0">
-                                {/* Tick here, then 顧客へ物件を提案 opens with these
+                            return (
+                              <div
+                                key={m._id}
+                                className={`border rounded-2xl overflow-hidden transition-all duration-200 shadow-xs ${
+                                  selectedForProposal.has(m._id)
+                                    ? "border-emerald-300 bg-emerald-50/60 ring-2 ring-emerald-500/20"
+                                    : "border-[var(--border-subtle)] bg-white hover:border-[var(--border-strong)] hover:shadow-sm"
+                                }`}
+                              >
+                                {/* Header Row */}
+                                <div
+                                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 cursor-pointer select-none"
+                                  onClick={() => toggleExpand(m._id)}
+                                >
+                                  <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                                    {/* Tick here, then 顧客へ物件を提案 opens with these
                                     already chosen. stopPropagation keeps the click
                                     from toggling the row's expand state. */}
-                                <input
-                                  type="checkbox"
-                                  checked={selectedForProposal.has(m._id)}
-                                  onChange={() => toggleProposalSelection(m._id)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="w-4 h-4 accent-emerald-700 shrink-0 cursor-pointer"
-                                  title="提案メールに含める"
-                                  aria-label="提案に含める"
-                                />
-                                <MapPin className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
-                                <span className="text-sm font-bold text-[var(--text-primary)] truncate">
-                                  {listing?.address || m.listingId?.slice(0, 8) || "—"}
-                                </span>
-
-                                {/* Source Portal Tag */}
-                                {listing?.source && (
-                                  <Badge variant="brand" className="text-[10px] shrink-0">
-                                    {listing.source === "stepon"
-                                      ? "住友不動産"
-                                      : listing.source === "mitsui"
-                                        ? "三井のリハウス"
-                                        : listing.source === "tokyu"
-                                          ? "東急リバブル"
-                                          : listing.source === "nomu"
-                                            ? "ノムコム"
-                                            : listing.source === "nomu_pro"
-                                              ? "ノムコムプロ"
-                                              : listing.source === "mizuho"
-                                                ? "みずほ不動産"
-                                                : listing.source ===
-                                                    "mitsubishi_ufj"
-                                                  ? "三菱UFJ"
-                                                  : listing.source === "odakyu"
-                                                    ? "小田急"
-                                                    : listing.source === "keio"
-                                                      ? "京王"
-                                                      : listing.source ===
-                                                          "asahi"
-                                                        ? "朝日住宅"
-                                                        : listing.source ===
-                                                            "haseko"
-                                                          ? "長谷工"
-                                                          : listing.source ===
-                                                              "daikyo"
-                                                            ? "大京穴吹"
-                                                            : listing.source ===
-                                                                "tokyotatemono"
-                                                              ? "東京建物"
-                                                              : listing.source ===
-                                                                  "homes"
-                                                                ? "LIFULL HOME'S"
-                                                                : listing.source}
-                                  </Badge>
-                                )}
-
-                                {/* Property Type Tag */}
-                                {listing?.propertyType && (
-                                  <Badge variant="neutral" className="text-[10px] shrink-0">
-                                    {listing.propertyType}
-                                  </Badge>
-                                )}
-
-                                {/* Prominent Score Badge on Item Header BEFORE Expanding */}
-                                {extractedScore !== undefined && (
-                                  <span
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const current = extractedScore;
-                                      const next =
-                                        current >= 100
-                                          ? 0
-                                          : (current || 0) + 10;
-                                      saveScore({
-                                        matchId: m._id,
-                                        score: next,
-                                      });
-                                    }}
-                                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black border shrink-0 transition-all ${
-                                      extractedScore >= 80
-                                        ? "bg-emerald-100 text-emerald-900 border-emerald-300 shadow-xs"
-                                        : extractedScore >= 60
-                                          ? "bg-green-100 text-green-900 border-green-300 shadow-xs"
-                                          : extractedScore >= 40
-                                            ? "bg-amber-100 text-amber-900 border-amber-300 shadow-xs"
-                                            : "bg-red-100 text-red-900 border-red-300 shadow-xs"
-                                    }`}
-                                    title="クリックでスコア変更"
-                                  >
-                                    評価 {extractedScore}点
-                                  </span>
-                                )}
-
-                                {/* Evaluation Status Badge if evaluated but no score */}
-                                {hasEvaluation &&
-                                  extractedScore === undefined && (
-                                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1 shrink-0">
-                                      評価済み
-                                    </span>
-                                  )}
-
-                                {evaluatingId === m._id && (
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0 animate-pulse">
-                                    <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
-                                    評価中...
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-4 shrink-0 text-slate-700">
-                                {listing?.price && (
-                                  <span className="text-base font-black text-slate-900 font-data">
-                                    {listing.price.toLocaleString()}
-                                    <span className="text-xs font-normal ml-0.5 text-slate-600">
-                                      万円
-                                    </span>
-                                  </span>
-                                )}
-
-                                {listing?.landSize && (
-                                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1">
-                                    <Ruler className="w-3.5 h-3.5 text-slate-400" />
-                                    {listing.landSize}㎡
-                                  </span>
-                                )}
-
-                                {listing?.walkMinutes !== undefined && (
-                                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1">
-                                    <Train className="w-3.5 h-3.5 text-slate-400" />
-                                    徒歩{listing.walkMinutes}分
-                                  </span>
-                                )}
-
-                                {isExpanded ? (
-                                  <ChevronUp className="w-4 h-4 text-slate-400" />
-                                ) : (
-                                  <ChevronDown className="w-4 h-4 text-slate-400" />
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Expanded Details */}
-                            {isExpanded && listing && (
-                              <div className="p-5 border-t border-slate-200 bg-white space-y-4 text-sm animate-in fade-in duration-200">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-400">
-                                      所在地
-                                    </div>
-                                    <div className="text-sm font-semibold text-slate-800 mt-0.5">
-                                      {listing.address || "—"}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-400">
-                                      価格
-                                    </div>
-                                    <div className="text-base font-extrabold text-emerald-700 font-data mt-0.5">
-                                      {listing.price
-                                        ? `${listing.price.toLocaleString()} 万円`
-                                        : "—"}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-400">
-                                      面積
-                                    </div>
-                                    <div className="text-sm font-semibold text-slate-800 mt-0.5 font-data">
-                                      {listing.landSize || listing.area
-                                        ? `${listing.landSize || listing.area} ㎡`
-                                        : "—"}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-400">
-                                      最寄駅アクセス
-                                    </div>
-                                    <div className="text-sm font-semibold text-slate-800 mt-0.5">
-                                      {listing.station || "—"}{" "}
-                                      {listing.walkMinutes !== undefined
-                                        ? `(徒歩${listing.walkMinutes}分)`
-                                        : ""}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* External Link & Google Maps */}
-                                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                                  {listing.url ? (
-                                    <a
-                                      href={listing.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 font-bold text-xs hover:bg-emerald-100 transition-colors"
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedForProposal.has(m._id)}
+                                      onChange={() =>
+                                        toggleProposalSelection(m._id)
+                                      }
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-4 h-4 accent-emerald-700 shrink-0 cursor-pointer"
+                                      title="提案メールに含める"
+                                      aria-label="提案に含める"
+                                    />
+                                    {/* ★ shortlist. Sends a SNAPSHOT of the listing,
+                                    not just its id: `listings` rows are deleted
+                                    with the last order that matched them, and a
+                                    saved property must outlive that (see
+                                    convex/savedListings.js). */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void toggleSaved({
+                                          listingId: m.listingId,
+                                          orderId: order._id,
+                                          orderName: order.name,
+                                          address: listing?.address,
+                                          ward: listing?.ward,
+                                          price: listing?.price,
+                                          area: listing?.area,
+                                          landSize: listing?.landSize,
+                                          source: listing?.source,
+                                          url: listing?.url,
+                                          propertyType: listing?.propertyType,
+                                          station: listing?.station,
+                                          walkMinutes: listing?.walkMinutes,
+                                          score: extractedScore,
+                                          postedAt: listing?.postedAt,
+                                          postedDateKind:
+                                            listing?.postedDateKind,
+                                        });
+                                      }}
+                                      className="shrink-0 p-0.5 rounded-md hover:bg-amber-50 transition-colors cursor-pointer"
+                                      title={
+                                        m.listingId && savedSet.has(m.listingId)
+                                          ? "保存物件から外す"
+                                          : "保存物件に追加（★）"
+                                      }
+                                      aria-label="保存物件に追加"
+                                      aria-pressed={Boolean(
+                                        m.listingId &&
+                                        savedSet.has(m.listingId),
+                                      )}
                                     >
-                                      ポータル掲載ページを開く ({listing.source}
-                                      )
-                                      <ExternalLink className="w-3.5 h-3.5" />
-                                    </a>
-                                  ) : null}
+                                      <Star
+                                        className={`w-4 h-4 transition-colors ${
+                                          m.listingId &&
+                                          savedSet.has(m.listingId)
+                                            ? "text-amber-500 fill-amber-400"
+                                            : "text-slate-300 hover:text-amber-400"
+                                        }`}
+                                      />
+                                    </button>
+                                    <MapPin className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
+                                    <span className="text-sm font-bold text-[var(--text-primary)] truncate">
+                                      {listing?.address ||
+                                        m.listingId?.slice(0, 8) ||
+                                        "—"}
+                                    </span>
 
-                                  {listing.address && GMAPS_KEY && (
-                                    <a
-                                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address)}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200 transition-colors"
-                                    >
-                                      Google Mapsで位置確認
-                                      <ArrowUpRight className="w-3.5 h-3.5" />
-                                    </a>
-                                  )}
-                                </div>
-
-                                {/* Evaluation Section */}
-                                <div className="border-t border-slate-100 pt-3">
-                                  {hasEvaluation ? (
-                                    <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-100 space-y-2">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
-                                          <FileText className="w-4 h-4 text-emerald-700" />
-                                          物件評価レポート
-                                        </div>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-7 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
-                                          onClick={() =>
-                                            handleEvaluate(m._id, listing, order)
-                                          }
-                                          disabled={evaluatingId === m._id}
+                                    {/* Source Portal Tag */}
+                                    {listing?.source === "email" ? (
+                                      <span title={listing.emailFrom || "メールで届いた物件紹介"}>
+                                        <Badge
+                                          variant="amber"
+                                          className="text-[10px] shrink-0"
                                         >
-                                          {evaluatingId === m._id
-                                            ? "評価中..."
-                                            : "再評価"}
-                                        </Button>
+                                          メール
+                                        </Badge>
+                                      </span>
+                                    ) : (
+                                      listing?.source && (
+                                      <Badge
+                                        variant="brand"
+                                        className="text-[10px] shrink-0"
+                                      >
+                                        {listing.source === "stepon"
+                                          ? "住友不動産"
+                                          : listing.source === "mitsui"
+                                            ? "三井のリハウス"
+                                            : listing.source === "tokyu"
+                                              ? "東急リバブル"
+                                              : listing.source === "nomu"
+                                                ? "ノムコム"
+                                                : listing.source === "nomu_pro"
+                                                  ? "ノムコムプロ"
+                                                  : listing.source === "mizuho"
+                                                    ? "みずほ不動産"
+                                                    : listing.source ===
+                                                        "mitsubishi_ufj"
+                                                      ? "三菱UFJ"
+                                                      : listing.source ===
+                                                          "odakyu"
+                                                        ? "小田急"
+                                                        : listing.source ===
+                                                            "keio"
+                                                          ? "京王"
+                                                          : listing.source ===
+                                                              "asahi"
+                                                            ? "朝日住宅"
+                                                            : listing.source ===
+                                                                "haseko"
+                                                              ? "長谷工"
+                                                              : listing.source ===
+                                                                  "daikyo"
+                                                                ? "大京穴吹"
+                                                                : listing.source ===
+                                                                    "tokyotatemono"
+                                                                  ? "東京建物"
+                                                                  : listing.source ===
+                                                                      "homes"
+                                                                    ? "LIFULL HOME'S"
+                                                                    : listing.source}
+                                      </Badge>
+                                      )
+                                    )}
+
+                                    {/* Property Type Tag */}
+                                    {listing?.propertyType && (
+                                      <Badge
+                                        variant="neutral"
+                                        className="text-[10px] shrink-0"
+                                      >
+                                        {listing.propertyType}
+                                      </Badge>
+                                    )}
+
+                                    {/* The portal's own 新着 badge. Kept separate from
+                                    掲載日: 東急リバブル・みずほ・東京建物 show this
+                                    badge but never publish a date. */}
+                                    {listing?.isNew && (
+                                      <Badge className="text-[10px] shrink-0 bg-rose-100 text-rose-900 border border-rose-200 font-black">
+                                        新着
+                                      </Badge>
+                                    )}
+
+                                    {/* Prominent Score Badge on Item Header BEFORE Expanding */}
+                                    {extractedScore !== undefined && (
+                                      <span
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const current = extractedScore;
+                                          const next =
+                                            current >= 100
+                                              ? 0
+                                              : (current || 0) + 10;
+                                          saveScore({
+                                            matchId: m._id,
+                                            score: next,
+                                          });
+                                        }}
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black border shrink-0 transition-all ${
+                                          extractedScore >= 80
+                                            ? "bg-emerald-100 text-emerald-900 border-emerald-300 shadow-xs"
+                                            : extractedScore >= 60
+                                              ? "bg-green-100 text-green-900 border-green-300 shadow-xs"
+                                              : extractedScore >= 40
+                                                ? "bg-amber-100 text-amber-900 border-amber-300 shadow-xs"
+                                                : "bg-red-100 text-red-900 border-red-300 shadow-xs"
+                                        }`}
+                                        title="クリックでスコア変更"
+                                      >
+                                        評価 {extractedScore}点
+                                      </span>
+                                    )}
+
+                                    {/* Evaluation Status Badge if evaluated but no score */}
+                                    {hasEvaluation &&
+                                      extractedScore === undefined && (
+                                        <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1 shrink-0">
+                                          評価済み
+                                        </span>
+                                      )}
+
+                                    {evaluatingId === m._id && (
+                                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0 animate-pulse">
+                                        <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                                        評価中...
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-4 shrink-0 text-slate-700">
+                                    {listing?.price && (
+                                      <span className="text-base font-black text-slate-900 font-data">
+                                        {listing.price.toLocaleString()}
+                                        <span className="text-xs font-normal ml-0.5 text-slate-600">
+                                          万円
+                                        </span>
+                                      </span>
+                                    )}
+
+                                    {listing?.landSize && (
+                                      <span className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+                                        <Ruler className="w-3.5 h-3.5 text-slate-400" />
+                                        {listing.landSize}㎡
+                                      </span>
+                                    )}
+
+                                    {listing?.walkMinutes !== undefined && (
+                                      <span className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+                                        <Train className="w-3.5 h-3.5 text-slate-400" />
+                                        徒歩{listing.walkMinutes}分
+                                      </span>
+                                    )}
+
+                                    {/* No 取得日 on the collapsed row — it competed with
+                                    price / area / walk time for space and is the
+                                    least useful of them at a glance. Both dates
+                                    (掲載日 and 取得日時) are in the expanded details. */}
+
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-slate-400" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-slate-400" />
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Expanded Details */}
+                                {isExpanded && listing && (
+                                  <div className="p-5 border-t border-slate-200 bg-white space-y-4 text-sm animate-in fade-in duration-200">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          所在地
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-800 mt-0.5">
+                                          {listing.address || "—"}
+                                        </div>
                                       </div>
-                                      <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed font-sans">
-                                        {hasEvaluation}
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          価格
+                                        </div>
+                                        <div className="text-base font-extrabold text-emerald-700 font-data mt-0.5">
+                                          {listing.price
+                                            ? `${listing.price.toLocaleString()} 万円`
+                                            : "—"}
+                                        </div>
+                                      </div>
+                                      {/* 土地面積 and 専有/建物面積 are different numbers
+                                      and both are filterable, so showing whichever
+                                      happened to be set under one "面積" label hid
+                                      which of the two the buyer was looking at. */}
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          面積
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-800 mt-0.5 font-data space-y-0.5">
+                                          {listing.landSize == null &&
+                                          listing.area == null ? (
+                                            <div>—</div>
+                                          ) : (
+                                            <>
+                                              {listing.landSize != null && (
+                                                <div>
+                                                  土地 {listing.landSize} ㎡
+                                                </div>
+                                              )}
+                                              {listing.area != null && (
+                                                <div>
+                                                  専有/延床 {listing.area} ㎡
+                                                </div>
+                                              )}
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          最寄駅アクセス
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-800 mt-0.5">
+                                          {listing.station || "—"}{" "}
+                                          {listing.walkMinutes !== undefined
+                                            ? `(徒歩${listing.walkMinutes}分)`
+                                            : ""}
+                                        </div>
                                       </div>
 
-                                      {scoreDetail?.comparables &&
-                                        scoreDetail.comparables.length > 0 && (
-                                          <div className="mt-2 rounded-lg border border-emerald-100 bg-white/70 p-3">
-                                            <div className="text-[11px] font-bold text-emerald-900 mb-1.5">
-                                              類似取引事例（国交省データ・面積が近い順）
-                                              {scoreDetail.marketAvgPrice != null && (
-                                                <span className="ml-2 font-normal text-slate-500">
-                                                  平均{" "}
-                                                  {scoreDetail.marketAvgPrice.toLocaleString()}
-                                                  万円
+                                      {/* Three separate facts that used to be muddled
+                                      into one: when the PORTAL posted it, when OUR
+                                      search found it, and who ran that search.
+                                      Often weeks apart, so never derived from each
+                                      other. */}
+                                      {(() => {
+                                        const d = describePostedDate(listing);
+                                        return (
+                                          <div>
+                                            <div className="text-xs font-bold text-slate-400">
+                                              {d.label}
+                                              <span
+                                                className="ml-1 cursor-help text-slate-300"
+                                                title={d.note}
+                                              >
+                                                ⓘ
+                                              </span>
+                                            </div>
+                                            <div className="text-sm font-semibold text-slate-800 mt-0.5">
+                                              {d.value ? (
+                                                formatJaDate(d.value)
+                                              ) : (
+                                                <span className="text-slate-400 font-medium">
+                                                  {d.missingReason ===
+                                                  "unpublished"
+                                                    ? "掲載元が非公開"
+                                                    : "未取得（次回の検索で取得）"}
                                                 </span>
                                               )}
                                             </div>
-                                            <div className="space-y-1">
-                                              {scoreDetail.comparables.map(
-                                                (comp, i) => (
-                                                  <div
-                                                    key={i}
-                                                    className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600"
-                                                  >
-                                                    <span className="font-semibold text-slate-800">
-                                                      {comp.price.toLocaleString()}
+                                          </div>
+                                        );
+                                      })()}
+
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          最終検索日時
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-800 mt-0.5">
+                                          {listing._creationTime
+                                            ? formatJaDateTime(
+                                                listing._creationTime,
+                                              )
+                                            : "—"}
+                                        </div>
+                                      </div>
+
+                                      {/* Attribution lives on the ORDER (the search is
+                                      run per order, not per listing), which is why
+                                      it reads from `order` here. */}
+                                      <div>
+                                        <div className="text-xs font-bold text-slate-400">
+                                          検索の実行者
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-800 mt-0.5">
+                                          {order.lastScrapeBy ? (
+                                            isAutomaticTrigger(
+                                              order.lastScrapeBy,
+                                            ) ? (
+                                              <span className="inline-flex items-center gap-1">
+                                                <Bot className="w-3.5 h-3.5 text-slate-400" />
+                                                {order.lastScrapeBy}
+                                              </span>
+                                            ) : (
+                                              order.lastScrapeBy
+                                            )
+                                          ) : (
+                                            <span
+                                              className="text-slate-400 font-medium cursor-help"
+                                              title="この物件が取得された時点では実行者を記録していませんでした。次回の検索から記録されます。"
+                                            >
+                                              記録なし
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* External Link & Google Maps */}
+                                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                                      {/* Email listings' `url` is a synthesized
+                                          `email:{provider}:{id}:{i}` key used only
+                                          for de-dup (see mailIngestData.js) — not a
+                                          real page, so no link for those. */}
+                                      {listing.url && listing.source !== "email" ? (
+                                        <a
+                                          href={listing.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 font-bold text-xs hover:bg-emerald-100 transition-colors"
+                                        >
+                                          ポータル掲載ページを開く (
+                                          {listing.source}
+                                          )
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                        </a>
+                                      ) : null}
+
+                                      {listing.address && GMAPS_KEY && (
+                                        <a
+                                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address)}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200 transition-colors"
+                                        >
+                                          Google Mapsで位置確認
+                                          <ArrowUpRight className="w-3.5 h-3.5" />
+                                        </a>
+                                      )}
+                                    </div>
+
+                                    {/* Email Source Details & PDF Attachments */}
+                                    {(listing.source === "email" ||
+                                      listing.url?.startsWith("email:") ||
+                                      Boolean(listing.emailFrom)) && (
+                                      <EmailListingDetails
+                                        listing={listing}
+                                        handleOpenAttachment={handleOpenAttachment}
+                                        openingAttachmentId={openingAttachmentId}
+                                      />
+                                    )}
+
+                                    {/* Evaluation Section */}
+                                    <div className="border-t border-slate-100 pt-3">
+                                      {hasEvaluation ? (
+                                        <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-100 space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
+                                              <FileText className="w-4 h-4 text-emerald-700" />
+                                              物件評価レポート
+                                            </div>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-7 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
+                                              onClick={() =>
+                                                handleEvaluate(
+                                                  m._id,
+                                                  listing,
+                                                  order,
+                                                )
+                                              }
+                                              disabled={evaluatingId === m._id}
+                                            >
+                                              {evaluatingId === m._id
+                                                ? "評価中..."
+                                                : "再評価"}
+                                            </Button>
+                                          </div>
+                                          <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed font-sans">
+                                            {hasEvaluation}
+                                          </div>
+
+                                          {scoreDetail?.comparables &&
+                                            scoreDetail.comparables.length >
+                                              0 && (
+                                              <div className="mt-2 rounded-lg border border-emerald-100 bg-white/70 p-3">
+                                                <div className="text-[11px] font-bold text-emerald-900 mb-1.5">
+                                                  類似取引事例（国交省データ・面積が近い順）
+                                                  {scoreDetail.marketAvgPrice !=
+                                                    null && (
+                                                    <span className="ml-2 font-normal text-slate-500">
+                                                      平均{" "}
+                                                      {scoreDetail.marketAvgPrice.toLocaleString()}
                                                       万円
                                                     </span>
-                                                    <span>
-                                                      {comp.area != null
-                                                        ? `${comp.area}㎡`
-                                                        : "面積不明"}
-                                                    </span>
-                                                    <span>{comp.district || ""}</span>
-                                                    <span>
-                                                      {comp.station
-                                                        ? `${comp.station}駅${comp.walkMinutes ? ` 徒歩${comp.walkMinutes}分` : ""}`
-                                                        : ""}
-                                                    </span>
-                                                    <span>築{comp.buildYear || "不明"}</span>
-                                                    <span className="text-slate-400">
-                                                      {comp.period || ""}
-                                                    </span>
-                                                  </div>
-                                                ),
-                                              )}
-                                            </div>
-                                          </div>
-                                        )}
+                                                  )}
+                                                </div>
+                                                <div className="space-y-1">
+                                                  {scoreDetail.comparables.map(
+                                                    (comp, i) => (
+                                                      <div
+                                                        key={i}
+                                                        className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600"
+                                                      >
+                                                        <span className="font-semibold text-slate-800">
+                                                          {comp.price.toLocaleString()}
+                                                          万円
+                                                        </span>
+                                                        <span>
+                                                          {comp.area != null
+                                                            ? `${comp.area}㎡`
+                                                            : "面積不明"}
+                                                        </span>
+                                                        <span>
+                                                          {comp.district || ""}
+                                                        </span>
+                                                        <span>
+                                                          {comp.station
+                                                            ? `${comp.station}駅${comp.walkMinutes ? ` 徒歩${comp.walkMinutes}分` : ""}`
+                                                            : ""}
+                                                        </span>
+                                                        <span>
+                                                          築
+                                                          {comp.buildYear ||
+                                                            "不明"}
+                                                        </span>
+                                                        <span className="text-slate-400">
+                                                          {comp.period || ""}
+                                                        </span>
+                                                      </div>
+                                                    ),
+                                                  )}
+                                                </div>
+                                              </div>
+                                            )}
 
-                                      {scoreDetail?.dataWarnings &&
-                                        scoreDetail.dataWarnings.length > 0 && (
-                                          <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-0.5">
-                                            {scoreDetail.dataWarnings.map((w, i) => (
-                                              <div key={i}>⚠ {w}</div>
-                                            ))}
-                                          </div>
-                                        )}
-                                    </div>
-                                  ) : (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="w-full h-10 text-xs font-bold gap-2 border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
-                                      onClick={() =>
-                                        handleEvaluate(m._id, listing)
-                                      }
-                                      disabled={evaluatingId === m._id}
-                                    >
-                                      {evaluatingId === m._id ? (
-                                        <>
-                                          <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
-                                          評価実行中...
-                                        </>
+                                          {scoreDetail?.dataWarnings &&
+                                            scoreDetail.dataWarnings.length >
+                                              0 && (
+                                              <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-0.5">
+                                                {scoreDetail.dataWarnings.map(
+                                                  (w, i) => (
+                                                    <div key={i}>⚠ {w}</div>
+                                                  ),
+                                                )}
+                                              </div>
+                                            )}
+                                        </div>
                                       ) : (
-                                        <>
-                                          <FileText className="w-4 h-4 text-emerald-700" />
-                                          物件の適正評価と強み・懸念点を分析
-                                        </>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="w-full h-10 text-xs font-bold gap-2 border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
+                                          onClick={() =>
+                                            handleEvaluate(m._id, listing)
+                                          }
+                                          disabled={evaluatingId === m._id}
+                                        >
+                                          {evaluatingId === m._id ? (
+                                            <>
+                                              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
+                                              評価実行中...
+                                            </>
+                                          ) : (
+                                            <>
+                                              <FileText className="w-4 h-4 text-emerald-700" />
+                                              物件の適正評価と強み・懸念点を分析
+                                            </>
+                                          )}
+                                        </Button>
                                       )}
-                                    </Button>
-                                  )}
-                                </div>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        );
+                            );
                           })}
 
                           {/* Pagination & Display Controls */}
                           {totalMatches > 0 && (
                             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 mt-4">
                               <div className="text-xs font-semibold text-slate-500">
-                                全 <span className="font-extrabold text-slate-900">{totalMatches}</span> 件中{" "}
-                                <span className="font-extrabold text-slate-900">{startIndex + 1}</span> 〜{" "}
-                                <span className="font-extrabold text-slate-900">{endIndex}</span> 件目を表示
+                                全{" "}
+                                <span className="font-extrabold text-slate-900">
+                                  {totalMatches}
+                                </span>{" "}
+                                件中{" "}
+                                <span className="font-extrabold text-slate-900">
+                                  {startIndex + 1}
+                                </span>{" "}
+                                〜{" "}
+                                <span className="font-extrabold text-slate-900">
+                                  {endIndex}
+                                </span>{" "}
+                                件目を表示
                               </div>
 
                               <div className="flex flex-wrap items-center gap-3">
@@ -1971,8 +4181,14 @@ export default function OrdersPage() {
                                       key={size}
                                       type="button"
                                       onClick={() => {
-                                        setShowLimit((prev) => ({ ...prev, [order._id]: size }));
-                                        setCurrentPage((prev) => ({ ...prev, [order._id]: 1 }));
+                                        setShowLimit((prev) => ({
+                                          ...prev,
+                                          [order._id]: size,
+                                        }));
+                                        setCurrentPage((prev) => ({
+                                          ...prev,
+                                          [order._id]: 1,
+                                        }));
                                       }}
                                       className={`px-2.5 py-1 rounded-lg transition-all ${
                                         pageSize === size
@@ -1993,7 +4209,10 @@ export default function OrdersPage() {
                                       size="sm"
                                       disabled={validPage <= 1}
                                       onClick={() =>
-                                        setCurrentPage((prev) => ({ ...prev, [order._id]: validPage - 1 }))
+                                        setCurrentPage((prev) => ({
+                                          ...prev,
+                                          [order._id]: validPage - 1,
+                                        }))
                                       }
                                       className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
                                     >
@@ -2002,7 +4221,10 @@ export default function OrdersPage() {
                                     </Button>
 
                                     <div className="flex items-center gap-1 px-1">
-                                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
+                                      {Array.from(
+                                        { length: totalPages },
+                                        (_, i) => i + 1,
+                                      ).map((p) => {
                                         if (
                                           totalPages <= 7 ||
                                           p === 1 ||
@@ -2014,7 +4236,10 @@ export default function OrdersPage() {
                                               key={p}
                                               type="button"
                                               onClick={() =>
-                                                setCurrentPage((prev) => ({ ...prev, [order._id]: p }))
+                                                setCurrentPage((prev) => ({
+                                                  ...prev,
+                                                  [order._id]: p,
+                                                }))
                                               }
                                               className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
                                                 validPage === p
@@ -2028,10 +4253,14 @@ export default function OrdersPage() {
                                         }
                                         if (
                                           (p === 2 && validPage > 3) ||
-                                          (p === totalPages - 1 && validPage < totalPages - 2)
+                                          (p === totalPages - 1 &&
+                                            validPage < totalPages - 2)
                                         ) {
                                           return (
-                                            <span key={p} className="text-slate-400 text-xs px-0.5">
+                                            <span
+                                              key={p}
+                                              className="text-slate-400 text-xs px-0.5"
+                                            >
                                               …
                                             </span>
                                           );
@@ -2045,7 +4274,10 @@ export default function OrdersPage() {
                                       size="sm"
                                       disabled={validPage >= totalPages}
                                       onClick={() =>
-                                        setCurrentPage((prev) => ({ ...prev, [order._id]: validPage + 1 }))
+                                        setCurrentPage((prev) => ({
+                                          ...prev,
+                                          [order._id]: validPage + 1,
+                                        }))
                                       }
                                       className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
                                     >
@@ -2092,14 +4324,386 @@ export default function OrdersPage() {
       </div>
       {proposalOrder && (
         <ProposalModal
-          order={proposalOrder}
-          initialSelectedMatchIds={selectedForProposal}
-          orderMatchList={orderMatches(proposalOrder._id) || []}
-          matchedListing={matchedListing}
-          evaluations={evaluations}
+          // Flattened here rather than inside the modal, so 保存物件 can feed the
+          // same modal from rows that are not matches at all.
+          items={(orderMatches(proposalOrder._id) || []).map((m) => {
+            const listing = matchedListing(m.listingId ?? "");
+            return {
+              id: m._id,
+              listingId: m.listingId,
+              address: listing?.address,
+              ward: listing?.ward,
+              price: listing?.price,
+              size: listing?.landSize ?? listing?.area,
+              station: listing?.station,
+              walkMinutes: listing?.walkMinutes,
+              url: listing?.url,
+              source: listing?.source,
+              propertyType: listing?.propertyType,
+              score: matchScore(m, evaluations),
+              evaluation: m.evaluation || evaluations[m._id],
+            };
+          })}
+          initialSelectedIds={selectedForProposal}
+          contextName={proposalOrder.name}
+          orderId={proposalOrder._id}
+          defaultCustomerId={proposalOrder.customerId}
           onClose={() => setProposalOrder(null)}
         />
       )}
+
+      {showMailRules && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                  <SlidersHorizontal className="w-4 h-4" />
+                  メール取り込み設定
+                </h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  どのメールを物件情報として読み取るかを決めます。1行に1つ入力してください。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMailRules(false)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-5 space-y-4">
+              {[
+                {
+                  key: "requiredKeywords" as const,
+                  label: "必須ワード",
+                  hint: "件名か本文にこのいずれかを含むメールだけを読み取ります。空欄ならすべて読み取ります。",
+                  placeholder: "物件\n物件概要\n売買価格",
+                },
+                {
+                  key: "blockedKeywords" as const,
+                  label: "除外ワード",
+                  hint: "このいずれかを含むメールは読み取りません。",
+                  placeholder: "メルマガ\nセミナー\nPremium deal",
+                },
+                {
+                  key: "allowedSenders" as const,
+                  label: "許可する送信者",
+                  hint: "入力すると、この送信者からのメールだけを読み取ります。@以下だけでも指定できます。",
+                  placeholder: "@baseltd.co.jp\ninagaki@xialead.co.jp",
+                },
+                {
+                  key: "blockedSenders" as const,
+                  label: "除外する送信者",
+                  hint: "この送信者からのメールは読み取りません。",
+                  placeholder: "@marketing.going.com\nnoreply@",
+                },
+              ].map((f) => (
+                <div key={f.key}>
+                  <Label className="text-xs font-bold text-[var(--text-primary)]">
+                    {f.label}
+                  </Label>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5 mb-1.5">{f.hint}</p>
+                  <textarea
+                    rows={4}
+                    value={mailRules[f.key]}
+                    placeholder={f.placeholder}
+                    onChange={(e) =>
+                      setMailRules((prev) => ({ ...prev, [f.key]: e.target.value }))
+                    }
+                    className="w-full text-xs rounded-xl border border-[var(--border-subtle)] bg-white px-3 py-2 font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/30"
+                  />
+                </div>
+              ))}
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mailRules.requireAttachment}
+                  onChange={(e) =>
+                    setMailRules((prev) => ({ ...prev, requireAttachment: e.target.checked }))
+                  }
+                  className="mt-0.5 w-4 h-4 accent-[var(--brand)]"
+                />
+                <span>
+                  <span className="block text-xs font-bold text-[var(--text-primary)]">
+                    添付ファイルのあるメールだけを読み取る
+                  </span>
+                  <span className="block text-[11px] text-[var(--text-muted)]">
+                    マイソクを必ず添付する会社だけを対象にしたい場合に使います。本文だけで物件を紹介するメールは除外されます。
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className="p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-3">
+              <p className="text-[11px] text-[var(--text-muted)]">
+                設定の効果は「同期メールを確認」で確認できます。
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowMailRules(false)}
+                  className="h-8 px-3 text-xs font-bold rounded-lg"
+                >
+                  キャンセル
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={savingMailRules}
+                  onClick={() => void handleSaveMailRules()}
+                  className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
+                >
+                  {savingMailRules && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  保存
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TEMPORARY: mail sync inspector. Shows each recent message, what it
+          carried, and what the rule-based parser made of it. */}
+      {inspected && (() => {
+        const displayedMails = filterMatchedOnly
+          ? inspected.filter((m) => !m.filtered && !m.error)
+          : inspected;
+        const matchedCount = inspected.filter((m) => !m.filtered && !m.error).length;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+              <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                    <Mail className="w-4 h-4" />
+                    同期メールの内容（{displayedMails.length}件）
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    過去3ヶ月の受信メールから取り込み条件に合致したメールを表示
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void handleInspectMail(true)}
+                    disabled={inspecting}
+                    title="各メールをAIで実際に解析し、取り込まれる物件情報を表示します（同期と同じ処理・保存はしません）"
+                    className="text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white shadow-xs hover:border-[var(--brand)] disabled:opacity-50"
+                  >
+                    {inspecting ? "解析中…" : "AIで抽出を確認"}
+                  </button>
+                  <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-semibold cursor-pointer select-none bg-white px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] shadow-xs hover:border-[var(--brand)]">
+                    <input
+                      type="checkbox"
+                      checked={filterMatchedOnly}
+                      onChange={(e) => setFilterMatchedOnly(e.target.checked)}
+                      className="rounded border-gray-300 text-brand focus:ring-brand"
+                    />
+                    設定に一致したメールのみ ({matchedCount}/{inspected.length})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setInspected(null)}
+                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-slate-100"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto p-4 space-y-2 flex-1">
+                {displayedMails.length === 0 ? (
+                  <div className="text-center py-12 px-4">
+                    <Mail className="w-10 h-10 text-[var(--text-muted)] mx-auto mb-3 opacity-40" />
+                    <p className="text-sm font-bold text-[var(--text-secondary)]">
+                      {filterMatchedOnly
+                        ? "取り込み設定に合致するメールはありませんでした"
+                        : "表示できるメールがありません"}
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
+                      {filterMatchedOnly
+                        ? "「取り込み設定」で設定した必須キーワードや許可送信者などの条件をご確認ください。右上のチェックを外すと除外されたメールも確認できます。"
+                        : "受信トレイにメールが見つかりませんでした。"}
+                    </p>
+                  </div>
+                ) : (
+                  displayedMails.map((m) => {
+                    const open = openMailId === m.id;
+                    const count = m.listings?.length ?? 0;
+                    return (
+                      <div
+                        key={m.id}
+                        className="border border-[var(--border-subtle)] rounded-2xl overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setOpenMailId(open ? null : m.id)}
+                          className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
+                        >
+                          <span
+                            className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                              m.error
+                                ? "bg-red-100 text-red-800"
+                                : m.filtered
+                                  ? "bg-violet-100 text-violet-900"
+                                  : count > 0
+                                    ? "bg-emerald-100 text-emerald-900"
+                                    : m.needsLlm
+                                      ? "bg-amber-100 text-amber-900"
+                                      : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {m.error
+                              ? "エラー"
+                              : m.filtered
+                                ? "設定で除外"
+                                : count > 0
+                                  ? `物件${count}件`
+                                  : m.needsLlm
+                                    ? "AI判定へ"
+                                    : "対象外"}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-[var(--text-primary)] truncate">
+                              {m.subject || "(件名なし)"}
+                            </span>
+                            <span className="block text-[11px] text-[var(--text-muted)] truncate">
+                              {m.from}
+                              {m.receivedAt ? ` ・ ${formatJaDateTimeShort(m.receivedAt)}` : ""}
+                              {(m.attachments?.length ?? 0) > 0
+                                ? ` ・ 添付${m.attachments?.length}件`
+                                : ""}
+                            </span>
+                          </span>
+                          {open ? (
+                            <ChevronUp className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
+                          )}
+                        </button>
+
+                        {open && (
+                          <div className="px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
+                            {m.error && (
+                              <p className="text-xs font-semibold text-red-700">{m.error}</p>
+                            )}
+
+                            <p className="text-[11px] text-[var(--text-muted)]">
+                              判定: {m.reason}
+                              {/* Once the AI pass has run, "AIでの抽出が必要" is
+                                  stale advice — say what actually read it. */}
+                              {m.engine
+                                ? `（抽出: ${
+                                    m.engine === "stored"
+                                      ? "取込済み（保存されたデータ）"
+                                      : m.engine === "rules"
+                                        ? "ルール解析"
+                                        : m.engine === "gemini"
+                                          ? "AI・添付PDFを直接読取"
+                                          : m.engine === "groq"
+                                            ? "AI・本文/PDFテキスト"
+                                            : "物件は見つかりませんでした"
+                                  }）`
+                                : m.needsLlm
+                                  ? "（AIでの抽出が必要）"
+                                  : ""}
+                            </p>
+
+                            {count > 0 && (
+                              <div className="space-y-1.5">
+                                {m.listings?.map((l, i) => (
+                                  <div
+                                    key={i}
+                                    className="text-[11px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
+                                  >
+                                    {Object.entries(l)
+                                      .filter(([, v]) => v !== null && v !== "")
+                                      .map(([k, v]) => `${k}: ${String(v)}`)
+                                      .join(" ／ ")}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {(m.attachments?.length ?? 0) > 0 && (
+                              <div className="text-[11px] text-[var(--text-secondary)]">
+                                <span className="font-bold flex items-center gap-1 mb-1.5 text-[var(--text-primary)]">
+                                  <FileText className="w-3.5 h-3.5 text-[var(--brand)]" />
+                                  添付ファイル（クリックしてPDFを開く）
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                  {m.attachments?.map((a, i) => {
+                                    const isPdf =
+                                      a.mimeType === "application/pdf" ||
+                                      a.filename?.toLowerCase().endsWith(".pdf");
+                                    const isOpening = openingAttachmentId === a.id;
+                                    return (
+                                      <button
+                                        key={i}
+                                        type="button"
+                                        disabled={isOpening || !a.id}
+                                        onClick={() => void handleOpenAttachment(m.provider, m.id, a)}
+                                        className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white hover:border-[var(--brand)] hover:bg-[var(--brand-soft)] transition-colors text-left shadow-2xs"
+                                        title={a.id ? "クリックして別タブで開く" : "添付ファイルIDがありません"}
+                                      >
+                                        {isOpening ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--brand)] shrink-0" />
+                                        ) : isPdf ? (
+                                          <FileText className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                        ) : (
+                                          <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                                        )}
+                                        <div className="min-w-0 max-w-[260px]">
+                                          <span className="block font-bold text-[11px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
+                                            {a.filename || "(名前なし)"}
+                                          </span>
+                                          <span className="block text-[10px] text-[var(--text-muted)]">
+                                            {a.size ? `${Math.round(a.size / 1024)}KB` : a.mimeType}
+                                          </span>
+                                        </div>
+                                        <ExternalLink className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--brand)] shrink-0 ml-1 opacity-70 group-hover:opacity-100" />
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            <div>
+                              <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                                本文
+                              </span>
+                              <pre className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
+                                {m.bodyText || "(本文なし)"}
+                              </pre>
+                            </div>
+
+                            {m.pdfTexts?.map((t, i) => (
+                              <div key={i}>
+                                <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                                  PDF {i + 1} の抽出テキスト
+                                </span>
+                                <pre className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
+                                  {t || "(テキストを抽出できませんでした)"}
+                                </pre>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

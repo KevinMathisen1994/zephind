@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -16,6 +16,7 @@ const CATEGORY_MAP: Record<string, string> = {
 // hardcoded — but the "<Module>_<localName>" prefix in front of it is stable,
 // which is what the [class*='...'] substring selectors below key on.
 const CARD_SELECTORS = [
+  "[class*='buiPropertyListCard']",
   "[class*='Card_buiPropertyListCard']",
   "[class*='propertyCardContents']",
   "[class*='propertyInfoContainer']",
@@ -81,7 +82,11 @@ async function extractJigyoListings(page: any): Promise<{ listings: PropertyList
       const plain = raw.replace(/<[^>]+>/g, "");
       const landM = plain.match(/^土地\s*([\d,.]+)\s*m/);
       if (landM) landSize = parseFloat(landM[1].replace(/,/g, ""));
-      const bldM = plain.match(/^建物\s*([\d,.]+)\s*m/);
+      // 区分 (sub-unit office/mansion-style) ビル listings label their size
+      // 専有面積/延床面積/内法/壁芯 instead of 建物 — confirmed live: these
+      // listings were coming back with area=0 because only "建物" was matched
+      // here (一棟 listings do use "建物", so that label stays first).
+      const bldM = plain.match(/^(?:建物|延床|専有|内法|壁芯)\s*([\d,.]+)\s*m/);
       if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
       const yearM = plain.match(/(\d{4})年\d{1,2}月築/);
       if (yearM) buildYear = parseInt(yearM[1], 10);
@@ -114,7 +119,270 @@ async function extractJigyoListings(page: any): Promise<{ listings: PropertyList
   return { listings: results, totalCount };
 }
 
+/**
+ * 賃貸 (chintai) lives at /chintai/tokyo/a{areaCode}/ — same Next.js
+ * __NEXT_DATA__ embedding as the /jigyo/ ビル vertical above, and likewise no
+ * per-type URL filter (confirmed live: one areaCode page mixes マンション/
+ * アパート/一戸建て, real type in labelList[0].detailText). `searchedResultCounts`
+ * (NOT the unrelated `totalPropertyCount` field, which reports some
+ * site-wide figure unconnected to this search) is the real per-ward total —
+ * confirmed stable at the same value across page 1 and page 2 for 港区.
+ *
+ * priceModel is either `{ rent, manageCost }` (a single unit) or
+ * `{ rentFrom, rentTo }` (a whole-building rent-range card, no manageCost);
+ * both are 円 (yen), not 万円. propertyDetail is an unlabeled, POSITIONALLY
+ * VARIABLE string array (6 or 7 entries depending on whether an orientation
+ * line is present) — read every line via regex rather than by index.
+ */
+function extractChintaiListings(html: string): { listings: PropertyListing[]; totalCount: number } {
+  const match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!match) return { listings: [], totalCount: 0 };
+
+  let data: any;
+  try {
+    data = JSON.parse(match[1]);
+  } catch {
+    return { listings: [], totalCount: 0 };
+  }
+
+  const pageProps = data?.props?.pageProps;
+  const propertyList = pageProps?.propertyList;
+  const totalCount = Number(pageProps?.searchedResultCounts) || 0;
+  if (!Array.isArray(propertyList)) return { listings: [], totalCount };
+
+  const results: PropertyListing[] = [];
+  for (const p of propertyList) {
+    const address: string = p.address || p.propertyName || "";
+    if (!address) continue;
+
+    const priceModel = p.priceModel || {};
+    const rentYen = typeof priceModel.rent === "number" ? priceModel.rent : priceModel.rentFrom;
+    if (typeof rentYen !== "number") continue;
+    const rent = rentYen / 10000;
+    const managementFee = typeof priceModel.manageCost === "number" ? priceModel.manageCost / 10000 : undefined;
+
+    let station: string | undefined;
+    let walkMinutes: number | undefined;
+    const accessLines: string[] = Array.isArray(p.access) ? p.access : [];
+    if (accessLines.length > 0) {
+      const line = accessLines[0];
+      const stM = line.match(/「([^」]+)」駅/) || line.match(/([^\s「」]+駅)/);
+      if (stM) station = stM[1].endsWith("駅") ? stM[1] : `${stM[1]}駅`;
+      const wkM = line.match(/徒歩(\d+)分/);
+      if (wkM) walkMinutes = parseInt(wkM[1], 10);
+    }
+
+    let deposit: number | undefined;
+    let keyMoney: number | undefined;
+    let layout: string | undefined;
+    let area: number | undefined;
+    let buildYear: number | undefined;
+    let floor: number | undefined;
+    let structureType: string | undefined;
+    const details: string[] = Array.isArray(p.propertyDetail) ? p.propertyDetail : [];
+    for (const raw of details) {
+      const plain = raw.replace(/<[^>]+>/g, "");
+
+      // "敷金1ヶ月 礼金1ヶ月" / "敷金各1ヶ月 礼金-〜1ヶ月" / "敷金- 礼金-" — a
+      // MULTIPLE of this listing's own rent (confirmed live: every sample in
+      // 港区 used ヶ月, never a bare 万円 figure), never an absolute amount.
+      // A range ("-〜1ヶ月") takes the one number present, same convention as
+      // parsing a price range elsewhere in this codebase.
+      if (/^敷金/.test(plain) && /礼金/.test(plain)) {
+        const shikikinM = plain.match(/敷金[^\s]*?([\d.]+)\s*ヶ月/);
+        const reikinM = plain.match(/礼金[^\s]*?([\d.]+)\s*ヶ月/);
+        if (shikikinM) deposit = parseFloat(shikikinM[1]) * rent;
+        if (reikinM) keyMoney = parseFloat(reikinM[1]) * rent;
+        continue;
+      }
+      if (/m2/.test(plain)) {
+        const aM = plain.match(/([\d,.]+)\s*m2/);
+        if (aM) area = parseFloat(aM[1].replace(/,/g, ""));
+        continue;
+      }
+      const yearM = plain.match(/(\d{4})年\d{1,2}月築/);
+      if (yearM) { buildYear = parseInt(yearM[1], 10); continue; }
+      const floorM = plain.match(/(\d+)階部分/);
+      if (floorM) { floor = parseInt(floorM[1], 10); continue; }
+      const structM = plain.match(/(鉄骨鉄筋コンクリート|鉄筋コンクリート|軽量鉄骨|鉄骨|木造|SRC|RC|ALC|プレキャストコンクリート)/);
+      if (structM) { structureType = structM[1]; continue; }
+      if (!layout && /^(ワンルーム|1R|[1-9]\d?[SLDK])/.test(plain)) { layout = plain; continue; }
+    }
+
+    let ward = "";
+    const wm = address.match(/([^都道府県]{2,4}[区市])/);
+    if (wm) ward = wm[1];
+
+    let url: string | undefined;
+    if (typeof p.detailUrl === "string" && p.detailUrl) {
+      url = p.detailUrl.startsWith("http") ? p.detailUrl : `https://www.livable.co.jp${p.detailUrl}`;
+    }
+    if (!url) continue;
+
+    results.push({
+      address,
+      ward,
+      price: rent,
+      rent,
+      managementFee,
+      deposit,
+      keyMoney,
+      area: area != null ? area : 0,
+      floorArea: area != null ? area : undefined,
+      buildYear: buildYear != null ? buildYear : undefined,
+      floor: floor != null ? floor : undefined,
+      structureType,
+      source: "tokyu",
+      url,
+      station,
+      walkMinutes,
+      propertyType: p?.labelList?.[0]?.detailText || undefined,
+      layout: layout || undefined,
+      dealType: "rent",
+    });
+  }
+  return { listings: results, totalCount };
+}
+
+async function scrapeTokyuChintai(areaCode: string): Promise<ScrapeResult> {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const allListings: PropertyListing[] = [];
+  const seenUrls = new Set<string>();
+  // Confirmed live: 港区 alone reports searchedResultCounts=203 at 30/page —
+  // give this real headroom, not the buy side's per-type cap.
+  const MAX_PAGES = 20;
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(config.userAgent);
+    await page.setViewport({ width: 1280, height: 800 });
+
+    let fetchedSoFar = 0;
+    for (let p = 1; p <= MAX_PAGES; p++) {
+      const pageParam = p > 1 ? `?page=${p}` : "";
+      const url = `https://www.livable.co.jp/chintai/tokyo/a${areaCode}/${pageParam}`;
+      logger.info(`[Tokyu Scraper] Loading chintai page ${p} for ${areaCode}...`);
+
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      } catch {
+        logger.warn(`[Tokyu Scraper] Chintai page ${p} failed to load`);
+        break;
+      }
+
+      const html: string = await page.content();
+      const { listings, totalCount } = extractChintaiListings(html);
+      logger.info(`[Tokyu Scraper] Chintai page ${p}: ${listings.length} listings (total known: ${totalCount})`);
+
+      if (listings.length === 0) break;
+
+      const newListings = listings.filter((l) => {
+        if (!l.url || seenUrls.has(l.url)) return false;
+        seenUrls.add(l.url);
+        return true;
+      });
+      fetchedSoFar += listings.length;
+      allListings.push(...newListings);
+
+      if (newListings.length === 0 || fetchedSoFar >= totalCount) break;
+    }
+
+    logger.info(`[Tokyu Scraper] Chintai scrape complete: ${allListings.length} listings for ${areaCode}`);
+    return {
+      listings: allListings,
+      source: "tokyu",
+      areaCode,
+      scrapedAt: Date.now(),
+      count: allListings.length,
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
+  try {
+    const html: string = await page.content();
+    const match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (match) {
+      const data = JSON.parse(match[1]);
+      const pageProps = data?.props?.pageProps;
+      const propertyList = pageProps?.propertyList;
+      if (Array.isArray(propertyList) && propertyList.length > 0) {
+        const results: PropertyListing[] = [];
+        for (const p of propertyList) {
+          const address: string = p.address || p.propertyName || "";
+          const priceYen = p?.priceModel?.price;
+          const price = typeof priceYen === "number" ? Math.round(priceYen / 10000) : 0;
+          if (!address || !price) continue;
+
+          let station: string | undefined;
+          let walkMinutes: number | undefined;
+          const accessLines: string[] = Array.isArray(p.access) ? p.access : [];
+          if (accessLines.length > 0) {
+            const line = accessLines[0];
+            const stM = line.match(/「([^」]+)」駅/) || line.match(/([^\s「」]+駅)/);
+            if (stM) station = stM[1].endsWith("駅") ? stM[1] : `${stM[1]}駅`;
+            const wkM = line.match(/徒歩(\d+)分/);
+            if (wkM) walkMinutes = parseInt(wkM[1], 10);
+          }
+
+          let landSize: number | undefined;
+          let floorArea: number | undefined;
+          let buildYear: number | undefined;
+          let age: string | undefined;
+          const details: string[] = Array.isArray(p.propertyDetail) ? p.propertyDetail : [];
+          for (const raw of details) {
+            const plain = raw.replace(/<[^>]+>/g, "");
+            const landM = plain.match(/^土地\s*([\d,.]+)\s*m/);
+            if (landM) landSize = parseFloat(landM[1].replace(/,/g, ""));
+            const bldM = plain.match(/^(?:建物|延床|専有|内法|壁芯)\s*([\d,.]+)\s*m/);
+            if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
+            const yearM = plain.match(/(\d{4})年(\d{1,2})月築/);
+            if (yearM) {
+              buildYear = parseInt(yearM[1], 10);
+              age = `${yearM[1]}年${yearM[2]}月`;
+            }
+          }
+
+          let ward = "";
+          const wm = address.match(/([^都道府県]{2,4}[区市])/);
+          if (wm) ward = wm[1];
+
+          let url: string | undefined;
+          if (typeof p.detailUrl === "string" && p.detailUrl) {
+            url = p.detailUrl.startsWith("http") ? p.detailUrl : `https://www.livable.co.jp${p.detailUrl}`;
+          }
+
+          const isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
+          const area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);
+
+          results.push({
+            address,
+            ward,
+            price,
+            area,
+            landSize: landSize || undefined,
+            floorArea: floorArea || undefined,
+            buildYear: buildYear || undefined,
+            age,
+            source: "tokyu",
+            url,
+            station,
+            walkMinutes,
+            propertyType,
+          });
+        }
+        if (results.length > 0) return results;
+      }
+    }
+  } catch (err) {
+    logger.warn(`[Tokyu Scraper] __NEXT_DATA__ extraction error: ${err}`);
+  }
+
   const raw = await page.evaluate(new Function("propertyType", "cardSelectors", `
     // Structured extraction, verified against the live PC layout of
     // /kounyu/{tochi,mansion,kodate}/tokyo/aNNNNN/.
@@ -180,10 +448,17 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var station = "";
       var walkMinutes = null;
 
+      // 東急リバブル publishes no date anywhere — neither the list card nor the
+      // detail page carries 情報公開日/更新日 (both checked live). The NEW badge in
+      // the card items is the only recency signal it gives, so record that.
+      var isNew = false;
+
       var rows = Array.prototype.slice.call(card.querySelectorAll("li[class*='Card_item']"));
       rows.forEach(function(row) {
         var t = clean(row);
         if (!t) return;
+
+        if (/^(NEW|新着)$/i.test(t.replace(/\\s+/g, ""))) { isNew = true; return; }
 
         // Rail lines look like "京王井の頭線「久我山」駅 徒歩6分"; a card lists one
         // per line, so keep the first (nearest) one only.
@@ -270,6 +545,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           floor: floor !== null ? floor : undefined,
           buildingCoverageRatio: bcr !== null ? bcr : undefined,
           floorAreaRatio: far !== null ? far : undefined,
+          isNew: isNew || undefined,
         });
       }
     });
@@ -279,7 +555,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
   return JSON.parse(raw);
 }
 
-export async function scrapeTokyu(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeTokyu(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  if (dealType === "rent") {
+    return await scrapeTokyuChintai(areaCode);
+  }
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],

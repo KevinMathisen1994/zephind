@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
+import { api } from "../lib/api";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import emailjs from "@emailjs/browser";
 import {
   X,
   Mail,
@@ -14,26 +13,56 @@ import {
   Users,
   CheckSquare,
   Square,
-  Loader2,
   Settings,
   Search,
 } from "lucide-react";
-import type { Doc } from "../../convex/_generated/dataModel";
+import {
+  DEFAULT_EMAIL_SIGNATURE,
+  withSignature,
+} from "../lib/emailSignature";
+
+/**
+ * One proposable property, flattened.
+ *
+ * The modal used to take `matching` rows plus a listings lookup, which tied the
+ * whole email flow — signature, sending, deal saving — to the Orders
+ * page. 保存物件 needs the same flow over rows that are NOT matches (they are
+ * snapshots, and their listing may no longer exist), so each caller flattens its
+ * own data into this shape and the modal stays the single place email lives.
+ */
+export interface ProposalItem {
+  /** Stable id within the caller's list (match id, saved-row id, …). */
+  id: string;
+  listingId?: string;
+  address?: string;
+  ward?: string;
+  price?: number;
+  /** 土地面積 or 専有面積 — whichever the caller considers the headline figure. */
+  size?: number;
+  station?: string;
+  walkMinutes?: number;
+  url?: string;
+  source?: string;
+  propertyType?: string;
+  score?: number;
+  evaluation?: string;
+}
 
 interface ProposalModalProps {
-  order: Doc<"orders">;
-  orderMatchList: Doc<"matching">[];
-  matchedListing: (id: string) => Doc<"listings"> | undefined;
-  evaluations: Record<string, string>;
-  /** Ticked in the results list before opening. When non-empty the picker below
-   *  starts collapsed — re-listing the same properties the user just chose is
-   *  redundant work, but it stays reachable for adjustments. */
-  initialSelectedMatchIds?: Set<string>;
+  /** Everything proposable, already flattened by the caller. */
+  items: ProposalItem[];
+  /** Ticked before opening. When non-empty the picker below starts collapsed —
+   *  re-listing what the user just chose is redundant, but it stays reachable. */
+  initialSelectedIds?: Set<string>;
+  /** Names the proposal in the default message and the saved deal. */
+  contextName?: string;
+  /** Present only when the proposal came from an order; the deal records it. */
+  orderId?: string;
+  /** Pre-selects the customer (an order carries one; 保存物件 does not). */
+  defaultCustomerId?: string;
   onClose: () => void;
 }
 
-/** Numbered heading so the three stacked steps of the modal read as distinct
- *  sections instead of one continuous form. */
 const SectionHeader = ({
   step,
   icon: Icon,
@@ -46,12 +75,12 @@ const SectionHeader = ({
   action?: React.ReactNode;
 }) => (
   <div className="flex flex-wrap items-center justify-between gap-2">
-    <div className="flex items-center gap-2">
-      <span className="w-5 h-5 rounded-md bg-emerald-700 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+    <div className="flex items-center gap-2.5">
+      <span className="w-5 h-5 rounded-full bg-[var(--brand)] text-white text-[10px] font-black flex items-center justify-center shrink-0 shadow-xs">
         {step}
       </span>
-      <Icon className="w-3.5 h-3.5 text-emerald-700" />
-      <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+      <Icon className="w-4 h-4 text-[var(--brand)]" />
+      <span className="text-xs font-extrabold text-[var(--text-primary)] uppercase tracking-wider">
         {title}
       </span>
     </div>
@@ -60,35 +89,32 @@ const SectionHeader = ({
 );
 
 export const ProposalModal = ({
-  order,
-  orderMatchList,
-  matchedListing,
-  evaluations,
-  initialSelectedMatchIds,
+  items,
+  initialSelectedIds,
+  contextName,
+  orderId,
+  defaultCustomerId,
   onClose,
 }: ProposalModalProps) => {
   const customers = useQuery(api.customers.list);
   const createDeal = useMutation(api.deals.create);
+  // The mail signature, stored per ACCOUNT rather than per browser. `undefined`
+  // while the query is in flight, `null` when nothing is saved yet.
+  const emailSettings = useQuery(api.emailSettings.get);
+  const saveEmailSettings = useMutation(api.emailSettings.save);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(
-    order?.customerId || "",
+    defaultCustomerId || "",
   );
   // Seed from what was ticked in the results list. Filtered against the current
   // matches so a stale id (listing removed since ticking) cannot select nothing.
-  const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(() => {
-    if (!initialSelectedMatchIds?.size) return new Set();
-    const valid = orderMatchList
-      .map((m) => m._id)
-      .filter((id) => initialSelectedMatchIds.has(id));
-    return new Set(valid);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    if (!initialSelectedIds?.size) return new Set();
+    // Filtered against the current items so a stale id cannot select nothing.
+    return new Set(items.map((i) => i.id).filter((id) => initialSelectedIds.has(id)));
   });
-  const [showPicker, setShowPicker] = useState<boolean>(
-    !initialSelectedMatchIds?.size,
-  );
+  const [showPicker, setShowPicker] = useState<boolean>(!initialSelectedIds?.size);
   const [listingSearch, setListingSearch] = useState<string>("");
-  const [customMessage, setCustomMessage] = useState<string>(
-    `${order?.name || "ご希望条件"}に適合するおすすめの物件情報を厳選してご案内いたします。ご内見や詳細資料のご要望がございましたら、お気軽にお申し付けください。`,
-  );
   const [emailSubject, setEmailSubject] = useState<string>("");
   const [emailBody, setEmailBody] = useState<string>("");
   const [isUserEditedBody, setIsUserEditedBody] = useState<boolean>(false);
@@ -98,82 +124,55 @@ export const ProposalModal = ({
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // EmailJS State
-  const [sendingEmailJS, setSendingEmailJS] = useState(false);
-  const [emailJSSuccess, setEmailJSSuccess] = useState(false);
-  const [emailJSError, setEmailJSError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [showConfigModal, setShowConfigModal] = useState(false);
 
-  const [serviceId, setServiceId] = useState(
-    localStorage.getItem("emailjs_service_id") ||
-      (import.meta.env.VITE_EMAILJS_SERVICE_ID as string) ||
-      "",
-  );
-  const [templateId, setTemplateId] = useState(
-    localStorage.getItem("emailjs_template_id") ||
-      (import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string) ||
-      "",
-  );
-  const [publicKey, setPublicKey] = useState(
-    localStorage.getItem("emailjs_public_key") ||
-      (import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string) ||
-      "",
-  );
+  /**
+   * The signature is DERIVED, not copied into state by an effect: the saved row
+   * arrives asynchronously, so seeding a field from it raced with typing. A draft
+   * that simply overrides the stored value has no race and needs no effect.
+   */
+  const [signatureDraft, setSignatureDraft] = useState<string | undefined>();
+  const signature =
+    signatureDraft ?? emailSettings?.signature ?? DEFAULT_EMAIL_SIGNATURE;
 
-  const saveEmailJSConfig = () => {
-    localStorage.setItem("emailjs_service_id", serviceId);
-    localStorage.setItem("emailjs_template_id", templateId);
-    localStorage.setItem("emailjs_public_key", publicKey);
-    setShowConfigModal(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
+  const saveSettings = async () => {
+    try {
+      await saveEmailSettings({ signature });
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 2500);
+      setShowConfigModal(false);
+    } catch (err) {
+      // Saving must not fail silently — the whole point is that the signature
+      // outlives this browser.
+      setFormError(
+        `設定を保存できませんでした: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   };
 
   const selectedCustomer = customers?.find((c) => c._id === selectedCustomerId);
 
   const toggleSelectMatch = (id: string) => {
-    const next = new Set(selectedMatchIds);
+    const next = new Set(selectedIds);
     if (next.has(id)) {
       next.delete(id);
     } else {
       next.add(id);
     }
-    setSelectedMatchIds(next);
+    setSelectedIds(next);
   };
 
   const selectAll = () => {
-    setSelectedMatchIds(new Set(orderMatchList.map((m) => m._id)));
+    setSelectedIds(new Set(items.map((i) => i.id)));
   };
 
-  const selectedListingsData = orderMatchList
-    .filter((m) => selectedMatchIds.has(m._id))
-    .map((m) => {
-      const listing = matchedListing(m.listingId ?? "");
-      const hasEvaluation = m.evaluation || evaluations[m._id];
-      const score =
-        m.score ??
-        (hasEvaluation
-          ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
-            ? Number(hasEvaluation.match(/評価[：:\s]*(\d+)/)[1])
-            : undefined
-          : undefined);
-      return {
-        matchId: m._id,
-        listingId: m.listingId,
-        address: listing?.address || "—",
-        ward: listing?.ward || "",
-        price: listing?.price,
-        landSize: listing?.landSize || listing?.area,
-        walkMinutes: listing?.walkMinutes,
-        station: listing?.station,
-        url: listing?.url,
-        source: listing?.source,
-        propertyType: listing?.propertyType,
-        score,
-        evaluation: hasEvaluation,
-      };
-    });
+  const selectedListingsData = items.filter((item) => selectedIds.has(item.id));
 
   // Construct Email Subject & Body
-  const clientName = selectedCustomer?.name || order?.name || "お客様";
+  const clientName = selectedCustomer?.name || contextName || "お客様";
 
   const buildGeneratedSubject = () =>
     `【物件ご提案】${clientName}様 ご希望条件に適合するおすすめ物件のご案内`;
@@ -183,19 +182,25 @@ export const ProposalModal = ({
       `${clientName} 様`,
       "",
       "いつもお世話になっております。",
-      customMessage,
+      "ご希望条件に適合するおすすめの物件情報を厳選してご案内いたします。",
       "",
       "--------------------------------------------------",
       `■ ご提案物件一覧 (全${selectedListingsData.length}件)`,
       "--------------------------------------------------",
       "",
+      // NOTHING here identifies where the listing came from.
+      //
+      // 評価スコア is our own internal ranking — a number the buyer cannot
+      // interpret and that invites argument about a figure we never intended to
+      // publish. 詳細URL points at the LISTING PORTAL, i.e. straight at the
+      // seller's agent, which would route the enquiry around us. Both are kept on
+      // the saved deal for our own records; neither goes to the customer. The
+      // portal name (l.source) is left out for the same reason.
       ...selectedListingsData.flatMap((l, idx) => [
         `【物件${idx + 1}】${l.address} ${l.propertyType ? `(${l.propertyType})` : ""}`,
         `・価格: ${l.price ? `${l.price.toLocaleString()} 万円` : "要確認"}`,
-        `・面積: ${l.landSize ? `${l.landSize} ㎡` : "要確認"}`,
+        `・面積: ${l.size ? `${l.size} ㎡` : "要確認"}`,
         `・アクセス: ${l.station || ""} ${l.walkMinutes !== undefined ? `(徒歩${l.walkMinutes}分)` : ""}`,
-        l.score !== undefined ? `・評価スコア: ${l.score}点` : "",
-        l.url ? `・詳細URL: ${l.url}` : "",
         "",
       ]),
       "--------------------------------------------------",
@@ -204,7 +209,9 @@ export const ProposalModal = ({
       "",
       "引き続き何卒よろしくお願い申し上げます。",
     ].filter((line) => line !== "");
-    return lines.join("\n");
+    // 会社所在地・名称・連絡先・宅建番号・取引態様 は署名として自動で付きます。
+    // 文言は「メール設定」から編集できます。
+    return withSignature(lines.join("\n"), signature);
   };
 
   useEffect(() => {
@@ -214,7 +221,9 @@ export const ProposalModal = ({
     if (!isUserEditedBody) {
       setEmailBody(buildGeneratedBody());
     }
-  }, [selectedCustomerId, selectedMatchIds, customMessage]);
+    // `signature` is in here so the body picks up the saved signature the moment
+    // the settings query resolves (and after an edit in the settings dialog).
+  }, [selectedCustomerId, selectedIds, signature]);
 
   const handleResetTemplate = () => {
     setEmailSubject(buildGeneratedSubject());
@@ -234,67 +243,6 @@ export const ProposalModal = ({
     window.location.href = mailtoUrl;
   };
 
-  // Direct Client-Side EmailJS Dispatch
-  const handleSendEmailJS = async () => {
-    if (!serviceId || !templateId || !publicKey) {
-      setShowConfigModal(true);
-      return;
-    }
-
-    const recipientEmail = selectedCustomer?.email?.trim();
-    if (!recipientEmail) {
-      setEmailJSError(
-        "提案先の顧客メールアドレスが設定されていません。選択した顧客にメールアドレスが登録されているかご確認ください。",
-      );
-      return;
-    }
-
-    setSendingEmailJS(true);
-    setEmailJSError(null);
-
-    try {
-      await emailjs.send(
-        serviceId,
-        templateId,
-        {
-          to_email: recipientEmail,
-          email: recipientEmail,
-          user_email: recipientEmail,
-          recipient_email: recipientEmail,
-          to: recipientEmail,
-          reply_to: recipientEmail,
-          title: emailSubject,
-          subject: emailSubject,
-          name: clientName,
-          to_name: clientName,
-          time: new Date().toLocaleString("ja-JP"),
-          message: emailBody,
-          content: emailBody,
-          order_name: order?.name || "",
-          listings_count: selectedListingsData.length,
-        },
-        publicKey,
-      );
-
-      setEmailJSSuccess(true);
-      setTimeout(() => setEmailJSSuccess(false), 4000);
-
-      // Auto save deal
-      await handleSaveDeal();
-    } catch (err: unknown) {
-      console.error("EmailJS Send Failed:", err);
-      const errorMessage =
-        err instanceof Error
-          ? err.message
-          : typeof err === "object" && err !== null && "text" in err
-            ? (err as { text: string }).text
-            : "メール送信に失敗しました。設定をご確認ください。";
-      setEmailJSError(errorMessage);
-    } finally {
-      setSendingEmailJS(false);
-    }
-  };
-
   const handleSaveDeal = async () => {
     setSaving(true);
     try {
@@ -304,10 +252,15 @@ export const ProposalModal = ({
         customerName: selectedCustomer?.name || clientName,
         customerEmail: selectedCustomer?.email,
         customerPhone: selectedCustomer?.phone,
-        orderId: order._id,
-        orderName: order.name,
+        // 保存物件 proposals have no order behind them; the deal then records
+        // only the customer and the properties.
+        orderId: orderId,
+        orderName: contextName,
         listings: selectedListingsData,
-        customMessage,
+        // The mail as sent. This used to be the separate 添え状 field, which no
+        // longer exists — the body itself is editable, so storing it records
+        // exactly what the customer received.
+        customMessage: emailBody,
         status: "proposed",
       });
       setSavedSuccess(true);
@@ -320,46 +273,52 @@ export const ProposalModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="p-6 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-700 flex items-center justify-center shadow-md shadow-emerald-700/20 text-white">
+        <div className="p-6 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-hover)] flex items-center justify-center shadow-[0_4px_16px_rgba(22,101,3,0.25)] text-white shrink-0">
               <Send className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+              <h2 className="text-xl font-extrabold text-[var(--text-primary)] tracking-tight flex items-center gap-2">
                 顧客へ物件を提案・メール送信
               </h2>
-              <p className="text-xs text-slate-500 font-semibold mt-0.5">
+              <p className="text-xs text-[var(--text-muted)] font-medium mt-0.5">
                 選択した抽出物件にコメントを添えて、お客様への提案メールを作成・送信します
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setShowConfigModal(true)}
-              className="p-2 text-slate-500 hover:text-emerald-700 rounded-lg hover:bg-slate-100 transition-colors"
-              title="EmailJS API設定"
+              className="h-9 w-9 rounded-xl text-[var(--text-muted)] hover:text-[var(--brand)]"
+              title="メール設定（署名）"
             >
               <Settings className="w-5 h-5" />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              className="h-9 w-9 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)]"
             >
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-200">
-          {/* Customer Selection & Message Box */}
+        <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)]">
+          {/* Recipient. The free-text 添え状 field was removed: the mail body in
+              step 3 is directly editable, so a second place to write prose only
+              made it unclear which one the customer would actually receive. */}
           <section className="p-6 space-y-3">
-          <SectionHeader step={1} icon={Users} title="提案先と添え状" />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50 p-5 rounded-2xl border border-slate-200/80">
+          <SectionHeader step={1} icon={Users} title="提案先" />
+          <div className="grid grid-cols-1 gap-5 bg-slate-50 p-5 rounded-2xl border border-slate-200/80">
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <Users className="w-4 h-4 text-emerald-700" />
@@ -390,19 +349,6 @@ export const ProposalModal = ({
               )}
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-emerald-700" />
-                自由記述コメント (添え状・メッセージ)
-              </label>
-              <textarea
-                rows={3}
-                value={customMessage}
-                onChange={(e) => setCustomMessage(e.target.value)}
-                placeholder="お客様への自由メッセージやおすすめポイントをご記入ください..."
-                className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700 leading-relaxed"
-              />
-            </div>
           </div>
           </section>
 
@@ -414,14 +360,14 @@ export const ProposalModal = ({
               title="提案する物件"
               action={
                 <span className="text-xs font-bold text-slate-500">
-                  {selectedMatchIds.size} / {orderMatchList.length}件 選択中
+                  {selectedIds.size} / {items.length}件 選択中
                 </span>
               }
             />
             {!showPicker && (
               <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                 <div className="text-xs font-bold text-emerald-900">
-                  一覧で選択した {selectedMatchIds.size} 件を提案に含めます
+                  一覧で選択した {selectedIds.size} 件を提案に含めます
                 </div>
                 <button
                   type="button"
@@ -459,34 +405,25 @@ export const ProposalModal = ({
             </div>
 
             <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-              {orderMatchList
-                .filter((m) => {
+              {items
+                .filter((item) => {
                   if (!listingSearch.trim()) return true;
                   const q = listingSearch.toLowerCase().trim();
-                  const listing = matchedListing(m.listingId ?? "");
                   return (
-                    listing?.address?.toLowerCase().includes(q) ||
-                    listing?.ward?.toLowerCase().includes(q) ||
-                    listing?.propertyType?.toLowerCase().includes(q) ||
-                    String(listing?.price || "").includes(q)
+                    item.address?.toLowerCase().includes(q) ||
+                    item.ward?.toLowerCase().includes(q) ||
+                    item.propertyType?.toLowerCase().includes(q) ||
+                    String(item.price || "").includes(q)
                   );
                 })
-                .map((m) => {
-                  const listing = matchedListing(m.listingId ?? "");
-                  const isSelected = selectedMatchIds.has(m._id);
-                  const hasEval = m.evaluation || evaluations[m._id];
-                  const score =
-                    m.score ??
-                    (hasEval
-                      ? hasEval.match(/評価[：:\s]*(\d+)/)?.[1]
-                        ? Number(hasEval.match(/評価[：:\s]*(\d+)/)[1])
-                        : undefined
-                      : undefined);
+                .map((item) => {
+                  const isSelected = selectedIds.has(item.id);
+                  const score = item.score;
 
                   return (
                     <div
-                      key={m._id}
-                      onClick={() => toggleSelectMatch(m._id)}
+                      key={item.id}
+                      onClick={() => toggleSelectMatch(item.id)}
                       className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         isSelected
                           ? "bg-emerald-50/70 border-emerald-300 shadow-xs"
@@ -501,18 +438,14 @@ export const ProposalModal = ({
                         )}
                         <div className="truncate">
                           <div className="text-sm font-extrabold text-slate-900 truncate">
-                            {listing?.address || m.listingId?.slice(0, 8)}
+                            {item.address || item.listingId?.slice(0, 8) || "—"}
                           </div>
                           <div className="text-xs text-slate-500 font-semibold flex items-center gap-2 mt-0.5">
-                            {listing?.price && (
-                              <span>{listing.price.toLocaleString()}万円</span>
+                            {item.price !== undefined && (
+                              <span>{item.price.toLocaleString()}万円</span>
                             )}
-                            {listing?.landSize && (
-                              <span>{listing.landSize}㎡</span>
-                            )}
-                            {listing?.propertyType && (
-                              <span>{listing.propertyType}</span>
-                            )}
+                            {item.size !== undefined && <span>{item.size}㎡</span>}
+                            {item.propertyType && <span>{item.propertyType}</span>}
                           </div>
                         </div>
                       </div>
@@ -525,32 +458,24 @@ export const ProposalModal = ({
                     </div>
                   );
                 })}
-            </div>
+              </div>
             </div>
           </section>
 
-          {/* Status Feedback Banners */}
-          {(emailJSSuccess || emailJSError) && (
-          <div className="px-6 py-4 space-y-3">
-          {emailJSSuccess && (
-            <div className="p-4 rounded-xl bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 animate-in fade-in">
-              <Check className="w-5 h-5" />
-              EmailJSにより、{clientName}様へのメール直接送信が成功しました！
+          {/* Status Feedback Banner (signature-settings save failures) */}
+          {formError && (
+            <div className="px-6 pt-5">
+              <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 font-bold text-xs flex items-center justify-between gap-2 shadow-xs">
+                <span>{formError}</span>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigModal(true)}
+                  className="underline font-black text-red-800 shrink-0 cursor-pointer"
+                >
+                  設定を確認
+                </button>
+              </div>
             </div>
-          )}
-
-          {emailJSError && (
-            <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-bold text-xs flex items-center justify-between gap-2">
-              <span>{emailJSError}</span>
-              <button
-                onClick={() => setShowConfigModal(true)}
-                className="underline font-black text-red-800 shrink-0"
-              >
-                API設定を変更
-              </button>
-            </div>
-          )}
-          </div>
           )}
 
           {/* Email Subject & Body (Editable) */}
@@ -624,35 +549,17 @@ export const ProposalModal = ({
                 </>
               )}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleOpenMailto}
-              className="rounded-xl text-xs font-bold border-slate-200 text-slate-700 h-10 px-3.5 gap-1.5"
-            >
-              <Mail className="w-3.5 h-3.5 text-slate-500" />
-              標準メールアプリで開く
-            </Button>
           </div>
 
           <div className="flex items-center gap-3">
             <Button
               type="button"
-              onClick={handleSendEmailJS}
-              disabled={sendingEmailJS || selectedMatchIds.size === 0}
+              onClick={handleOpenMailto}
+              disabled={selectedIds.size === 0}
               className="bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold px-5 gap-1.5 h-11 shadow-md shadow-emerald-700/20"
             >
-              {sendingEmailJS ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  送信中
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 text-white" />
-                  メール送信
-                </>
-              )}
+              <Mail className="w-4 h-4 text-white" />
+              Outlookで開く
             </Button>
 
             <Button
@@ -684,70 +591,40 @@ export const ProposalModal = ({
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
-              <div className="p-3 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200 leading-relaxed font-semibold">
-                EmailJS (`@emailjs/browser`)
-                はサーバー不要でブラウザから直接Gmail/Outlook/SMTPにメール送信できる無料ライブラリです（月200通無料）。
-              </div>
-
-              <div className="p-3 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 leading-relaxed font-semibold">
-                ⚠️ <strong>EmailJSダッシュボード設定のポイント:</strong>
-                <br />
-                <a
-                  href="https://dashboard.emailjs.com/admin/templates"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline text-amber-900 hover:text-amber-950 font-bold"
+            <div className="p-5 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  メール署名（会社情報・宅建番号・取引態様）
+                </label>
+                <p className="text-[11px] text-slate-500 font-medium mb-1.5 leading-relaxed">
+                  ここに入力した内容が、提案メール本文の末尾に自動で挿入されます。
+                  文言・改行・空白はそのまま送信されます。
+                </p>
+                <textarea
+                  rows={8}
+                  value={signature}
+                  onChange={(e) => setSignatureDraft(e.target.value)}
+                  className="w-full p-3 border rounded-xl font-mono text-[11px] leading-relaxed text-slate-900 focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSignatureDraft(DEFAULT_EMAIL_SIGNATURE)}
+                  className="mt-1.5 text-[11px] font-bold text-emerald-700 hover:underline"
                 >
-                  EmailJS Dashboard
-                </a>
-                の <strong>Email Templates {">"} Settings</strong> にて、「<strong>To Email (宛先)</strong>」を
-                <code className="bg-amber-100 px-1 rounded mx-1 text-amber-950">{"{{to_email}}"}</code>
-                または
-                <code className="bg-amber-100 px-1 rounded mx-1 text-amber-950">{"{{email}}"}</code>
-                に設定してください。（アカウント登録時のメールアドレスのままだと自身宛てに固定送信されてしまいます）
+                  既定の署名に戻す
+                </button>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Service ID (サービスID)
-                </label>
-                <input
-                  type="text"
-                  value={serviceId}
-                  onChange={(e) => setServiceId(e.target.value)}
-                  placeholder="例: service_abc123"
-                  className="w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Template ID (テンプレートID)
-                </label>
-                <input
-                  type="text"
-                  value={templateId}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                  placeholder="例: template_xyz789"
-                  className="w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Public Key (公開キー)
-                </label>
-                <input
-                  type="text"
-                  value={publicKey}
-                  onChange={(e) => setPublicKey(e.target.value)}
-                  placeholder="例: user_pk_123456"
-                  className="w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
-                />
+              <div className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                保存した設定はログイン中のアカウントに保存されるため、別のパソコンやスマートフォンでも同じ設定で送信できます。
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t">
+                {settingsSaved && (
+                  <span className="text-[11px] font-bold text-emerald-700 mr-auto">
+                    保存しました
+                  </span>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -758,7 +635,7 @@ export const ProposalModal = ({
                 </Button>
                 <Button
                   size="sm"
-                  onClick={saveEmailJSConfig}
+                  onClick={() => void saveSettings()}
                   className="bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold px-4"
                 >
                   設定を保存

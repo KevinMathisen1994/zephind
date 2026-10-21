@@ -33,9 +33,12 @@
 
   --ring-color: #1a7100;
   --shadow-xs: 0 1px 2px rgba(10, 20, 10, 0.04);
-  --shadow-sm: 0 1px 3px rgba(10, 20, 10, 0.05), 0 1px 2px rgba(10, 20, 10, 0.04);
-  --shadow-md: 0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.04);
-  --shadow-lg: 0 8px 32px rgba(10, 20, 10, 0.08), 0 2px 8px rgba(10, 20, 10, 0.04);
+  --shadow-sm:
+    0 1px 3px rgba(10, 20, 10, 0.05), 0 1px 2px rgba(10, 20, 10, 0.04);
+  --shadow-md:
+    0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.04);
+  --shadow-lg:
+    0 8px 32px rgba(10, 20, 10, 0.08), 0 2px 8px rgba(10, 20, 10, 0.04);
 
   /* shadcn-compatible semantic aliases */
   --background: var(--bg-page);
@@ -139,22 +142,64 @@
    Typography scale (no !important)
    ───────────────────────────── */
 @layer base {
-  .text-xs  { font-size: 0.75rem;  line-height: 1.15rem; }
-  .text-sm  { font-size: 0.85rem;  line-height: 1.4rem;  }
-  .text-base { font-size: 0.95rem; line-height: 1.65rem; }
-  .text-lg  { font-size: 1.1rem;   line-height: 1.7rem;  }
-  .text-xl  { font-size: 1.3rem;   line-height: 1.85rem; }
-  .text-2xl { font-size: 1.55rem;  line-height: 2.1rem;  }
-  .text-3xl { font-size: 1.8rem;   line-height: 2.3rem;  }
+  .text-xs {
+    font-size: 0.75rem;
+    line-height: 1.15rem;
+  }
+  .text-sm {
+    font-size: 0.85rem;
+    line-height: 1.4rem;
+  }
+  .text-base {
+    font-size: 0.95rem;
+    line-height: 1.65rem;
+  }
+  .text-lg {
+    font-size: 1.1rem;
+    line-height: 1.7rem;
+  }
+  .text-xl {
+    font-size: 1.3rem;
+    line-height: 1.85rem;
+  }
+  .text-2xl {
+    font-size: 1.55rem;
+    line-height: 2.1rem;
+  }
+  .text-3xl {
+    font-size: 1.8rem;
+    line-height: 2.3rem;
+  }
 
   @media (min-width: 768px) {
-    .text-xs  { font-size: 0.8125rem; line-height: 1.35rem; }
-    .text-sm  { font-size: 0.9rem;    line-height: 1.55rem; }
-    .text-base { font-size: 1rem;     line-height: 1.8rem;  }
-    .text-lg  { font-size: 1.15rem;   line-height: 1.9rem;  }
-    .text-xl  { font-size: 1.45rem;   line-height: 2.15rem; }
-    .text-2xl { font-size: 1.75rem;   line-height: 2.45rem; }
-    .text-3xl { font-size: 2.1rem;    line-height: 2.85rem; }
+    .text-xs {
+      font-size: 0.8125rem;
+      line-height: 1.35rem;
+    }
+    .text-sm {
+      font-size: 0.9rem;
+      line-height: 1.55rem;
+    }
+    .text-base {
+      font-size: 1rem;
+      line-height: 1.8rem;
+    }
+    .text-lg {
+      font-size: 1.15rem;
+      line-height: 1.9rem;
+    }
+    .text-xl {
+      font-size: 1.45rem;
+      line-height: 2.15rem;
+    }
+    .text-2xl {
+      font-size: 1.75rem;
+      line-height: 2.45rem;
+    }
+    .text-3xl {
+      font-size: 2.1rem;
+      line-height: 2.85rem;
+    }
   }
 }
 
@@ -166,8 +211,12 @@
    Skeleton shimmer
    ───────────────────────────── */
 @keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position:  200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 .skeleton-shimmer {
   background: linear-gradient(110deg, #eef0ee 25%, #e2e5e2 37%, #eef0ee 63%);
@@ -201,11 +250,33 @@ html {
    Shared component-level utilities
    ───────────────────────────── */
 
+/* Clean High-End Card Containers */
+.bezel-container {
+  @apply rounded-2xl transition-all duration-200;
+}
+
+.bezel-core {
+  @apply rounded-2xl bg-white text-[var(--text-primary)] border border-[var(--border-subtle)] transition-all duration-200;
+  box-shadow: 0 1px 3px rgba(10, 20, 10, 0.04), 0 1px 2px rgba(10, 20, 10, 0.02);
+}
+
+.bezel-container:hover .bezel-core {
+  box-shadow: 0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.03);
+  border-color: var(--border-default);
+}
+
+/* Eyebrow badge */
+.eyebrow-pill {
+  @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-[var(--brand)] bg-[var(--brand-soft)] border border-[var(--brand-border)] w-fit;
+}
+
 /* KPI stat cards — consistent across all pages */
 .kpi-card {
   @apply bg-white rounded-2xl border border-[var(--border-subtle)] p-4 md:p-5 flex items-center gap-3 md:gap-4;
   box-shadow: var(--shadow-xs);
-  transition: box-shadow 0.2s ease, transform 0.15s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
 }
 .kpi-card:hover {
   box-shadow: var(--shadow-sm);
@@ -250,3 +321,4 @@ html {
   box-shadow: 0 0 0 3px rgba(26, 113, 0, 0.15);
   border-color: var(--brand);
 }
+

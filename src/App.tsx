@@ -5,6 +5,7 @@ import AdminPage from "./pages/Admin";
 import OrdersPage from "./pages/Orders";
 import CustomersPage from "./pages/Customers";
 import DealsPage from "./pages/Deals";
+import SavedListingsPage from "./pages/SavedListings";
 import { isClerkEnabled } from "./Providers";
 import { AuthErrorBoundary } from "./components/AuthErrorBoundary";
 
@@ -16,6 +17,7 @@ function AppRoutes() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/deals" element={<DealsPage />} />
+        <Route path="/saved" element={<SavedListingsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="*" element={<Navigate to="/orders" replace />} />
       </Route>

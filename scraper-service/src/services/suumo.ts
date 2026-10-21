@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -28,6 +28,212 @@ const CODE_TO_WARD: Record<string, string> = {
   "13402": "青ヶ島村", "13421": "小笠原村",
 };
 
+
+/**
+ * 賃貸 (chintai) cards are a completely different template from the 中古/新築
+ * one above: each `.cassetteitem` is a BUILDING, and inside it one `<tbody>`
+ * per actual rentable UNIT (different floor/rent/layout), so one building
+ * card can yield several listings. Confirmed live (港区, bs=040): there is no
+ * per-type category param the way the buy side has bs=030/020/011 — one URL
+ * returns 賃貸マンション/賃貸アパート/賃貸一戸建て all mixed together, with each
+ * unit's real type in `.cassetteitem_content-label .ui-pct`. Same pattern as
+ * kenbiya.ts: read the real type per card, let hardFilter narrow downstream.
+ */
+async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
+  const raw = await page.evaluate(new Function(`
+    var parseYen = function(text) {
+      if (!text) return null;
+      var t = text.replace(/[\\s,]/g, "");
+      if (!t || t === "-" || t === "‐" || t === "―") return null;
+      var okuM = t.match(/([\\d.]+)億/);
+      var manM = t.match(/([\\d.]+)万円?/);
+      if (okuM || manM) {
+        var oku = okuM ? parseFloat(okuM[1]) * 10000 : 0;
+        var man = manM ? parseFloat(manM[1]) : 0;
+        return oku + man;
+      }
+      var yenM = t.match(/([\\d.]+)円/);
+      if (yenM) return parseFloat(yenM[1]) / 10000;
+      return null;
+    };
+
+    var results = [];
+    var buildings = document.querySelectorAll(".cassetteitem");
+
+    buildings.forEach(function(building) {
+      var typeLabel = building.querySelector(".cassetteitem_content-label .ui-pct");
+      var rawType = typeLabel ? typeLabel.textContent.trim() : "";
+
+      var addrEl = building.querySelector(".cassetteitem_detail-col1");
+      var address = addrEl ? addrEl.textContent.trim() : "";
+      if (!address) return;
+
+      var ward = "";
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        .replace(/^[^\\s]{1,4}郡/, "")
+        .match(/^(.{1,6}?[市区])/)
+        || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+      if (wm) ward = wm[1];
+
+      var stationEl = building.querySelector(".cassetteitem_detail-col2 .cassetteitem_detail-text");
+      var stationText = stationEl ? stationEl.textContent.trim() : "";
+      var station = "";
+      var walkMinutes = null;
+      var stM = stationText.match(/([^\\s\\/]+駅)/);
+      if (stM) station = stM[1];
+      var wkM = stationText.match(/歩(\\d+)分/);
+      if (wkM) walkMinutes = parseInt(wkM[1], 10);
+
+      var col3 = building.querySelector(".cassetteitem_detail-col3");
+      var col3Text = col3 ? col3.textContent : "";
+      var buildYear = null;
+      if (/新築/.test(col3Text)) {
+        buildYear = new Date().getFullYear();
+      } else {
+        var ageM = col3Text.match(/築(\\d+)年/);
+        if (ageM) buildYear = new Date().getFullYear() - parseInt(ageM[1], 10);
+      }
+
+      var rows = building.querySelectorAll("tbody tr.js-cassette_link");
+      rows.forEach(function(row) {
+        var rentEl = row.querySelector(".cassetteitem_price--rent");
+        var rent = parseYen(rentEl ? rentEl.textContent : "");
+        if (rent == null) return; // no rent = not a real listing row
+
+        var mgmtEl = row.querySelector(".cassetteitem_price--administration");
+        var managementFee = parseYen(mgmtEl ? mgmtEl.textContent : "");
+        var depositEl = row.querySelector(".cassetteitem_price--deposit");
+        var deposit = parseYen(depositEl ? depositEl.textContent : "");
+        var gratuityEl = row.querySelector(".cassetteitem_price--gratuity");
+        var keyMoney = parseYen(gratuityEl ? gratuityEl.textContent : "");
+
+        var layoutEl = row.querySelector(".cassetteitem_madori");
+        var layout = layoutEl ? layoutEl.textContent.trim() : "";
+        var areaEl = row.querySelector(".cassetteitem_menseki");
+        var areaText = areaEl ? areaEl.textContent : "";
+        var areaM = areaText.match(/([\\d.]+)\\s*m/);
+        var area = areaM ? parseFloat(areaM[1]) : null;
+
+        var floor = null;
+        var tds = row.querySelectorAll("td");
+        if (tds.length > 2) {
+          var floorM = tds[2].textContent.match(/(\\d+)\\s*階/);
+          if (floorM) floor = parseInt(floorM[1], 10);
+        }
+
+        var linkEl = row.querySelector("a.js-cassette_link_href");
+        var url = "";
+        if (linkEl) {
+          var href = linkEl.getAttribute("href") || "";
+          url = href.indexOf("http") === 0 ? href : "https://suumo.jp" + href;
+        }
+        if (!url) return; // no detail link = can't dedupe/match reliably
+
+        results.push({
+          address: address,
+          ward: ward,
+          price: rent, // kept for any code path that reads .price generically
+          rent: rent,
+          managementFee: managementFee != null ? managementFee : undefined,
+          deposit: deposit != null ? deposit : undefined,
+          keyMoney: keyMoney != null ? keyMoney : undefined,
+          area: area != null ? area : undefined,
+          floorArea: area != null ? area : undefined,
+          buildYear: buildYear != null ? buildYear : undefined,
+          floor: floor != null ? floor : undefined,
+          layout: layout || undefined,
+          station: station || undefined,
+          walkMinutes: walkMinutes != null ? walkMinutes : undefined,
+          url: url,
+          source: "suumo",
+          propertyType: rawType || undefined,
+          dealType: "rent",
+        });
+      });
+    });
+
+    return JSON.stringify(results);
+  `));
+  return JSON.parse(raw);
+}
+
+async function scrapeSuumoChintai(areaCode: string, wardName: string): Promise<ScrapeResult> {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const allListings: PropertyListing[] = [];
+  const seenUrls = new Set<string>();
+  // Confirmed live: 港区 alone still returned ~150-230 NEW listings per page
+  // all the way to page 10 with no sign of tapering off — a buy-side cap of
+  // 10 (chosen for a single property-type category) badly undercounts a
+  // dense ward's whole 賃貸 inventory (every type mixed into one page, same
+  // reasoning as kenbiya/keio/nomu_pro's higher caps elsewhere).
+  const MAX_PAGES = 30;
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(config.userAgent);
+    await page.setViewport({ width: 1280, height: 800 });
+
+    for (let p = 1; p <= MAX_PAGES; p++) {
+      // bs=040 (賃貸マンション・アパート) — confirmed live it already returns
+      // 賃貸一戸建て too, not just マンション/アパート, so there is no separate
+      // house category to also fetch here (unlike the buy side's 030/020/011).
+      const url = `https://suumo.jp/jj/chintai/ichiran/FR301FC001/?ar=030&bs=040&ta=13&sc=${areaCode}&cb=0.0&ct=9999999&et=9999999&mb=0&mt=9999999&cn=9999999&fw2=&page=${p}`;
+      logger.info(`[Suumo Scraper] Loading chintai page ${p} for ${wardName}...`);
+
+      try {
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+      } catch {
+        logger.warn(`[Suumo Scraper] Chintai page ${p} failed to load`);
+        break;
+      }
+
+      try {
+        await page.waitForSelector(".cassetteitem", { timeout: 15000 });
+      } catch {
+        logger.info(`[Suumo Scraper] No chintai listings on page ${p}, stopping`);
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const listings = await extractChintaiListings(page);
+      const newListings = listings.filter((l) => {
+        if (!l.url || seenUrls.has(l.url)) return false;
+        seenUrls.add(l.url);
+        return true;
+      });
+
+      if (newListings.length === 0) {
+        logger.info(`[Suumo Scraper] Chintai page ${p}: no new listings, stopping`);
+        break;
+      }
+
+      logger.info(`[Suumo Scraper] Chintai page ${p}: ${newListings.length} new listings (total: ${allListings.length + newListings.length})`);
+      allListings.push(...newListings);
+    }
+
+    logger.info(`[Suumo Scraper] Chintai scrape complete: ${allListings.length} listings for ${wardName}`);
+    allListings.slice(0, 5).forEach((l, i) => {
+      logger.info(
+        `[Suumo Scraper]   [${i}] ${l.ward} ${l.address} | rent=${l.rent}万円 | mgmt=${l.managementFee ?? "?"}万円 | deposit=${l.deposit ?? "?"} | keyMoney=${l.keyMoney ?? "?"} | type=${l.propertyType}`
+      );
+    });
+
+    return {
+      listings: allListings,
+      source: "suumo",
+      areaCode,
+      scrapedAt: Date.now(),
+      count: allListings.length,
+    };
+  } finally {
+    await browser.close();
+    logger.info(`[Suumo Scraper] Browser closed`);
+  }
+}
 
 async function extractListings(page: any): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function(`
@@ -74,10 +280,24 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       var wkM = stationText.match(/徒歩(\\d+)分/);
       if (wkM) walkMinutes = parseInt(wkM[1], 10);
 
-      var areaText = getVal("土地面積");
-      var area = null;
-      var aM = areaText.match(/([\\d,.]+)\\s*m[²2]/);
-      if (aM) area = parseFloat(aM[1].replace(/,/g, ""));
+      // Land vs unit area are DIFFERENT numbers and the cassette prints whichever
+      // applies: 土地面積 on 土地/戸建て pages, 専有面積 (壁芯) on 中古マンション.
+      // Reading only 土地面積 left every mansion with no area at all, so the
+      // buyer's 専有面積 range could never be checked against it.
+      var parseArea = function(text) {
+        if (!text) return null;
+        var m = text.match(/([\\d,.]+)\\s*m[²2]/);
+        return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+      };
+      var landSize = parseArea(getVal("土地面積"));
+      var floorArea = parseArea(getVal("専有面積") || getVal("建物面積"));
+      // 専有面積 is the mansion figure; fall back to land for the other pages.
+      var area = floorArea != null ? floorArea : landSize;
+
+      // 築年月 reads "1968年1月".
+      var buildYear = null;
+      var byM = getVal("築年月").match(/(\\d{4})年/);
+      if (byM) buildYear = parseInt(byM[1], 10);
 
       var bcrFarText = getVal("建ぺい率・容積率");
       var bcr = null;
@@ -125,7 +345,12 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         // unparsed size read as "confirmed 0m²" and was hard-rejected by
         // any such filter instead of being treated as unknown.
         area: area || undefined,
-        landSize: area || undefined,
+        // Only the real 土地面積 goes here. It used to be the same value as
+        // area, i.e. a mansion's 専有面積 was also reported as its plot size,
+        // which made a 30㎡ flat look like a 30㎡ plot to every land filter.
+        landSize: landSize || undefined,
+        floorArea: floorArea || undefined,
+        buildYear: buildYear || undefined,
         url: url || undefined,
         source: "suumo",
         station: station || undefined,
@@ -141,15 +366,20 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
   return JSON.parse(raw);
 }
 
-export async function scrapeSuumo(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeSuumo(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
   const wardName = CODE_TO_WARD[areaCode] || areaCode;
-  logger.info(`[Suumo Scraper] Starting scrape`, { ward: wardName, areaCode });
+  logger.info(`[Suumo Scraper] Starting scrape`, { ward: wardName, areaCode, dealType });
+
+  if (dealType === "rent") {
+    return await scrapeSuumoChintai(areaCode, wardName);
+  }
 
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const allListings: PropertyListing[] = [];
+  const scrapeErrors: string[] = [];
   const seenSignatures = new Set<string>();
 
   try {
@@ -158,7 +388,7 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[]): Pro
     await page.setViewport({ width: 1280, height: 800 });
 
     const MAX_PAGES = 10;
-    const catMap: Record<string, string> = { "030": "土地", "020": "一戸建て", "010": "マンション" };
+    const catMap: Record<string, string> = { "030": "土地", "020": "一戸建て", "011": "マンション" };
     const categories = filterTypes && filterTypes.length > 0
       ? Object.entries(catMap).filter(([, label]) => filterTypes.includes(label)).map(([key]) => key)
       : Object.keys(catMap);
@@ -175,9 +405,16 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[]): Pro
         logger.info(`[Suumo Scraper] Loading page ${p} (bs=${bs}) for ${wardName}...`);
 
         try {
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+          await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
         } catch {
           logger.warn(`[Suumo Scraper] Page ${p} failed to load`);
+          break;
+        }
+
+        const title = await page.title();
+        if (title.includes("メンテナンス") || title.includes("Maintenance")) {
+          logger.warn(`[Suumo Scraper] SUUMO is currently under maintenance: ${title}`);
+          scrapeErrors.push(`SUUMOサイトは現在メンテナンス中です (${title})`);
           break;
         }
 
@@ -212,6 +449,7 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[]): Pro
         logger.info(`[Suumo Scraper] Page ${p}: ${newListings.length} new listings (total: ${allListings.length + newListings.length})`);
         allListings.push(...newListings);
       }
+      if (scrapeErrors.length > 0) break;
     }
 
     logger.info(`[Suumo Scraper] Scrape complete: ${allListings.length} listings for ${wardName}`);
@@ -222,6 +460,7 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[]): Pro
     });
 
     return {
+      errors: scrapeErrors.length > 0 ? scrapeErrors : undefined,
       listings: allListings,
       source: "suumo",
       areaCode,

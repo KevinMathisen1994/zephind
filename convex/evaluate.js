@@ -64,14 +64,28 @@ export const evaluateListing = action({
     floor: v.optional(v.number()),
     totalUnits: v.optional(v.number()),
     elevators: v.optional(v.number()),
+    // Rental-only economics (万円/月 for rent & managementFee, 万円 absolute
+    // amount — not a month-multiple — for deposit/keyMoney).
+    dealType: v.optional(v.string()), // "buy" | "rent"
+    rent: v.optional(v.number()),
+    managementFee: v.optional(v.number()),
+    deposit: v.optional(v.number()),
+    keyMoney: v.optional(v.number()),
+    petsAllowed: v.optional(v.boolean()),
 
-    // Order Criteria (Buyer Requirements)
+    // Order Criteria (Buyer/Tenant Requirements)
     orderCriteria: v.optional(
       v.object({
         orderName: v.optional(v.string()),
         wards: v.optional(v.array(v.string())),
+        dealType: v.optional(v.string()), // "buy" | "rent"
         priceMin: v.optional(v.number()),
         priceMax: v.optional(v.number()),
+        rentMin: v.optional(v.number()),
+        rentMax: v.optional(v.number()),
+        maxDeposit: v.optional(v.number()),
+        maxKeyMoney: v.optional(v.number()),
+        petsRequired: v.optional(v.boolean()),
         areaMin: v.optional(v.number()),
         areaMax: v.optional(v.number()),
         landSizeMin: v.optional(v.number()),
@@ -81,6 +95,8 @@ export const evaluateListing = action({
         walkMinutesMax: v.optional(v.number()),
         minRoadWidth: v.optional(v.number()),
         propertyTypes: v.optional(v.array(v.string())),
+        // 賃貸中のまま売却される物件（オーナーチェンジ）を希望しているか。
+        ownerChange: v.optional(v.boolean()),
         structureTypes: v.optional(v.array(v.string())),
         maxBuildAge: v.optional(v.number()),
         minBuildYear: v.optional(v.number()),
@@ -104,13 +120,20 @@ export const evaluateListing = action({
     }
 
     const c = args.orderCriteria || {};
+    const isRental = (args.dealType ?? c.dealType) === "rent";
 
-    // 1. Construct Property Summary
+    // 1. Construct Property Summary. Rent and price/yield are mutually
+    // exclusive (a listing is one or the other — see the schema comment on
+    // orders.dealType), so which line prints is decided by dealType, not by
+    // which field happens to be set.
     const propertySummary = `
 【物件概要】
 ・所在地: ${args.address || ""} ${args.ward || ""}
-・価格: ${args.price ? `${args.price.toLocaleString()}万円` : "未記載"}
-・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}
+${
+  isRental
+    ? `・賃料: ${args.rent ? `${args.rent.toLocaleString()}万円/月` : "未記載"}\n・管理費: ${args.managementFee ? `${args.managementFee}万円/月` : "なし/未記載"}\n・敷金/礼金: ${args.deposit != null ? `${args.deposit}万円` : "未記載"} / ${args.keyMoney != null ? `${args.keyMoney}万円` : "未記載"}\n・ペット: ${args.petsAllowed === true ? "相談可" : args.petsAllowed === false ? "不可" : "未記載"}`
+    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
+}
 ・土地面積: ${args.landSize ? `${args.landSize}㎡` : "要確認"}
 ・延床/専有面積: ${args.area ? `${args.area}㎡` : "要確認"}
 ・物件種別: ${args.propertyType || "未記載"}
@@ -126,14 +149,18 @@ export const evaluateListing = action({
     const hasOrderContext = Object.keys(c).length > 0;
     const orderSummary = hasOrderContext
       ? `
-【顧客の購入ニーズ・ご要望】
-・案件名: ${c.orderName || "買主指定条件"}
+【${isRental ? "入居希望者の賃貸ニーズ・ご要望" : "顧客の購入ニーズ・ご要望"}】
+・案件名: ${c.orderName || (isRental ? "借主指定条件" : "買主指定条件")}
 ・希望エリア: ${c.wards && c.wards.length > 0 ? c.wards.join("、") : "都内近郊"}
-・ご予算: ${c.priceMin || c.priceMax ? `${c.priceMin || 0}万円 〜 ${c.priceMax ? `${c.priceMax}万円` : "上限なし"}` : "指定なし"}
-・希望利回り: ${c.minYield ? `${c.minYield}% 以上` : "指定なし"}
+${
+  isRental
+    ? `・ご予算(賃料): ${c.rentMin || c.rentMax ? `${c.rentMin || 0}万円/月 〜 ${c.rentMax ? `${c.rentMax}万円/月` : "上限なし"}` : "指定なし"}\n・敷金上限: ${c.maxDeposit != null ? `${c.maxDeposit}万円` : "指定なし"}\n・礼金上限: ${c.maxKeyMoney != null ? `${c.maxKeyMoney}万円` : "指定なし"}${c.petsRequired ? "\n・ペット可の物件を希望" : ""}`
+    : `・ご予算: ${c.priceMin || c.priceMax ? `${c.priceMin || 0}万円 〜 ${c.priceMax ? `${c.priceMax}万円` : "上限なし"}` : "指定なし"}\n・希望利回り: ${c.minYield ? `${c.minYield}% 以上` : "指定なし"}`
+}
 ・駅徒歩制限: ${c.walkMinutesMax ? `徒歩${c.walkMinutesMax}分以内` : "指定なし"}
 ・前面道路幅員: ${c.minRoadWidth ? `${c.minRoadWidth}m以上` : "指定なし"}
-・希望物件種別: ${c.propertyTypes && c.propertyTypes.length > 0 ? c.propertyTypes.join("、") : "指定なし"}
+・希望物件種別: ${c.propertyTypes && c.propertyTypes.length > 0 ? c.propertyTypes.join("、") : "指定なし"}${c.ownerChange ? "（オーナーチェンジ／賃貸中のままの売却を希望）" : ""}
+・希望専有／建物面積: ${c.areaMin || c.areaMax ? `${c.areaMin || 0}㎡ 〜 ${c.areaMax ? `${c.areaMax}㎡` : "上限なし"}` : "指定なし"}
 ・希望構造: ${c.structureTypes && c.structureTypes.length > 0 ? c.structureTypes.join("、") : "指定なし"}
 ・築年数条件: ${c.maxBuildAge ? `築${c.maxBuildAge}年以内` : "指定なし"}
 ・こだわり条件: ${
@@ -443,6 +470,47 @@ ${verdictBrief}
 ※【要確認事項】は③に「現地調査・売主資料での確認が必要な項目」として列挙してください。推測で埋めないこと。
 `.trim();
 
+    // Built once, up front, so every return path below (success, a Rax AI
+    // error payload, or a thrown network error) has the same shape to persist
+    // and return. This used to only happen on the success path, so any Rax AI
+    // hiccup — and each evaluation already fires ~9 external calls (Places,
+    // MLIT, Rax AI) — meant the already-computed score was silently thrown
+    // away instead of saved, leaving the listing looking permanently
+    // "unevaluated" until someone noticed and manually re-ran it.
+    const scoreDetail = {
+      fitPct: assessment.fitPct,
+      marketPct: assessment.marketPct,
+      completeness: assessment.completeness,
+      disqualifiers: assessment.disqualifiers,
+      unverified: assessment.unverified,
+      breakdown: assessment.breakdown,
+      marketAvgPrice,
+      amenityCount: nearbyTotalCount,
+      comparables,
+      dataWarnings,
+    };
+
+    /** Persist the deterministic score even when the AI narrative fails. */
+    const persistScore = async (evaluationText) => {
+      if (!args.matchId) return;
+      try {
+        await ctx.runMutation(api.matching.saveEvaluation, {
+          matchId: args.matchId,
+          evaluation: evaluationText,
+        });
+        await ctx.runMutation(api.matching.saveScore, {
+          matchId: args.matchId,
+          score,
+        });
+        await ctx.runMutation(api.matching.saveScoreDetail, {
+          matchId: args.matchId,
+          scoreDetail,
+        });
+      } catch (dbErr) {
+        console.error("[Rax AI] DB save failed:", dbErr);
+      }
+    };
+
     try {
       const response = await fetch(
         "https://ai.raxcore.dev/api/v1/chat/completions",
@@ -473,7 +541,10 @@ ${verdictBrief}
       const data = parseChatCompletion(raw);
       if (data.error) {
         console.error("[Rax AI] API error:", data.error);
-        return { error: data.error.message || JSON.stringify(data.error) };
+        const message = data.error.message || JSON.stringify(data.error);
+        const fallback = `AI解説の生成に失敗しました（${message}）。スコアは社内査定ロジックによる確定値です。\n\n【プロの総合投資スコア: ${score}点】`;
+        await persistScore(fallback);
+        return { error: message, evaluation: fallback, score, scoreDetail };
       }
       let evaluation =
         data.choices?.[0]?.message?.content || "評価レスポンスなし";
@@ -509,38 +580,7 @@ ${verdictBrief}
         }),
       );
 
-      const scoreDetail = {
-        fitPct: assessment.fitPct,
-        marketPct: assessment.marketPct,
-        completeness: assessment.completeness,
-        disqualifiers: assessment.disqualifiers,
-        unverified: assessment.unverified,
-        breakdown: assessment.breakdown,
-        marketAvgPrice,
-        amenityCount: nearbyTotalCount,
-        comparables,
-        dataWarnings,
-      };
-
-      // Save to DB if matchId provided
-      if (args.matchId) {
-        try {
-          await ctx.runMutation(api.matching.saveEvaluation, {
-            matchId: args.matchId,
-            evaluation,
-          });
-          await ctx.runMutation(api.matching.saveScore, {
-            matchId: args.matchId,
-            score,
-          });
-          await ctx.runMutation(api.matching.saveScoreDetail, {
-            matchId: args.matchId,
-            scoreDetail,
-          });
-        } catch (dbErr) {
-          console.error("[Rax AI] DB save failed:", dbErr);
-        }
-      }
+      await persistScore(evaluation);
 
       return {
         evaluation,
@@ -552,13 +592,13 @@ ${verdictBrief}
       };
     } catch (err) {
       console.error("[Rax AI] Request failed:", err);
-      // The score no longer depends on the model, so return it even when the
-      // narrative call fails — a listing without prose still ranks correctly.
-      return {
-        error: err instanceof Error ? err.message : String(err),
-        score,
-        scoreDetail: { marketAvgPrice, comparables, dataWarnings },
-      };
+      const message = err instanceof Error ? err.message : String(err);
+      // The score no longer depends on the model, so persist and return it
+      // even when the narrative call fails — a listing without prose still
+      // ranks correctly, and (critically) no longer looks "unevaluated".
+      const fallback = `AI解説の生成に失敗しました（${message}）。スコアは社内査定ロジックによる確定値です。\n\n【プロの総合投資スコア: ${score}点】`;
+      await persistScore(fallback);
+      return { error: message, evaluation: fallback, score, scoreDetail };
     }
   },
 });

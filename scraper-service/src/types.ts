@@ -19,6 +19,34 @@ export interface PropertyListing {
   roadWidth?: number;
   frontage?: number;
   propertyType?: string; // "土地" | "一戸建て" | "マンション" | etc
+  title?: string; // 掲載タイトル。一棟/オーナーチェンジ判定の手掛かりになる
+  /**
+   * 掲載日 (epoch ms). From the list card where the portal prints one, otherwise
+   * from the detail page — see services/postedDate.ts for which sites publish
+   * what. Undefined means the portal does not expose it, NOT "posted long ago".
+   */
+  postedAt?: number;
+  /** "posted" = 情報公開日/掲載日, "updated" = 更新日 (a re-post, not the original). */
+  postedDateKind?: "posted" | "updated";
+  /** The portal's own NEW / 新着 badge, for sites that show a badge but no date. */
+  isNew?: boolean;
+
+  /**
+   * "rent" for a listing scraped off a site's 賃貸 (rental) vertical, "buy"
+   * (or undefined, for every existing for-sale scraper) otherwise. Stamped by
+   * the scraper itself, since it's the only thing that knows which vertical a
+   * card came from — hardFilter gates a listing against an order's own
+   * dealType using this field, not by guessing from which price-ish field is
+   * populated.
+   */
+  dealType?: "buy" | "rent";
+  /** Rental-only economics, additive to `price` (never a replacement for it). */
+  rent?: number; // 賃料 (万円/月)
+  managementFee?: number; // 管理費・共益費 (万円/月)
+  deposit?: number; // 敷金 (万円 — absolute amount, not a month-multiple)
+  keyMoney?: number; // 礼金 (万円 — absolute amount, not a month-multiple)
+  petsAllowed?: boolean;
+
   // New fields for enhanced filtering
   yield?: number; // 利回り (%)
   totalUnits?: number; // 総戸数
@@ -49,14 +77,25 @@ export interface ScrapeResult {
 export interface OrderCriteria {
   ward?: string;
   wards?: string[]; // 複数区対応 (e.g., ["台東区", "中央区", "渋谷区"])
+  /** "buy" (default when absent — every order created before this existed) or
+   *  "rent". An order is ONE or the other, never both. */
+  dealType?: "buy" | "rent";
   priceMin?: number;
   priceMax?: number;
+  rentMin?: number; // 賃料下限 (万円/月)
+  rentMax?: number; // 賃料上限 (万円/月)
+  maxDeposit?: number; // 敷金上限 (万円)
+  maxKeyMoney?: number; // 礼金上限 (万円)
+  petsRequired?: boolean; // ペット可のみ
   walkMinutes?: number;
   minBuildingCoverageRatio?: number;
   minFloorAreaRatio?: number;
   propertyTypes?: string[];
+  /** オーナーチェンジ（賃貸中のまま売却される物件）のみを対象にする */
+  ownerChange?: boolean;
   landSizeMin?: number;
   landSizeMax?: number;
+  /** 専有面積 (マンション) / 建物面積。listing.area と比較する */
   buildingSizeMin?: number;
   buildingSizeMax?: number;
   // New filter options

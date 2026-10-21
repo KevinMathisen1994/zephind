@@ -1,7 +1,8 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
+import { applyListPostedText } from "./postedDate";
 
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -146,6 +147,19 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var isMansion = propertyType === "マンション" || propertyType === "mansion" || propertyType === "収益物件";
       var area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);
 
+      // 掲載日. 大京穴吹 is the ONLY one of the 19 portals that prints a date on
+      // its list card: <span class="is-new">New 8/10</span>, with the date also
+      // isolated in <span class="date">8/10</span>. Month/day only, so the year
+      // is resolved on the Node side (parseJapaneseDate).
+      var isNew = false;
+      var postedText = "";
+      var newBadge = card.querySelector("span.is-new");
+      if (newBadge) {
+        isNew = true;
+        var dateEl = newBadge.querySelector("span.date") || card.querySelector("span.is-new span.date");
+        postedText = clean(dateEl) || clean(newBadge).replace(/New/gi, "").trim();
+      }
+
       if (address && price) {
         results.push({
           address: address,
@@ -164,16 +178,222 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           yield: yieldPct !== null ? yieldPct : undefined,
           floor: floor !== null ? floor : undefined,
           totalUnits: totalUnits !== null ? totalUnits : undefined,
+          isNew: isNew || undefined,
+          postedText: postedText || undefined,
         });
       }
     });
 
     return JSON.stringify(results);
   `), propertyType);
+  // "New 8/10" -> epoch ms (year resolved centrally, see postedDate.ts).
+  return applyListPostedText(JSON.parse(raw));
+}
+
+/**
+ * 賃貸 (rent) cards share the exact same list-search-result__item /
+ * info-item grid as the 中古 cards above, just with a different label set —
+ * 賃料 instead of 価格, plus 管理費/敷金・保証金/礼金 that the buy side never
+ * has. Confirmed live: 敷金・保証金 and 礼金 print an ABSOLUTE 万円 amount
+ * here (e.g. "8.5万円" on an 8.5万円/月 rent), NOT a "Xヶ月" multiple like
+ * keio.ts/suumo.ts/tokyotatemono.ts use — no conversion needed, unlike those
+ * sites. No per-type land/house/mansion split either: one unfiltered
+ * /rent/p13/c{code}/ URL, with each card's own 物件種別 label ("マンション")
+ * giving the real type.
+ */
+async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
+  const raw = await page.evaluate(new Function(`
+    var cards = Array.prototype.slice.call(document.querySelectorAll("li.list-search-result__item"));
+    var results = [];
+    var clean = function(el) { return ((el && el.textContent) || "").replace(/\\s+/g, " ").trim(); };
+
+    var parseManYen = function(t) {
+      var s = (t || "").replace(/\\s/g, "");
+      var m = s.match(/([\\d,.]+)万円?/);
+      if (m) return parseFloat(m[1].replace(/,/g, ""));
+      var y = s.match(/([\\d,.]+)円/);
+      return y ? parseFloat(y[1].replace(/,/g, "")) / 10000 : null;
+    };
+    var parseArea = function(t) {
+      var m = (t || "").match(/([\\d,]+(?:\\.\\d+)?)\\s*(?:㎡|m2|m²|平米|m)/);
+      return m ? parseFloat(m[1].replace(/,/g, "")) : null;
+    };
+
+    cards.forEach(function(card) {
+      var link = card.querySelector("a.card-props-detail__link[href]");
+      var url = link ? link.getAttribute("href") : null;
+      if (url && !url.startsWith("http")) {
+        url = "https://www.daikyo-anabuki.co.jp" + (url.startsWith("/") ? "" : "/") + url;
+      }
+      if (!url) return;
+
+      var rent = null, managementFee = null, deposit = null, keyMoney = null;
+      var address = "", station = "", walkMinutes = null;
+      var floorArea = null, layout = "", buildYear = null, floor = null, propertyType = "";
+
+      var rows = Array.prototype.slice.call(card.querySelectorAll(".card-props-detail__info-item"));
+      rows.forEach(function(row) {
+        var columns = Array.prototype.slice.call(row.querySelectorAll(".card-props-detail__info-column"));
+        var groups = columns.length ? columns : [row];
+        groups.forEach(function(group) {
+          var label = clean(group.querySelector(".card-props-detail__info-title"));
+          var value = clean(group.querySelector(".card-props-detail__info-data"));
+          if (!label || !value) return;
+
+          if (label.indexOf("賃料") >= 0) {
+            rent = parseManYen(value);
+          } else if (label.indexOf("管理費") >= 0) {
+            managementFee = parseManYen(value);
+          } else if (label.indexOf("敷金") >= 0) {
+            deposit = parseManYen(value);
+          } else if (label.indexOf("礼金") >= 0) {
+            keyMoney = parseManYen(value);
+          } else if (label.indexOf("住所") >= 0 || label.indexOf("所在地") >= 0) {
+            address = value.replace(/\\s+/g, "");
+          } else if (label.indexOf("交通") >= 0 || label.indexOf("最寄") >= 0 || label.indexOf("沿線") >= 0) {
+            var stM = value.match(/「([^」]+)」駅/);
+            if (stM) station = stM[1] + "駅";
+            else {
+              var stM2 = value.match(/([^\\s「」]+)駅/);
+              if (stM2) station = stM2[1] + "駅";
+            }
+            var wkM = value.match(/徒歩(\\d+)分/);
+            if (wkM) walkMinutes = parseInt(wkM[1], 10);
+          } else if (label.indexOf("専有面積") >= 0 || label.indexOf("建物面積") >= 0) {
+            floorArea = parseArea(value);
+          } else if (label.indexOf("間取") >= 0) {
+            layout = value;
+          } else if (label.indexOf("築年") >= 0) {
+            var byM = value.match(/(\\d{4})年/);
+            if (byM) buildYear = parseInt(byM[1], 10);
+          } else if (label.indexOf("所在階") >= 0) {
+            var flM = value.match(/(\\d+)階/);
+            if (flM) floor = parseInt(flM[1], 10);
+          } else if (label.indexOf("物件種別") >= 0) {
+            propertyType = value;
+          }
+        });
+      });
+
+      if (!address) {
+        var head = card.querySelector(".card-props-detail__labelnone-text");
+        if (head) {
+          var ht = clean(head).replace(/\\s+/g, "");
+          if (/[都道府県市区町村]/.test(ht)) address = ht;
+        }
+      }
+
+      var ward = "";
+      var wm = address.match(/([^都道府県]{2,4}[区市])/);
+      if (wm) ward = wm[1];
+
+      if (address && rent != null) {
+        results.push({
+          address: address,
+          ward: ward,
+          price: rent,
+          rent: rent,
+          managementFee: managementFee != null ? managementFee : undefined,
+          deposit: deposit != null ? deposit : undefined,
+          keyMoney: keyMoney != null ? keyMoney : undefined,
+          area: floorArea != null ? floorArea : undefined,
+          floorArea: floorArea != null ? floorArea : undefined,
+          buildYear: buildYear != null ? buildYear : undefined,
+          floor: floor != null ? floor : undefined,
+          source: "daikyo",
+          url: url,
+          station: station || undefined,
+          walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
+          propertyType: propertyType || undefined,
+          layout: layout || undefined,
+          dealType: "rent",
+        });
+      }
+    });
+
+    return JSON.stringify(results);
+  `));
   return JSON.parse(raw);
 }
 
-export async function scrapeDaikyo(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+async function scrapeDaikyoChintai(areaCode: string): Promise<ScrapeResult> {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const allListings: PropertyListing[] = [];
+  const scrapeErrors: string[] = [];
+  const seenUrls = new Set<string>();
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(config.userAgent);
+    await page.setViewport({ width: 1280, height: 800 });
+
+    let currentPage = 1;
+    let hasNextPage = true;
+
+    while (hasNextPage) {
+      const url = `https://www.daikyo-anabuki.co.jp/rent/p13/c${areaCode}/${currentPage > 1 ? "?page=" + currentPage : ""}`;
+      logger.info(`[Daikyo Scraper] Fetching (賃貸): ${url}`);
+
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await new Promise((r) => setTimeout(r, 1500));
+
+      // Same hidden "no results" dialog ships on every page here as on the
+      // buy side (see the comment in scrapeDaikyo below) — count real rows.
+      const cardCount = await page.evaluate(
+        () => document.querySelectorAll("li.list-search-result__item").length
+      );
+      if (cardCount === 0) {
+        logger.info(`[Daikyo Scraper] No 賃貸 result rows on page ${currentPage}`);
+        break;
+      }
+
+      const listings = await extractChintaiListings(page);
+      logger.info(`[Daikyo Scraper] Extracted ${listings.length} 賃貸 listings from page ${currentPage}`);
+
+      const newListings = listings.filter((l) => {
+        if (!l.url || seenUrls.has(l.url)) return false;
+        seenUrls.add(l.url);
+        return true;
+      });
+      if (newListings.length === 0) {
+        logger.info(`[Daikyo Scraper] 賃貸 page ${currentPage}: no new listings, stopping`);
+        break;
+      }
+      allListings.push(...newListings);
+
+      const nextButtonVisible = await page.evaluate(() => {
+        const next = Array.from(document.querySelectorAll("a")).find(
+          (a) => a.textContent && a.textContent.includes("次へ")
+        );
+        return !!next;
+      });
+
+      if (nextButtonVisible && currentPage < config.maxPagesPerSite) {
+        currentPage++;
+      } else {
+        hasNextPage = false;
+      }
+    }
+
+    logger.info(`[Daikyo Scraper] 賃貸 scrape complete: ${allListings.length} listings for ${areaCode}`);
+    return { errors: scrapeErrors, listings: allListings, source: "daikyo", areaCode, scrapedAt: Date.now(), count: allListings.length };
+  } catch (error: any) {
+    logger.error(`[Daikyo Scraper] Error during 賃貸 scraping: ${error.message}`);
+    scrapeErrors.push(error?.message ?? String(error));
+    return { errors: scrapeErrors, listings: allListings, source: "daikyo", areaCode, scrapedAt: Date.now(), count: allListings.length };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function scrapeDaikyo(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  if (dealType === "rent") {
+    return await scrapeDaikyoChintai(areaCode);
+  }
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],

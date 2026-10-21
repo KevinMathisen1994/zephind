@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -165,7 +165,14 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
   return JSON.parse(raw);
 }
 
-export async function scrapeHatomark(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeHatomark(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Rental support not yet wired up for this site — return empty rather
+  // than silently mislabeling a for-sale listing as a rental one. Remove
+  // this guard once this file scrapes its site's real 賃貸 vertical.
+  if (dealType === "rent") {
+    return { listings: [], source: "hatomark", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const wardName = TOKYO_WARD_MAP[areaCode] || areaCode;
   logger.info(`[Hatomark Scraper] Starting scrape`, { ward: wardName, areaCode });
 

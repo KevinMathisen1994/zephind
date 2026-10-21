@@ -20,8 +20,14 @@ export const create = mutation({
         name: v.optional(v.string()),
         ward: v.optional(v.string()),
         wards: v.optional(v.array(v.string())), // 複数区対応
+        dealType: v.optional(v.string()), // "buy" | "rent"
         priceMin: v.optional(v.number()),
         priceMax: v.optional(v.number()),
+        rentMin: v.optional(v.number()),
+        rentMax: v.optional(v.number()),
+        maxDeposit: v.optional(v.number()),
+        maxKeyMoney: v.optional(v.number()),
+        petsRequired: v.optional(v.boolean()),
         areaMin: v.optional(v.number()),
         areaMax: v.optional(v.number()),
         status: v.optional(v.string()),
@@ -31,6 +37,7 @@ export const create = mutation({
         minBuildingCoverageRatio: v.optional(v.number()),
         minFloorAreaRatio: v.optional(v.number()),
         propertyTypes: v.optional(v.array(v.string())),
+        ownerChange: v.optional(v.boolean()),
         landSizeMin: v.optional(v.number()),
         landSizeMax: v.optional(v.number()),
         buildingSizeMin: v.optional(v.number()),
@@ -52,6 +59,8 @@ export const create = mutation({
         scrapingStatus: v.optional(v.string()),
         activeSource: v.optional(v.string()),
         scrapeRunId: v.optional(v.number()),
+        lastScrapeAt: v.optional(v.number()),
+        lastScrapeBy: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         // userId is taken from the verified JWT and any client-supplied value is
@@ -108,8 +117,14 @@ export const update = mutation({
         name: v.optional(v.string()),
         ward: v.optional(v.string()),
         wards: v.optional(v.array(v.string())),
+        dealType: v.optional(v.string()),
         priceMin: v.optional(v.number()),
         priceMax: v.optional(v.number()),
+        rentMin: v.optional(v.number()),
+        rentMax: v.optional(v.number()),
+        maxDeposit: v.optional(v.number()),
+        maxKeyMoney: v.optional(v.number()),
+        petsRequired: v.optional(v.boolean()),
         areaMin: v.optional(v.number()),
         areaMax: v.optional(v.number()),
         status: v.optional(v.string()),
@@ -119,6 +134,7 @@ export const update = mutation({
         minBuildingCoverageRatio: v.optional(v.number()),
         minFloorAreaRatio: v.optional(v.number()),
         propertyTypes: v.optional(v.array(v.string())),
+        ownerChange: v.optional(v.boolean()),
         landSizeMin: v.optional(v.number()),
         landSizeMax: v.optional(v.number()),
         buildingSizeMin: v.optional(v.number()),
@@ -139,6 +155,8 @@ export const update = mutation({
         scrapingStatus: v.optional(v.string()),
         activeSource: v.optional(v.string()),
         scrapeRunId: v.optional(v.number()),
+        lastScrapeAt: v.optional(v.number()),
+        lastScrapeBy: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         // Ownership check first: without it any signed-in user could patch any

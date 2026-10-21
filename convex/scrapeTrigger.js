@@ -106,9 +106,45 @@ export const triggerScrape = action({
     // When present, the run this dispatch starts is recorded on that order so
     // the UI can show progress for THIS user's scrape only.
     orderId: v.optional(v.id("orders")),
+    /**
+     * DISPLAY name for 実行者, used ONLY when the JWT carries no name or email.
+     *
+     * Clerk's Convex JWT template does not map the `name` claim by default, so
+     * ctx.auth.getUserIdentity() often has nothing but `subject` — which is why
+     * cards read "ログインユーザー". The browser DOES know the name (Clerk's
+     * useUser()), so it may pass it for display.
+     *
+     * Ownership and authorisation never use this: userId still comes from the
+     * verified token, so the worst a forged value can do is mislabel 実行者 on
+     * the caller's OWN order. Map the `name` claim in the Clerk dashboard and the
+     * server-side value takes precedence automatically.
+     */
+    triggeredByName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireUserId(ctx);
+    // Who pressed the button. Taken from the verified JWT (never from an
+    // argument) so the "実行: 柴田" line on the card cannot be forged, and
+    // recorded even when GitHub never tells us a run id.
+    // Which claims are present depends on the Clerk JWT template, so fall through
+    // several: a full name if the template maps one, else nickname, else the
+    // given/family pair, else the email address. "ログインユーザー" is the last
+    // resort — the search WAS run by a signed-in person, so never say 不明.
+    const identity = await ctx.auth.getUserIdentity();
+    const fullName =
+      identity?.name ||
+      identity?.nickname ||
+      [identity?.givenName, identity?.familyName].filter(Boolean).join(" ") ||
+      "";
+    // Client-supplied name is the LAST resort before the generic label, and is
+    // sanitised: it is rendered on a card, so no control characters and no
+    // unbounded length.
+    const clientName = (args.triggeredByName ?? "")
+      .replace(/[\x00-\x1f\x7f]/g, "")
+      .trim()
+      .slice(0, 60);
+    const triggeredBy =
+      fullName || identity?.email || clientName || "ログインユーザー";
 
     // Verify the caller owns the order they are scoping the run to. api.orders.get
     // is already per-user scoped, so this throws for someone else's id. Without it
@@ -188,10 +224,15 @@ export const triggerScrape = action({
       }
     }
 
-    if (args.orderId && runId !== null) {
+    // Stamp the order even when the run id poll came back empty: "who searched,
+    // and when" is useful on its own, and it is the only record of a dispatch
+    // whose run GitHub was slow to list.
+    if (args.orderId) {
       await ctx.runMutation(api.orders.update, {
         id: args.orderId,
-        scrapeRunId: runId,
+        ...(runId !== null ? { scrapeRunId: runId } : {}),
+        lastScrapeAt: Date.now(),
+        lastScrapeBy: triggeredBy,
       });
     }
 

@@ -3,7 +3,7 @@
  *
  * The HTTP endpoint in scrapeRoutes.ts returns JSON and lets the browser decide
  * what to persist. This entrypoint has no browser, so it does the whole job:
- * fetch orders -> scrape -> hardFilter -> write to Convex via convex/ingest.js.
+ * fetch orders -> scrape -> hardFilter -> write to the backend via /api/ingest.
  *
  * Usage:
  *   npm run scrape:cron
@@ -13,11 +13,47 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+import puppeteer from "./puppeteerStealth";
+import type { Browser, Page } from "puppeteer";
 import { KNOWN_SOURCES, SOURCE_LABELS, runScraper } from "./services/scraperRegistry";
 import { hardFilter } from "./services/propertyMatcher";
-import { createIngestClient, type IngestMatch, type IngestOrder, type IngestSummary } from "./convexIngest";
+import {
+  DETAIL_DATE_SOURCES,
+  fetchPostedDates,
+} from "./services/postedDate";
+import { createIngestClient, type IngestMatch, type IngestOrder, type IngestSummary } from "./ingestClient";
 import { logger } from "./logger";
+import { config } from "./config";
 import type { OrderCriteria, PropertyListing } from "./types";
+
+/**
+ * 掲載日 fetching budget.
+ *
+ * Only ONE of the 19 portals prints a date on its list card (大京穴吹); for the
+ * rest it is on the detail page, so a date costs one extra page load. Two caps
+ * keep that honest:
+ *
+ *   PER JOB   — how many detail pages one (source, area) may open.
+ *   PER RUN   — the whole sweep's budget, so a first run over 23 wards x 19
+ *               sources cannot turn a 20-minute job into a 9-hour one and blow
+ *               the GitHub Actions limit.
+ *
+ * Only listings the database has never seen are candidates (a posted date does
+ * not change), so in steady state this is a handful of loads a night and the
+ * caps never bind. Whatever a capped run skips stays a candidate for the next
+ * one, and every truncation is logged — never silent.
+ */
+/**
+ * 実行者 recorded for a run nobody pressed a button for. A user-initiated scrape
+ * is attributed to that account by src/api/scrapeTrigger.ts (from the verified
+ * JWT); this label is what the scheduled sweep writes instead, so the card can
+ * never leave "who searched" blank.
+ */
+const AUTOMATIC_TRIGGER_LABEL = "自動取得（定期実行）";
+
+const POSTED_DATES_ENABLED = (process.env.SCRAPE_POSTED_DATES ?? "1") !== "0";
+const POSTED_DATE_LIMIT_PER_JOB = Number(process.env.SCRAPE_POSTED_DATE_LIMIT || 30);
+const POSTED_DATE_RUN_BUDGET = Number(process.env.SCRAPE_POSTED_DATE_RUN_LIMIT || 400);
 
 /**
  * Area label -> JIS municipality code, for deriving "what should we scrape
@@ -77,12 +113,19 @@ function toCriteria(order: IngestOrder): OrderCriteria {
   return {
     ward: pick<string>("ward"),
     wards: pick<string[]>("wards"),
+    dealType: pick<"buy" | "rent">("dealType"),
     priceMin: pick<number>("priceMin"),
     priceMax: pick<number>("priceMax"),
+    rentMin: pick<number>("rentMin"),
+    rentMax: pick<number>("rentMax"),
+    maxDeposit: pick<number>("maxDeposit"),
+    maxKeyMoney: pick<number>("maxKeyMoney"),
+    petsRequired: pick<boolean>("petsRequired"),
     walkMinutes: pick<number>("walkMinutes"),
     minBuildingCoverageRatio: pick<number>("minBuildingCoverageRatio"),
     minFloorAreaRatio: pick<number>("minFloorAreaRatio"),
     propertyTypes: pick<string[]>("propertyTypes"),
+    ownerChange: pick<boolean>("ownerChange"),
     landSizeMin: pick<number>("landSizeMin"),
     landSizeMax: pick<number>("landSizeMax"),
     buildingSizeMin: pick<number>("buildingSizeMin"),
@@ -134,10 +177,210 @@ function urlOf(listing: PropertyListing & { detailUrl?: string }): string {
   return listing.url || listing.detailUrl || "";
 }
 
+/**
+ * Fill in 掲載日 for the listings of one (source, area) that the database has
+ * never seen, by reading their detail pages.
+ *
+ * Shares ONE browser across the whole run (lazily opened) rather than per job:
+ * launching Chrome costs seconds and memory, and the scrapers already each open
+ * their own — a third concurrent one per job is how CI runners run out of RAM.
+ *
+ * Failure here is never fatal: a missing 掲載日 is a missing field, and the UI
+ * falls back to 取得日時 (when we found the listing) with a label that says so.
+ */
+async function enrichPostedDates(
+  client: { unknownListingUrls(urls: string[]): Promise<string[]> },
+  source: string,
+  listings: PropertyListing[],
+  state: { browser: Browser | null; page: Page | null; budgetLeft: number },
+): Promise<{ filled: number }> {
+  if (!POSTED_DATES_ENABLED || state.budgetLeft <= 0) return { filled: 0 };
+  // Sites verified to publish nothing (ステップ, 東急, 朝日) or to answer detail
+  // requests with a bot check (At Home) are skipped outright — see
+  // DETAIL_DATE_SOURCES for the per-site evidence.
+  if (!DETAIL_DATE_SOURCES.has(source)) return { filled: 0 };
+
+  const byUrl = new Map<string, PropertyListing[]>();
+  for (const listing of listings) {
+    if (listing.postedAt != null) continue; // list card already gave us one
+    const url = urlOf(listing);
+    if (!url) continue;
+    const bucket = byUrl.get(url);
+    if (bucket) bucket.push(listing);
+    else byUrl.set(url, [listing]);
+  }
+  if (byUrl.size === 0) return { filled: 0 };
+
+  let candidates: string[];
+  try {
+    candidates = await client.unknownListingUrls([...byUrl.keys()]);
+  } catch (err) {
+    logger.warn(
+      `[${source}] 掲載日: could not check which listings are new (${(err as Error).message}) — skipping dates for this batch`,
+    );
+    return { filled: 0 };
+  }
+  if (candidates.length === 0) return { filled: 0 };
+
+  if (!state.browser) {
+    state.browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    state.page = await state.browser.newPage();
+    await state.page.setUserAgent(config.userAgent);
+    await state.page.setViewport({ width: 1280, height: 900 });
+  }
+
+  const limit = Math.min(POSTED_DATE_LIMIT_PER_JOB, state.budgetLeft);
+  const { dates, attempted } = await fetchPostedDates(state.page, candidates, {
+    source,
+    limit,
+    delayMs: 1200,
+  });
+  state.budgetLeft -= attempted;
+
+  let filled = 0;
+  for (const [url, result] of dates) {
+    for (const listing of byUrl.get(url) ?? []) {
+      listing.postedAt = result.postedAt;
+      listing.postedDateKind = result.postedDateKind;
+      filled++;
+    }
+  }
+  if (state.budgetLeft <= 0) {
+    logger.warn(
+      `掲載日: run budget of ${POSTED_DATE_RUN_BUDGET} detail page(s) is used up — ` +
+        `remaining new listings keep 取得日時 only until the next run`,
+    );
+  }
+  return { filled };
+}
+
+/**
+ * Fill in 掲載日 for listings ALREADY stored without one.
+ *
+ * The normal path only looks up dates for URLs the database has never seen, so
+ * everything found before 掲載日 scraping existed would stay blank forever. This
+ * walks those rows (indexed, see src/api/ingest.ts) and reads their detail pages,
+ * spending the same capped budget as the main pass.
+ *
+ * Sources that publish no date are excluded, so a row belonging to one of them is
+ * never re-attempted — it is not a gap that can be filled.
+ */
+async function backfillPostedDates(
+  client: ReturnType<typeof createIngestClient>,
+  state: { browser: Browser | null; page: Page | null; budgetLeft: number },
+): Promise<number> {
+  if (!POSTED_DATES_ENABLED || state.budgetLeft <= 0) return 0;
+
+  // The query caps a batch, so one call cannot drain a large table. Loop until the
+  // budget is gone or a batch stops making progress, tracking what has already
+  // been attempted: a listing whose detail page yields no date stays "pending"
+  // forever, and without this the loop would keep re-fetching the same rows.
+  const attemptedUrls = new Set<string>();
+  let pending: { listingId: string; url: string; source: string }[] = [];
+  const nextBatch = async () => {
+    const batch = await client.listingsMissingPostedDate({
+      limit: Math.min(state.budgetLeft, 200),
+      sources: [...DETAIL_DATE_SOURCES],
+    });
+    return batch.filter((row) => !attemptedUrls.has(row.url));
+  };
+
+  pending = await nextBatch();
+  if (pending.length === 0) {
+    logger.info("掲載日 backfill: nothing pending");
+    return 0;
+  }
+
+  if (!state.browser) {
+    state.browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    state.page = await state.browser.newPage();
+    await state.page.setUserAgent(config.userAgent);
+    await state.page.setViewport({ width: 1280, height: 900 });
+  }
+
+  let saved = 0;
+  let considered = 0;
+  while (pending.length > 0 && state.budgetLeft > 0) {
+    considered += pending.length;
+    // Group by source so the per-request delay is not spent hopping between
+    // hosts, and so one blocked portal cannot starve the others of the budget.
+    const bySource = new Map<string, typeof pending>();
+    for (const row of pending) {
+      const bucket = bySource.get(row.source);
+      if (bucket) bucket.push(row);
+      else bySource.set(row.source, [row]);
+    }
+
+    for (const [source, rows] of bySource) {
+      if (state.budgetLeft <= 0) break;
+      const limit = Math.min(rows.length, state.budgetLeft);
+      const targets = rows.slice(0, limit);
+      for (const row of targets) attemptedUrls.add(row.url);
+
+      const { dates, attempted } = await fetchPostedDates(
+        state.page,
+        targets.map((r) => r.url),
+        { source: `${source} backfill`, limit, delayMs: 1200 },
+      );
+      state.budgetLeft -= attempted;
+
+      const updates = targets
+        .filter((r) => dates.has(r.url))
+        .map((r) => ({
+          listingId: r.listingId,
+          postedAt: dates.get(r.url)!.postedAt!,
+          postedDateKind: dates.get(r.url)!.postedDateKind,
+        }));
+      if (updates.length > 0) saved += await client.savePostedDates(updates);
+    }
+
+    pending = state.budgetLeft > 0 ? await nextBatch() : [];
+  }
+
+  logger.info(
+    `掲載日 backfill: filled ${saved} of ${considered} listing(s) examined` +
+      (state.budgetLeft <= 0
+        ? " (budget exhausted — the rest wait for the next run)"
+        : " (nothing further pending)"),
+  );
+  return saved;
+}
+
 async function main(): Promise<number> {
   const startedAt = Date.now();
   const client = createIngestClient();
-  logger.info(`Cron scrape starting — convex=${client.convexUrl}`);
+  logger.info(`Cron scrape starting — backend=${client.backendUrl}`);
+
+  // --backfill-dates: fill in 掲載日 for stored listings and exit, without
+  // scraping. Useful to catch up the whole table in one go after adding date
+  // support, instead of waiting for nightly runs to trickle through it.
+  if (process.argv.slice(2).includes("--backfill-dates")) {
+    const state: { browser: Browser | null; page: Page | null; budgetLeft: number } = {
+      browser: null,
+      page: null,
+      budgetLeft: POSTED_DATE_RUN_BUDGET,
+    };
+    let filled = 0;
+    try {
+      filled = await backfillPostedDates(client, state);
+    } finally {
+      if (state.browser) {
+        try {
+          await state.browser.close();
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    logger.info(`掲載日 backfill only: ${filled} listing(s) updated`);
+    return 0;
+  }
 
   let orders = await client.listOrdersForMatching();
   // listOrdersForMatching returns EVERY account's orders, which is right for the
@@ -217,10 +460,42 @@ async function main(): Promise<number> {
   const unionTypes = Array.from(
     new Set(criteria.flatMap((c) => c.propertyTypes ?? [])),
   );
+  // Buyer-facing type -> the category LABELS the individual scrapers understand.
+  //
+  // Every scraper filters its own URL categories by EXACT label match against
+  // this list (athome's 売ビル・一棟売マンション page is labelled ビル; suumo has no
+  // アパート category at all). So handing a new order-form label such as
+  // 一棟マンション straight to them makes each one log "No matching categories"
+  // and scrape nothing at all. Widen to the pages that actually carry the stock;
+  // hardFilter still enforces each order's precise type afterwards, so widening
+  // here costs crawl time, never accuracy.
+  const SITE_CATEGORY_LABELS: Record<string, string[]> = {
+    一棟マンション: ["マンション", "ビル"],
+    アパート: ["マンション", "ビル"],
+  };
+  const siteTypes = Array.from(
+    new Set(unionTypes.flatMap((t) => SITE_CATEGORY_LABELS[t] ?? [t])),
+  );
   const requestedTypes =
-    anyOrderWantsEverything || unionTypes.length === 0 ? undefined : unionTypes;
+    anyOrderWantsEverything || siteTypes.length === 0 ? undefined : siteTypes;
+
+  // Same union logic for 買う vs 借りる: an order is one or the other (never
+  // both — see the schema comment on orders.dealType), but a SWEEP covers
+  // every order, so if any order in this run wants "rent" the sweep must
+  // fetch that vertical too, alongside "buy" if any order wants that. Each
+  // is a separate runScraper call per (source, area) below — hardFilter then
+  // routes every scraped listing to only the orders whose dealType it matches.
+  const dealTypesNeeded: Array<"buy" | "rent"> =
+    criteria.length === 0
+      ? ["buy"]
+      : Array.from(new Set(criteria.map((c) => c.dealType ?? "buy")));
+  logger.info(`Deal type(s) for this sweep: ${dealTypesNeeded.join(", ")}`);
+
   logger.info(
-    `Property types for this sweep: ${requestedTypes ? requestedTypes.join(", ") : "(all — at least one order has no type filter)"}`,
+    `Property types for this sweep: ${requestedTypes ? requestedTypes.join(", ") : "(all — at least one order has no type filter)"}` +
+      (requestedTypes && siteTypes.length !== unionTypes.length
+        ? ` (widened from 希望: ${unionTypes.join(", ")})`
+        : ""),
   );
 
   const total: IngestSummary = {
@@ -231,6 +506,13 @@ async function main(): Promise<number> {
   };
   let jobsOk = 0;
   let jobsFailed = 0;
+  // Shared browser + remaining budget for 掲載日 lookups (see enrichPostedDates).
+  const dateState: { browser: Browser | null; page: Page | null; budgetLeft: number } = {
+    browser: null,
+    page: null,
+    budgetLeft: POSTED_DATES_ENABLED ? POSTED_DATE_RUN_BUDGET : 0,
+  };
+  let datesFilled = 0;
   const failedSources: string[] = [];
   const okSources: string[] = [];
 
@@ -255,11 +537,24 @@ async function main(): Promise<number> {
     for (const areaCode of areaCodes) {
       const jobStart = Date.now();
       try {
-        const result = await runScraper(source, areaCode, requestedTypes);
-        const scraped = result.listings ?? [];
+        // One runScraper call per needed dealType (almost always just ["buy"]
+        // today) — a single call only ever fetches one vertical. SEQUENTIAL,
+        // like the areaCode loop around this one: concurrent Chrome launches
+        // exhaust memory on this machine and on constrained CI runners.
+        const results = [];
+        for (const dt of dealTypesNeeded) {
+          results.push(await runScraper(source, areaCode, requestedTypes, dt));
+        }
+        const scraped = results.flatMap((r) => r.listings ?? []);
 
         // Reuse the existing matcher — do not reimplement matching here.
         const { passed, stats } = hardFilter(scraped, criteria);
+
+        // 掲載日 only for listings that survived matching: fetching a detail page
+        // for a listing nobody asked for would be the most wasteful thing in the
+        // whole run.
+        const dateResult = await enrichPostedDates(client, source, passed, dateState);
+        datesFilled += dateResult.filled;
 
         // Only listings that satisfy at least one order are persisted, which is
         // what the browser flow stored too. With zero orders hardFilter passes
@@ -310,7 +605,8 @@ async function main(): Promise<number> {
         logger.info(
           `[${label}/${areaCode}] scraped=${scraped.length} passed=${stats.passed} ` +
             `inserted=${summary.listingsInserted} skipped=${summary.listingsSkipped} ` +
-            `matches=${summary.matchesCreated} matchesSkipped=${summary.matchesSkipped}` +
+            `matches=${summary.matchesCreated} matchesSkipped=${summary.matchesSkipped} ` +
+            `掲載日=${dateResult.filled}` +
             (summary.matchesSkipped > 0 && summary.matchSkipReasons
               ? `[dup=${summary.matchSkipReasons.duplicate ?? 0} ` +
                 `noOwner=${summary.matchSkipReasons.noOwner ?? 0} ` +
@@ -333,11 +629,53 @@ async function main(): Promise<number> {
     else if (sourceFailed > 0) failedSources.push(source);
   }
 
+  // Spend whatever detail-page budget the sweep left over on listings already
+  // stored without a 掲載日. Runs after the sweep so fresh inventory always gets
+  // first claim on the budget.
+  try {
+    datesFilled += await backfillPostedDates(client, dateState);
+  } catch (err) {
+    logger.warn(`掲載日 backfill failed: ${(err as Error).message}`);
+  }
+
+  // Attribute the run. A run scoped to one order (SCRAPE_ORDER_ID) was dispatched
+  // by a signed-in user and is already stamped with their name by
+  // src/api/scrapeTrigger.ts — overwriting that with "自動" would be a lie. Only
+  // the unscoped nightly sweep needs the automatic label.
+  if (!onlyOrderId && jobsOk > 0 && orders.length > 0) {
+    try {
+      await client.markScrapeRun({
+        orderIds: orders.map((o) => o._id),
+        triggeredBy: AUTOMATIC_TRIGGER_LABEL,
+      });
+      logger.info(
+        `Marked ${orders.length} order(s) as searched by ${AUTOMATIC_TRIGGER_LABEL}`,
+      );
+    } catch (err) {
+      // Bookkeeping only — never fail a successful scrape over it.
+      logger.warn(`Could not record scrape attribution: ${(err as Error).message}`);
+    }
+  }
+
+  // Close the shared 掲載日 browser before reporting, so a leaked Chrome cannot
+  // keep the process alive after the summary is printed.
+  if (dateState.browser) {
+    try {
+      await dateState.browser.close();
+    } catch {
+      /* already gone */
+    }
+  }
+
   const mins = Math.round((Date.now() - startedAt) / 6000) / 10;
   logger.info(
     `Cron scrape finished in ${mins}min — jobs ok=${jobsOk} failed=${jobsFailed} | ` +
       `listings inserted=${total.listingsInserted} skipped=${total.listingsSkipped} | ` +
-      `matches created=${total.matchesCreated} skipped=${total.matchesSkipped}`,
+      `matches created=${total.matchesCreated} skipped=${total.matchesSkipped} | ` +
+      `掲載日 resolved=${datesFilled}` +
+      (POSTED_DATES_ENABLED
+        ? ` (detail budget used ${POSTED_DATE_RUN_BUDGET - dateState.budgetLeft}/${POSTED_DATE_RUN_BUDGET})`
+        : " (disabled via SCRAPE_POSTED_DATES=0)"),
   );
   if (failedSources.length > 0) {
     logger.warn(`Sources with no successful job: ${failedSources.join(", ")}`);

@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -9,6 +9,16 @@ const CATEGORY_MAP: Record<string, string> = {
   "一戸建て": "house",
   "マンション": "mansion",
   "収益物件": "mansion",
+  // /investment is a curated landing page over ordinary マンション listings
+  // (its 6 featured cards all resolved live to "中古マンション" detail pages) —
+  // confirmed NOT a real 4th category, matching the prior audit. But
+  // /buy/search_result?type[]=4 ("住宅以外の建物全部") and type[]=5 ("住宅以外
+  // の建物一部") are genuine, unlinked-from-nav search types on the SAME
+  // /buy/search_result backend the site itself uses — found by probing type[]
+  // values live. A sample fetch for pref[]=13&type[]=4&type[]=5 returned real
+  // listings whose own image alt text reads e.g. "店舗 北区田端３丁目 ...",
+  // "ビル 中野区中央５丁目 ...", "店舗付住宅 豊島区上池袋１丁目 ...".
+  "ビル": "invest",
 };
 
 // asahi-jutaku.co.jp keys its area search by romanized ward/city slug, not by
@@ -124,7 +134,116 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
   return JSON.parse(raw);
 }
 
-export async function scrapeAsahi(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+// /buy/search_result rows for type[]=4/5 use the same .SearchResult tr / cellNN
+// layout as the residential search, but with two differences confirmed live:
+// (1) cell02's <img alt> carries the site's own real type label as its first
+// token (e.g. "店舗 北区田端３丁目 ..."), which the residential extractor has
+// no equivalent for and had to guess at via isMansion; (2) cell06 area figures
+// are explicit .LandValue / .FloorValue spans instead of a single ambiguous
+// number, so there's no need to infer which figure is which.
+async function extractInvestListings(page: any, propertyType: string): Promise<PropertyListing[]> {
+  const raw = await page.evaluate(new Function("propertyType", `
+    var items = Array.from(document.querySelectorAll(".SearchResult tr")).filter(function(tr) {
+      return tr.querySelector(".cell03");
+    });
+    var results = [];
+
+    items.forEach(function(el) {
+      if (!el) return;
+      var linkEl = el.querySelector('.cell03 a[href*="/buy/detail/"]');
+      var url = linkEl ? linkEl.getAttribute("href") : null;
+      if (url && !url.startsWith("http")) url = "https://www.asahi-jutaku.co.jp" + (url.startsWith("/") ? "" : "/") + url;
+
+      var imgEl = el.querySelector(".cell02 img[alt]");
+      var altText = imgEl ? (imgEl.getAttribute("alt") || "") : "";
+      var realType = (altText.match(/^([^\\s]+)/) || [])[1] || "";
+      // 住宅以外の建物全部/一部 shouldn't surface raw land, but guard anyway —
+      // land is a different product, already covered by the 土地 typePath.
+      if (/土地|宅地|売地|用地/.test(realType)) return;
+
+      var text = el.textContent || "";
+      var price = 0;
+      var okuMatch = text.match(/([\\d,]+(?:\\.\\d+)?)億/);
+      var manMatch = text.match(/([\\d,]+(?:\\.\\d+)?)万/);
+      if (okuMatch || manMatch) {
+        var oku = okuMatch ? parseFloat(okuMatch[1].replace(/,/g, "")) * 10000 : 0;
+        var man = manMatch ? parseFloat(manMatch[1].replace(/,/g, "")) : 0;
+        price = oku + man;
+      }
+
+      // .cell03's <a> is literally "BuildingName<br>Address" — textContent
+      // collapses the <br> with no separator, so a whole-row regex greedily
+      // grabs the building name too whenever it's the only "区" in the text
+      // (confirmed live: "コスモプレイス田端　路面店舗北区田端３丁目" came out
+      // as one string). Split the anchor's own innerHTML on <br> instead.
+      var address = "";
+      if (linkEl) {
+        var linkParts = linkEl.innerHTML.split(/<br\\s*\\/?>/i);
+        if (linkParts.length > 1) {
+          address = linkParts[linkParts.length - 1].replace(/<[^>]+>/g, "").replace(/\\s+/g, "").trim();
+        }
+      }
+
+      var station = "";
+      var walkMinutes = null;
+      var stM = text.match(/([^\\s]+駅)/);
+      if (stM) station = stM[1];
+      var wkM = text.match(/徒歩(\\d+)分/);
+      if (wkM) walkMinutes = parseInt(wkM[1], 10);
+
+      var landEl = el.querySelector(".LandValue");
+      var floorEl = el.querySelector(".FloorValue");
+      var landSize = landEl ? parseFloat((landEl.textContent || "").replace(/,/g, "")) : null;
+      var floorArea = floorEl ? parseFloat((floorEl.textContent || "").replace(/,/g, "")) : null;
+      if (landSize !== null && isNaN(landSize)) landSize = null;
+      if (floorArea !== null && isNaN(floorArea)) floorArea = null;
+
+      var ward = "";
+      var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
+        .replace(/^[^\\s]{1,4}郡/, "")
+        .match(/^(.{1,6}?[市区])/)
+        || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+      if (wm) ward = wm[1];
+
+      var area = floorArea !== null ? floorArea : (landSize || 0);
+
+      if (address && price) {
+        results.push({
+          address: address,
+          ward: ward,
+          price: price,
+          area: area,
+          landSize: landSize || undefined,
+          floorArea: floorArea || undefined,
+          source: "asahi",
+          url: url || undefined,
+          station: station || undefined,
+          walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
+          propertyType: propertyType,
+          description: realType || undefined,
+        });
+      }
+    });
+
+    return JSON.stringify(results);
+  `), propertyType);
+  return JSON.parse(raw);
+}
+
+export async function scrapeAsahi(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Confirmed live: asahi-jutaku.co.jp has NO 賃貸 (rental) vertical of its
+  // own. Every /rent* path 302-redirects to /contents/404, and the site's own
+  // "住まいを借りる" (rent a home) nav entry loads a page whose own text says
+  // outright: "（このコーナーは、不動産サイト「at home web」へリンクいたします。）"
+  // — this section links out to athome.co.jp — and every one of its area
+  // links resolves to an athome.co.jp/bklist?... URL, confirmed live for the
+  // Tokyo entry too. athome.co.jp is already a separately-scraped portal in
+  // this codebase; asahi itself never renders a single rental listing of its
+  // own, so there is nothing here to scrape independently of that site.
+  if (dealType === "rent") {
+    return { listings: [], source: "asahi", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -138,17 +257,71 @@ export async function scrapeAsahi(areaCode: string, filterTypes?: string[]): Pro
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
+    // Only the residential typePaths (land/house/mansion) need the romanized
+    // slug — "invest" hits /buy/search_result directly with the numeric
+    // areaCode via area[]=, the same param the site's own area-change modal
+    // uses, so it isn't gated on the 23-ward slug table below.
     const slug = CODE_TO_SLUG[areaCode];
-    if (!slug) {
-      logger.info(`[Asahi Scraper] No known area slug for code ${areaCode}, skipping (asahi only covers Tokyo's 23 wards)`);
-      return { listings: [], source: "asahi", areaCode, scrapedAt: Date.now(), count: 0 };
-    }
 
     const typesToScrape = filterTypes?.length ? filterTypes : ["土地"];
 
     for (const type of typesToScrape) {
       const typePath = CATEGORY_MAP[type];
       if (!typePath) continue;
+
+      if (typePath === "invest") {
+        let currentPage = 1;
+        let hasNextPage = true;
+
+        while (hasNextPage) {
+          // type[]=4 (住宅以外の建物全部) + type[]=5 (住宅以外の建物一部) — the
+          // whole-building/sectional split confirmed live via /buy/search_result
+          // titles ("住宅以外の建物全部 住宅以外の建物一部 検索結果"). Neither
+          // is linked from any nav; found by probing type[] values directly.
+          const url = `https://www.asahi-jutaku.co.jp/buy/search_result?pref[]=13&area[]=${areaCode}&type[]=4&type[]=5&limit=100&page=${currentPage}`;
+          logger.info(`[Asahi Scraper] Fetching: ${url}`);
+
+          await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+          await new Promise((r) => setTimeout(r, 1500));
+
+          const rowCount = await page.evaluate(() => document.querySelectorAll(".SearchResult tr").length);
+          if (rowCount === 0) {
+            logger.info(`[Asahi Scraper] No ビル listings on page ${currentPage}`);
+            break;
+          }
+
+          const listings = await extractInvestListings(page, type);
+          logger.info(`[Asahi Scraper] Extracted ${listings.length} ビル listings from page ${currentPage}`);
+
+          let addedCount = 0;
+          for (const item of listings) {
+            const sig = `${item.address}-${item.price}-${item.area}`;
+            if (!seenSignatures.has(sig)) {
+              seenSignatures.add(sig);
+              allListings.push(item);
+              addedCount++;
+            }
+          }
+
+          if (addedCount === 0) break;
+
+          const hasNextPageLink = await page.evaluate((next) => {
+            return Array.from(document.querySelectorAll(".pager_view a")).some((a) => a.textContent?.trim() === String(next));
+          }, currentPage + 1);
+
+          if (hasNextPageLink && currentPage < config.maxPagesPerSite) {
+            currentPage++;
+          } else {
+            hasNextPage = false;
+          }
+        }
+        continue;
+      }
+
+      if (!slug) {
+        logger.info(`[Asahi Scraper] No known area slug for code ${areaCode}, skipping ${type} (asahi only covers Tokyo's 23 wards)`);
+        continue;
+      }
 
       let currentPage = 1;
       let hasNextPage = true;

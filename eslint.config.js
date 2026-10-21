@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // 'dist' alone only matched the root build output; scraper-service has its
+  // own, and linting generated .d.ts files reports errors nobody can fix.
+  globalIgnores(['dist', '**/dist/**', '.next']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

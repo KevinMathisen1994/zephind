@@ -1,4 +1,4 @@
-import { computeMatchScore, normalizeWard } from "../convex/lib/scoring.js";
+import { computeMatchScore, normalizeWard } from "../scraper-service/src/lib/scoring.js";
 
 const CY = 2026; // pin "current year" so build-age tests are stable
 

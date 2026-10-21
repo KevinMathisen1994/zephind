@@ -2,7 +2,7 @@ name: Scheduled scrape
 
 # Nightly portal sweep. The browser UI used to be the only thing that persisted
 # scrape results; this run has no browser, so scraper-service/src/cli.ts writes
-# to Convex itself through the secret-guarded functions in convex/ingest.js.
+# to the backend itself through the secret-guarded /api/ingest routes.
 
 on:
   schedule:
@@ -80,7 +80,7 @@ jobs:
 
       - name: Run scrape
         env:
-          CONVEX_URL: ${{ secrets.CONVEX_URL }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
           SCRAPER_INGEST_SECRET: ${{ secrets.SCRAPER_INGEST_SECRET }}
           # Passed as env rather than argv so a dispatch input cannot inject shell.
           # Empty string falls through to the CLI's defaults (all sources, and

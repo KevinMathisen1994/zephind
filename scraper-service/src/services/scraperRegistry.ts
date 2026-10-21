@@ -58,27 +58,32 @@ export async function runScraper(
   source: string,
   code: string,
   requestedTypes?: string[],
+  // "buy" (default — every existing caller predates rental support) or "rent".
+  // Each scraper either has a real 賃貸 vertical wired up, or short-circuits to
+  // an empty result when asked for "rent" — see the guard at the top of each
+  // not-yet-updated scrapeX function.
+  dealType?: "buy" | "rent",
 ): Promise<ScrapeResult> {
   switch (source) {
-    case "athome":   return await scrapeAtHome(code, requestedTypes);
-    case "rakuten":  return await scrapeRakuten(code, requestedTypes);
-    case "hatomark": return await scrapeHatomark(code, requestedTypes);
-    case "kenbiya":  return await scrapeKenbiya(code, requestedTypes);
-    case "suumo":    return await scrapeSuumo(code, requestedTypes);
-    case "homes":    return await scrapeHomes(code, requestedTypes);
-    case "nomu":     return await scrapeNomu(code, requestedTypes);
-    case "nomu_pro": return await scrapeNomuPro(code, requestedTypes);
-    case "mitsui":   return await scrapeMitsui(code, requestedTypes);
-    case "stepon":         return await scrapeStepon(code, requestedTypes);
-    case "tokyu":          return await scrapeTokyu(code, requestedTypes);
-    case "mizuho":         return await scrapeMizuho(code, requestedTypes);
-    case "mitsubishi_ufj": return await scrapeSumai1(code, requestedTypes);
-    case "odakyu":         return await scrapeOdakyu(code, requestedTypes);
-    case "keio":           return await scrapeKeio(code, requestedTypes);
-    case "haseko":         return await scrapeHaseko(code, requestedTypes);
-    case "daikyo":         return await scrapeDaikyo(code, requestedTypes);
-    case "tokyotatemono":  return await scrapeTokyoTatemono(code, requestedTypes);
-    case "asahi":          return await scrapeAsahi(code, requestedTypes);
+    case "athome":   return await scrapeAtHome(code, requestedTypes, dealType);
+    case "rakuten":  return await scrapeRakuten(code, requestedTypes, dealType);
+    case "hatomark": return await scrapeHatomark(code, requestedTypes, dealType);
+    case "kenbiya":  return await scrapeKenbiya(code, requestedTypes, dealType);
+    case "suumo":    return await scrapeSuumo(code, requestedTypes, dealType);
+    case "homes":    return await scrapeHomes(code, requestedTypes, dealType);
+    case "nomu":     return await scrapeNomu(code, requestedTypes, dealType);
+    case "nomu_pro": return await scrapeNomuPro(code, requestedTypes, dealType);
+    case "mitsui":   return await scrapeMitsui(code, requestedTypes, dealType);
+    case "stepon":         return await scrapeStepon(code, requestedTypes, dealType);
+    case "tokyu":          return await scrapeTokyu(code, requestedTypes, dealType);
+    case "mizuho":         return await scrapeMizuho(code, requestedTypes, dealType);
+    case "mitsubishi_ufj": return await scrapeSumai1(code, requestedTypes, dealType);
+    case "odakyu":         return await scrapeOdakyu(code, requestedTypes, dealType);
+    case "keio":           return await scrapeKeio(code, requestedTypes, dealType);
+    case "haseko":         return await scrapeHaseko(code, requestedTypes, dealType);
+    case "daikyo":         return await scrapeDaikyo(code, requestedTypes, dealType);
+    case "tokyotatemono":  return await scrapeTokyoTatemono(code, requestedTypes, dealType);
+    case "asahi":          return await scrapeAsahi(code, requestedTypes, dealType);
     default:         throw new Error(`Unknown source: ${source}`);
   }
 }

@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -213,7 +213,18 @@ async function extractListings(page: any, propertyType: string, typePath: string
   return JSON.parse(raw);
 }
 
-export async function scrapeHaseko(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeHaseko(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Confirmed live: haseko-chukai.com has NO 賃貸 (rental) vertical at all —
+  // checked the homepage top nav, the footer nav, and /sitemap.html; every
+  // link is under /buy/ (中古マンション購入), /sell/ (売却), or /services/
+  // (after-sale support for owners). No /rent/, /chintai/, or 賃貸 link
+  // exists anywhere on the site. This is a pure resale-mansion brokerage
+  // brand with no rental listing business, not a scraper gap — leave this
+  // guard in place.
+  if (dealType === "rent") {
+    return { listings: [], source: "haseko", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],

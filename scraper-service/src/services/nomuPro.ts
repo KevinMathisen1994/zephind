@@ -1,10 +1,13 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
 
 
 // Area code -> pref/ward code for nomu-pro
+// See the comment at its one use below for why this isn't config.maxPagesPerSite.
+const NOMU_PRO_MAX_PAGES = 20;
+
 const CODE_TO_PREF_URL: Record<string, string> = {
   "13101": "tokyo/13101", "13102": "tokyo/13102", "13103": "tokyo/13103",
   "13104": "tokyo/13104", "13105": "tokyo/13105", "13106": "tokyo/13106",
@@ -183,7 +186,14 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
   return JSON.parse(raw);
 }
 
-export async function scrapeNomuPro(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeNomuPro(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Rental support not yet wired up for this site — return empty rather
+  // than silently mislabeling a for-sale listing as a rental one. Remove
+  // this guard once this file scrapes its site's real 賃貸 vertical.
+  if (dealType === "rent") {
+    return { listings: [], source: "nomu_pro", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const prefAndCode = CODE_TO_PREF_URL[areaCode];
   if (!prefAndCode) {
       logger.warn(`[Nomu Pro Scraper] No mapping for ward code ${areaCode}, skipping`);
@@ -255,7 +265,13 @@ export async function scrapeNomuPro(areaCode: string, filterTypes?: string[]): P
         return false;
       });
 
-      if (nextButtonVisible && currentPage < config.maxPagesPerSite) {
+      // This one URL returns every property type mixed together (no per-type
+      // filter exists), so the shared config.maxPagesPerSite budget — sized
+      // for scrapers that page through ONE type per request — would only
+      // cover a fraction of a single type's real listings here. Give it a
+      // dedicated, higher cap instead of raising the shared default for every
+      // other (type-scoped) scraper.
+      if (nextButtonVisible && currentPage < NOMU_PRO_MAX_PAGES) {
         currentPage++;
       } else {
         hasNextPage = false;

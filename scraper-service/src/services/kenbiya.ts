@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -67,11 +67,15 @@ const WARD_TO_SLUG: Record<string, string> = {
 async function extractListings(page: any): Promise<PropertyListing[]> {
   return await page.evaluate(() => {
     const results: PropertyListing[] = [];
-    const items = document.querySelectorAll("li.item");
+    const items = document.querySelectorAll("li.js-repeaterListCard, li.item");
 
     items.forEach((el) => {
       // Title
-      const title = el.querySelector(".subTitle")?.textContent?.trim() || "";
+      const title =
+        el.querySelector(".main h3")?.textContent?.trim() ||
+        el.querySelector(".subTitle")?.textContent?.trim() ||
+        el.querySelector("h3")?.textContent?.trim() ||
+        "";
 
       // Price: handle "X億Y,YYY万円" or "X,XXX万円" format
       let price: number | null = null;
@@ -90,51 +94,76 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         }
       }
 
-      // Land area
+      // Address & station
+      let address = "";
+      let station = "";
+      let walkMinutes: number | null = null;
+
+      // In the new markup, .main > ul > li contains lines for title, address, station
+      const mainLis = el.querySelectorAll(".main ul > li");
+      if (mainLis.length > 0) {
+        mainLis.forEach((li) => {
+          const txt = li.textContent?.trim() || "";
+          if (li.querySelector("h3") || txt.startsWith("■") || txt.includes("★")) return;
+          // Address line usually starts with or contains 都, 府, 県, or a ward/city
+          if (!address && (txt.includes("都") || txt.includes("県") || txt.includes("区") || txt.includes("市"))) {
+            address = txt;
+          } else if (!station && (txt.includes("駅") || txt.includes("歩"))) {
+            const stM = txt.match(/([^\s]+駅)/);
+            if (stM) station = stM[1];
+            const wkM = txt.match(/歩\s*(\d+)\s*分/);
+            if (wkM) walkMinutes = parseInt(wkM[1]);
+          }
+        });
+      }
+
+      // Fallback to legacy .trafficInfo
+      if (!address || !station) {
+        const trafficLis = el.querySelectorAll(".trafficInfo li");
+        if (!address && trafficLis.length > 0) {
+          address = trafficLis[0]?.textContent?.trim() || "";
+        }
+        if (!station && trafficLis.length > 1) {
+          const tText = trafficLis[1]?.textContent?.trim() || "";
+          const stM = tText.match(/([^\s]+駅)/);
+          if (stM) station = stM[1];
+          const wkM = tText.match(/歩\s*(\d+)\s*分/);
+          if (wkM) walkMinutes = parseInt(wkM[1]);
+        }
+      }
+
+      // Land area / building area
       let area: number | null = null;
       const landEl = el.querySelector(".land .num");
       if (landEl) {
         const aText = landEl.textContent?.trim() || "";
         const aM = aText.match(/([\d,.]+)/);
         if (aM) area = parseFloat(aM[1].replace(/,/g, ""));
-      }
-
-      // Address & station from trafficInfo
-      const trafficLis = el.querySelectorAll(".trafficInfo li");
-      let address = "";
-      let station = "";
-      let walkMinutes: number | null = null;
-
-      if (trafficLis.length > 0) {
-        address = trafficLis[0]?.textContent?.trim() || "";
-      }
-      if (trafficLis.length > 1) {
-        const tText = trafficLis[1]?.textContent?.trim() || "";
-        const stM = tText.match(/([^\s]+駅)/);
-        if (stM) station = stM[1];
-        const wkM = tText.match(/歩\s*(\d+)\s*分/);
-        if (wkM) walkMinutes = parseInt(wkM[1]);
+      } else {
+        // New markup has lines like "専:19.12m²" or "土:100.5m²"
+        const cardText = el.textContent || "";
+        const areaMatch = cardText.match(/(?:専|土|延|床|面積)?[:：]?\s*([\d,.]+)\s*(?:m|㎡|平米)/);
+        if (areaMatch) {
+          area = parseFloat(areaMatch[1].replace(/,/g, ""));
+        }
       }
 
       // Determine ward from address
       let ward = "";
-      // Strip the prefecture first: /(.{2,4}[区市])/ scanned over
-      // "東京都杉並区…" matches "京都杉並区" — it is greedy from the left and
-      // the 東 lands outside the capture. This is the source of the corrupt
-      // ward values ("京都町田市") seen in the listings table.
-      const wm = address.replace(/^東京都|^北海道|^[^\s]{2,3}[府県]/, "")
-        // Drop a 郡 (county) prefix — the municipality follows it,
-        // e.g. 西多摩郡瑞穂町 -> 瑞穂町.
-        .replace(/^[^\s]{1,4}郡/, "")
-        // 市/区 BEFORE 町/村: one combined [区市町村] class matches 武蔵村
-        // inside 武蔵村山市. The 町/村 fallback covers 島嶼部 (大島町, 八丈町,
-        // 檜原村, 小笠原村) and 郡部, which previously extracted no ward at all.
-        .match(/^(.{1,6}?[市区])/)
-        || address.replace(/^東京都|^北海道|^[^\s]{2,3}[府県]/, "").replace(/^[^\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
+      const wm =
+        address.replace(/^東京都|^北海道|^[^\s]{2,3}[府県]/, "")
+          .replace(/^[^\s]{1,4}郡/, "")
+          .match(/^(.{1,6}?[市区])/) ||
+        address.replace(/^東京都|^北海道|^[^\s]{2,3}[府県]/, "")
+          .replace(/^[^\s]{1,4}郡/, "")
+          .match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
       // Detail URL
-      const link = el.querySelector("a.link");
+      const link =
+        el.querySelector("a[href*='/re_']") ||
+        el.querySelector("a.link") ||
+        el.querySelector("a");
       let url = "";
       if (link) {
         const href = link.getAttribute("href") || "";
@@ -142,23 +171,26 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       }
 
       if (!price && !address) return;
+      if (!address.startsWith("東京都")) return;
 
-      // Detect property type from icon
+      // Detect property type from icon or link
       let propertyType = "土地";
-      const iconEl = el.querySelector(".photo .icon") as HTMLImageElement | null;
-      if (iconEl) {
-        const src = iconEl.src || "";
-        if (src.includes("cate_APT") || src.includes("cate_MAN")) propertyType = "マンション";
-        else if (src.includes("cate_BUL")) propertyType = "ビル";
-        else if (src.includes("cate_LND")) propertyType = "土地";
-        else if (src.includes("cate_HOU") || src.includes("cate_KOD") || src.includes("cate_HSE") || src.includes("house")) propertyType = "一戸建て";
-      }
+      const iconEl = el.querySelector(".cate_icon, .photo .icon") as HTMLImageElement | null;
+      const src = (iconEl?.src || link?.getAttribute("href") || "") + " " + (iconEl?.alt || "");
+      if (src.includes("cate_APT") || src.includes("アパート")) propertyType = "アパート";
+      else if (src.includes("cate_MAN") || src.includes("cate_ONE") || src.includes("マンション")) propertyType = "マンション";
+      else if (src.includes("cate_BUL") || src.includes("ビル")) propertyType = "ビル";
+      else if (src.includes("cate_LND") || src.includes("土地")) propertyType = "土地";
+      else if (src.includes("cate_HOU") || src.includes("cate_KOD") || src.includes("cate_HSE") || src.includes("一戸建") || src.includes("戸建")) propertyType = "一戸建て";
+
       // Fallback based on title/description text keywords
       const fullText = (title + " " + address).toLowerCase();
       if (propertyType === "土地") {
         if (fullText.includes("戸建") || fullText.includes("テラスハウス") || fullText.includes("一戸建")) {
           propertyType = "一戸建て";
-        } else if (fullText.includes("マンション") || fullText.includes("アパート")) {
+        } else if (fullText.includes("アパート")) {
+          propertyType = "アパート";
+        } else if (fullText.includes("マンション")) {
           propertyType = "マンション";
         }
       }
@@ -168,9 +200,6 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         ward,
         price: price || 0,
         area: area || 0,
-        // Was defaulting to 0 when unparsed. hardFilter's landSizeMin check
-        // only skips on null/undefined, not 0, so an unparsed land size read
-        // as "confirmed 0m²" and was hard-rejected by any such filter.
         landSize: area || undefined,
         source: "kenbiya",
         station: station || undefined,
@@ -185,7 +214,12 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
   });
 }
 
-export async function scrapeKenbiya(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeKenbiya(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Rental support not yet wired up for this site
+  if (dealType === "rent") {
+    return { listings: [], source: "kenbiya", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const wardName = CODE_TO_WARD[areaCode] || areaCode;
   const wardSlug = WARD_TO_SLUG[wardName];
   logger.info(`[Kenbiya Scraper] Starting scrape`, { ward: wardName, areaCode });
@@ -206,80 +240,46 @@ export async function scrapeKenbiya(areaCode: string, filterTypes?: string[]): P
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    let hasMore = true;
-    const maxPages = 5;
+    const maxPages = 4; // 50 items per page, up to 200 items
 
-    for (let p = 0; p < maxPages && hasMore; p++) {
-      if (p === 0) {
-        // The /pp0/ prefix (= "all property types") is REQUIRED. Without it,
-        // https://www.kenbiya.com/s/tokyo/mitaka-shi/ 302s to
-        // https://www.kenbiya.com/pp0/s/tokyo/ and silently drops the area, so
-        // every ward/city scraped the same all-Tokyo page. With it,
-        // /pp0/s/tokyo/mitaka-shi/ loads 「東京都三鷹市の収益物件一覧」 as expected.
-        const baseUrl = `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/`;
-        logger.info(`[Kenbiya Scraper] Loading page for ${wardName} (batch ${p + 1})...`);
+    for (let p = 0; p < maxPages; p++) {
+      const pageUrl = p === 0
+        ? `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/`
+        : `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/n-${p + 1}/`;
 
-        try {
-          await page.goto(baseUrl, { waitUntil: "networkidle2", timeout: 60000 });
-        } catch {
-          logger.warn(`[Kenbiya Scraper] Failed to load ${baseUrl}`);
-          break;
-        }
-      } else {
-        logger.info(`[Kenbiya Scraper] Processing next page for ${wardName} (batch ${p + 1})...`);
-      }
+      logger.info(`[Kenbiya Scraper] Loading page ${p + 1} for ${wardName}: ${pageUrl}`);
 
       try {
-        await page.waitForSelector("li.item", { timeout: 15000 });
+        await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
       } catch {
-        logger.warn(`[Kenbiya Scraper] No listings on page for ${wardName}`);
+        logger.warn(`[Kenbiya Scraper] Failed to load ${pageUrl}`);
         break;
       }
 
-      await new Promise((r) => setTimeout(r, 2000));
-
-      // Scroll to bottom repeatedly to trigger lazy loading
-      for (let s = 0; s < 5; s++) {
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await new Promise((r) => setTimeout(r, 1500));
+      try {
+        await page.waitForSelector("li.js-repeaterListCard, li.item", { timeout: 10000 });
+      } catch {
+        logger.warn(`[Kenbiya Scraper] No listings on page ${p + 1} for ${wardName}`);
+        break;
       }
 
+      await new Promise((r) => setTimeout(r, 1000));
+
       const listings = await extractListings(page);
-      logger.info(`[Kenbiya Scraper] Found ${listings.length} land listings on page`);
+      logger.info(`[Kenbiya Scraper] Found ${listings.length} listings on page ${p + 1}`);
+
+      if (listings.length === 0) break;
 
       // Dedup by URL
       const existingUrls = new Set(allListings.map((l) => l.url));
       const newListings = listings.filter((l) => !existingUrls.has(l.url));
       allListings.push(...newListings);
 
-      // Check for "次の50件" button
-      hasMore = await page.evaluate(() => {
-        const nextBtn = Array.from(document.querySelectorAll("a")).find(
-          (a) => a.textContent?.trim() === "次の50件"
-        );
-        return !!nextBtn && nextBtn.style.display !== "none";
-      });
-
-      if (hasMore) {
-        logger.info(`[Kenbiya Scraper] "次の50件" found, clicking...`);
-        try {
-          await page.evaluate(() => {
-            const btn = Array.from(document.querySelectorAll("a")).find(
-              (a) => a.textContent?.trim() === "次の50件"
-            );
-            if (btn) btn.click();
-          });
-          await new Promise((r) => setTimeout(r, 3000));
-          await page.waitForSelector("li.item", { timeout: 10000 });
-        } catch {
-          logger.warn(`[Kenbiya Scraper] Failed to load next batch`);
-          break;
-        }
-      }
+      if (newListings.length === 0) break;
     }
 
     logger.info(
-      `[Kenbiya Scraper] Scrape complete: ${allListings.length} land listings for ${wardName}`
+      `[Kenbiya Scraper] Scrape complete: ${allListings.length} listings for ${wardName}`
     );
     allListings.slice(0, 5).forEach((l, i) => {
       logger.info(

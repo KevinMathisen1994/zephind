@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import type { PropertyListing, ScrapeResult } from "../types";
@@ -49,6 +49,15 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       if (url && !url.startsWith("http")) url = "https://www.mizuho-re.co.jp" + (url.startsWith("/") ? "" : "/") + url;
 
       var text = el.textContent || "";
+      // みずほ prints a NEW badge (li.category-icon-01) but never a date — the
+      // date is only on the detail page, fetched centrally by cli.ts.
+      var isNew = false;
+      var badges = Array.prototype.slice.call(el.querySelectorAll(".category-list li, .category-list span"));
+      for (var b = 0; b < badges.length; b++) {
+        var bt = ((badges[b].textContent) || "").replace(/\\s+/g, "");
+        if (/^(NEW|新着)$/i.test(bt)) { isNew = true; break; }
+      }
+
       var price = 0;
       var okuMatch = text.match(/([\\d,]+(?:\\.\\d+)?)億/);
       var manMatch = text.match(/([\\d,]+(?:\\.\\d+)?)万/);
@@ -79,7 +88,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var aM = text.match(/([\\d,.]+)\\s*(?:㎡|m)/);
       if (aM) {
         var parsed = parseFloat(aM[1].replace(/,/g, ""));
-        if (propertyType === "Mansion") floorArea = parsed;
+        // propertyType here is always the caller's Japanese label
+        // ("マンション"), never the English "Mansion" CATEGORY_MAP value —
+        // that comparison never matched, so every mansion's floor size
+        // landed in landSize instead of floorArea.
+        if ((propertyType === "マンション" || propertyType === "収益物件")) floorArea = parsed;
         else landSize = parsed;
       }
 
@@ -99,7 +112,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
-      area = propertyType === "Mansion" ? (floorArea || 0) : (landSize || 0);
+      area = (propertyType === "マンション" || propertyType === "収益物件") ? (floorArea || 0) : (landSize || 0);
 
       if (address && price) {
         results.push({
@@ -114,6 +127,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           propertyType: propertyType,
+          isNew: isNew || undefined,
         });
       }
     });
@@ -123,7 +137,14 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
   return JSON.parse(raw);
 }
 
-export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Promise<ScrapeResult> {
+export async function scrapeMizuho(areaCode: string, filterTypes?: string[], dealType?: "buy" | "rent"): Promise<ScrapeResult> {
+  // Rental support not yet wired up for this site — return empty rather
+  // than silently mislabeling a for-sale listing as a rental one. Remove
+  // this guard once this file scrapes its site's real 賃貸 vertical.
+  if (dealType === "rent") {
+    return { listings: [], source: "mizuho", areaCode, scrapedAt: Date.now(), count: 0 };
+  }
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -151,7 +172,14 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Pr
           const url = `https://www.mizuho-re.co.jp/investors/search/area/all_building/area_${investorsCode}/list/?page=${currentPage}&limit_value=60`;
           logger.info(`[Mizuho Scraper] Fetching (investors/ビル): ${url}`);
 
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+          const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+          const title = await page.title().catch(() => "");
+          if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance")) {
+            const msg = `みずほ不動産販売サイトは現在メンテナンス中です (HTTP ${resp?.status() ?? 503}, ${title})`;
+            logger.warn(`[Mizuho Scraper] ${msg}`);
+            scrapeErrors.push(msg);
+            break;
+          }
           await new Promise((r) => setTimeout(r, 1500));
 
           const itemCount = await page.evaluate(() => document.querySelectorAll(".bukkenItemBox").length);
@@ -208,7 +236,14 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[]): Pr
         const url = `https://www.mizuho-re.co.jp/buyers/search/area/type_${typePath}/pref_13/city_${areaCode}/list/?page=${currentPage}&limit_value=60`;
         logger.info(`[Mizuho Scraper] Fetching: ${url}`);
 
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+        const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        const title = await page.title().catch(() => "");
+        if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance")) {
+          const msg = `みずほ不動産販売サイトは現在メンテナンス中です (HTTP ${resp?.status() ?? 503}, ${title})`;
+          logger.warn(`[Mizuho Scraper] ${msg}`);
+          scrapeErrors.push(msg);
+          break;
+        }
         await new Promise((r) => setTimeout(r, 1500));
 
         const itemCount = await page.evaluate(() => document.querySelectorAll(".bukkenItemBox").length);

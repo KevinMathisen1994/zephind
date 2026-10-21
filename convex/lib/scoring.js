@@ -1,5 +1,5 @@
 /**
- * Deterministic broker-style match scoring.
+ * Deterministic, investment-return-focused match scoring.
  *
  * Pure module: no Convex/network imports, so it can be unit-tested directly
  * with `node`. `convex/evaluate.js` imports `computeMatchScore` and treats its
@@ -8,10 +8,25 @@
  * own text, which made this whole file dead code and produced a score that
  * drifted 10+ points between identical runs.)
  *
+ * THE SCORE ANSWERS "how much can the client earn on this", not "how well does
+ * this match stated preferences" — the two are related but not the same thing,
+ * and conflating them used to mean a listing that ticked every box but was
+ * priced 35% over real market comps could still outscore a genuine bargain.
+ * Requirement fit still matters, but only as a small tie-breaker (see
+ * `fitShare` below) among listings that are otherwise similarly profitable —
+ * deal-breaking preferences (wrong ward/type/over budget/etc) are handled
+ * separately as hard disqualifiers, since a listing the client can't or won't
+ * buy earns nothing regardless of its paper return.
+ *
  * Layers, in the order a broker actually applies them:
  *   1. Hard disqualifiers  -> cap the final score, cannot be compensated for
- *   2. Requirement fit     -> weighted over ONLY what the buyer specified
- *   3. Market quality      -> objective merit vs MLIT comps, walk, yield, amenities
+ *   2. Requirement fit     -> small, secondary weight — a tie-breaker, not the driver
+ *   3. Investment return    -> DOMINANT layer: undervaluation vs MLIT comps and
+ *                              yield are the direct earning signals; walk time,
+ *                              amenities, road width and ward prestige are
+ *                              modifiers on whether that return is realizable
+ *                              (vacancy risk, rebuildability, exit liquidity),
+ *                              not earning signals themselves, so they weigh less
  *   4. Unverifiable fields -> moderate sub-score + explicit flags + a top-end cap
  */
 
@@ -168,6 +183,11 @@ const W = {
   floor: 4,
   elevators: 4,
   totalUnits: 4,
+  // Rental-only (mutually exclusive with price/yield/landSize/roadWidth above
+  // — a listing is never both, see the schema comment on orders.dealType).
+  rent: 25, // mirrors price's weight — the equivalent budget fit for 借りる
+  deposit: 4,
+  keyMoney: 4,
 };
 
 /**
@@ -236,6 +256,39 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
     }
   }
 
+  // --- Rent (借りる — mutually exclusive with price/yield above) -----------
+  if (criteria.rentMax || criteria.rentMin) {
+    if (listing.rent != null) {
+      let s = 1;
+      if (criteria.rentMax) {
+        const r = listing.rent / criteria.rentMax;
+        s = r <= 1 ? 1 : clamp01(1 - (r - 1) * 3);
+        if (r > 1.5) disqualify(`予算を50%超過（${listing.rent}万円/月 / 上限${criteria.rentMax}万円/月）`, 25);
+        else if (r > 1.25) disqualify(`予算を25%超過（${listing.rent}万円/月 / 上限${criteria.rentMax}万円/月）`, 48);
+      }
+      if (criteria.rentMin && listing.rent < criteria.rentMin) {
+        s = Math.min(s, clamp01(0.4 + 0.6 * (listing.rent / criteria.rentMin)));
+      }
+      need("rent", W.rent, s);
+    } else {
+      cannotVerify("rent", W.rent, "賃料が未記載");
+    }
+  }
+  // 敷金/礼金: hardFilter (propertyMatcher.ts) already hard-rejects anything
+  // over the buyer's ceiling before a listing ever reaches scoring, so this is
+  // purely a soft tie-breaker among listings that already passed — lower is
+  // still nicer even when both are under the cap.
+  if (criteria.maxDeposit != null && listing.deposit != null) {
+    need("deposit", W.deposit, clamp01(1 - listing.deposit / (criteria.maxDeposit || 1) * 0.5));
+  }
+  if (criteria.maxKeyMoney != null && listing.keyMoney != null) {
+    need("keyMoney", W.keyMoney, clamp01(1 - listing.keyMoney / (criteria.maxKeyMoney || 1) * 0.5));
+  }
+  if (criteria.petsRequired) {
+    if (listing.petsAllowed != null) need("pets", 6, listing.petsAllowed ? 1 : 0);
+    else cannotVerify("pets", 6, "ペット可否が未記載");
+  }
+
   // --- Property type --------------------------------------------------------
   if (criteria.propertyTypes?.length) {
     if (listing.propertyType) {
@@ -246,8 +299,17 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
       const landListing = ["土地", "用地", "宅地"].some((t) =>
         listing.propertyType.includes(t),
       );
+      // Substring match in BOTH directions. Portals label the same product at
+      // different granularity — a 一棟売マンション is often listed as plain
+      // "マンション" — so a one-way `listing.includes(wanted)` test dropped a
+      // 28-point disqualification on listings the buyer would happily look at.
+      // The scraper's hardFilter is where the strict type decision belongs; this
+      // score is a ranking signal on listings that already passed it.
       const match =
-        criteria.propertyTypes.some((t) => lt.includes(t.toLowerCase())) ||
+        criteria.propertyTypes.some((t) => {
+          const wanted = t.toLowerCase();
+          return lt.includes(wanted) || wanted.includes(lt);
+        }) ||
         (landOrder && landListing);
       need("propertyType", W.propertyType, match ? 1 : 0);
       if (!match)
@@ -357,11 +419,18 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
   }
 
   // ------------------------------------------------------------------ LAYER 3
-  // Objective merit, independent of what the buyer asked for. This is what
-  // differentiates listings that a pre-filter already guaranteed will pass the
-  // stated criteria.
+  // Investment-return signal, independent of what the buyer asked for. This is
+  // now the DOMINANT layer (see fitShare below): the score is meant to answer
+  // "how much can the client earn on this", not just "does it match their
+  // stated preferences". The two heaviest weights below (vsMarket, yieldQuality)
+  // are the direct earning signals — undervaluation is realizable profit on
+  // resale/refinance, yield is realizable income. The rest are modifiers on
+  // whether that paper return is actually realizable (rentability/vacancy risk,
+  // exit liquidity), not earning signals in themselves, so they carry less.
 
-  // Price vs real MLIT ward comps — the single strongest objective signal.
+  // Price vs real MLIT ward comps. Buying below comps IS the return: it is
+  // either instant resale/refinance equity or a lower cost basis under the same
+  // rent roll, i.e. a straightforwardly higher effective yield.
   if (marketAvgPrice && listing.price != null) {
     const r = listing.price / marketAvgPrice;
     // A price far below ward comps is far more often bad data or an encumbrance
@@ -373,7 +442,7 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
       ? 0.55
       : r <= 0.7 ? 1 : r <= 0.85 ? 0.88 : r <= 1.0 ? 0.72 : r <= 1.1 ? 0.55
       : r <= 1.25 ? 0.35 : r <= 1.5 ? 0.18 : 0.05;
-    market.push({ key: "vsMarket", weight: 35, score: s });
+    market.push({ key: "vsMarket", weight: 40, score: s });
     if (suspicious)
       unverified.push(
         `価格が区平均（${marketAvgPrice}万円）の25%未満 — 借地権・再建築不可・持分等の可能性、要確認`,
@@ -385,45 +454,60 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
     else if (r > 1.3) disqualify(`相場比+30%超の割高（${listing.price}万円 / 区平均${marketAvgPrice}万円）`, 72);
   }
 
-  if (listing.walkMinutes != null) {
-    const m = listing.walkMinutes;
-    const s = m <= 3 ? 1 : m <= 5 ? 0.9 : m <= 7 ? 0.8 : m <= 10 ? 0.65 : m <= 15 ? 0.45 : clamp01(0.45 - (m - 15) / 25);
-    market.push({ key: "walkQuality", weight: 25, score: s });
-  }
-
+  // 表面利回り — the direct annual income return. Absent for owner-occupier
+  // product (plain マンション/一戸建て listings rarely publish one), which is
+  // fine: it simply drops out of the weighted average below rather than
+  // scoring as zero.
   if (listing.yield != null) {
     const y = listing.yield;
     const s = y >= 9 ? 1 : y >= 7 ? 0.85 : y >= 5.5 ? 0.65 : y >= 4 ? 0.45 : clamp01(y / 10);
-    market.push({ key: "yieldQuality", weight: 20, score: s });
+    market.push({ key: "yieldQuality", weight: 30, score: s });
   }
 
+  // Walk time is a REALIZATION modifier on the return above, not a return
+  // itself: a far walk means higher vacancy risk / lower achievable rent, which
+  // is exactly how it eats into a paper yield. Weighted well below the two
+  // direct-earning signals.
+  if (listing.walkMinutes != null) {
+    const m = listing.walkMinutes;
+    const s = m <= 3 ? 1 : m <= 5 ? 0.9 : m <= 7 ? 0.8 : m <= 10 ? 0.65 : m <= 15 ? 0.45 : clamp01(0.45 - (m - 15) / 25);
+    market.push({ key: "walkQuality", weight: 15, score: s });
+  }
+
+  // Amenity density is the same kind of modifier: it supports occupancy/rent,
+  // it doesn't generate return on its own.
   if (amenityCount != null) {
     const n = amenityCount;
     const s = n >= 40 ? 1 : n >= 25 ? 0.85 : n >= 12 ? 0.7 : n >= 5 ? 0.5 : 0.3;
-    market.push({ key: "amenities", weight: 12, score: s });
+    market.push({ key: "amenities", weight: 8, score: s });
   }
 
+  // A premium ward is a proxy for capital preservation / exit liquidity — an
+  // investment property is only as good as its resale market.
+  if (listingWard && PREMIUM_WARDS.includes(listingWard)) {
+    market.push({ key: "premiumWard", weight: 12, score: 1 });
+  }
+
+  // Road width mostly matters for land/house rebuildability (資産性), a minor
+  // modifier here rather than a return signal.
   if (listing.roadWidth != null) {
     const w = listing.roadWidth;
-    market.push({ key: "roadQuality", weight: 8, score: w >= 6 ? 1 : w >= 4 ? 0.7 : w >= 2.7 ? 0.4 : 0.15 });
-  }
-
-  if (listingWard && PREMIUM_WARDS.includes(listingWard)) {
-    market.push({ key: "premiumWard", weight: 10, score: 1 });
+    market.push({ key: "roadQuality", weight: 5, score: w >= 6 ? 1 : w >= 4 ? 0.7 : w >= 2.7 ? 0.4 : 0.15 });
   }
 
   // ------------------------------------------------------------------ COMBINE
   const fitPct = weighted(fit);
   const marketPct = weighted(market);
 
-  // How much did the buyer actually specify? A listing that satisfies a
-  // two-field order is NOT as proven as one that satisfies a full spec — and
-  // when an upstream pre-filter already guarantees those two fields pass,
-  // fitPct is 1.0 for every candidate and carries no information at all.
-  // Let objective market quality carry more of the score when criteria are thin.
+  // The score is primarily an earning-potential score (marketPct above), not a
+  // buyer-preference-fit score. Requirement fit still gets a SMALL, secondary
+  // say (a tie-breaker among similarly-profitable listings) — deal-breaking
+  // preferences (wrong ward/type/budget/road width) are handled separately as
+  // hard disqualifiers above and already cap the score regardless of this
+  // share, since a listing the client can't/won't buy earns nothing.
   const specifiedWeight = fit.reduce((a, c) => a + c.weight, 0);
   const specDepth = clamp01(specifiedWeight / 100);
-  const fitShare = 0.35 + 0.35 * specDepth;
+  const fitShare = 0.1 + 0.15 * specDepth;
 
   let pct;
   if (fitPct != null && marketPct != null) pct = fitShare * fitPct + (1 - fitShare) * marketPct;
@@ -434,7 +518,12 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
   // How much do we actually know about this listing? Confidence is not merit:
   // a mostly-blank listing regresses toward the middle rather than riding the
   // few fields that happen to look good.
-  const CORE = ["price", "ward", "propertyType", "walkMinutes", "yield", "roadWidth", "buildYear", "structure"];
+  // Rent listings never carry price/yield/roadWidth (they're buy-only
+  // fields) — using the buy CORE list here would unfairly read every rental
+  // as "mostly blank" regardless of how complete its own listing actually is.
+  const CORE = listing.dealType === "rent"
+    ? ["rent", "ward", "propertyType", "walkMinutes", "managementFee", "buildYear", "structure", "deposit"]
+    : ["price", "ward", "propertyType", "walkMinutes", "yield", "roadWidth", "buildYear", "structure"];
   let known = CORE.filter((k) => listing[k] != null && listing[k] !== "").length;
   if (listing.area != null || listing.landSize != null) known += 1;
   const completeness = known / (CORE.length + 1);

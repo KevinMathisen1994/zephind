@@ -1,7 +1,12 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
-import { api } from "../../convex/_generated/api";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+// Aliased so the call sites below read unchanged. useAction and useMutation
+// are the same hook now: both just POST to the backend.
+import {
+  useApiQuery as useQuery,
+  useApiMutation as useMutation,
+  useApiMutation as useAction,
+} from "../hooks/useApi";
+import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
@@ -15,8 +20,9 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { wardLabelToCode } from "../lib/tokyoWards";
-import { Play, RefreshCw, Database, Trash2, Sliders, ShieldCheck } from "lucide-react";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { Play, RefreshCw, Database, Trash2, Sliders, ShieldCheck, ExternalLink } from "lucide-react";
+import type { Doc, Id } from "../lib/dataModel";
+import { formatJaDateTime } from "../lib/dateFormat";
 
 const SOURCE_LABELS: Record<string, string> = {
   athome: "At Home",
@@ -69,6 +75,14 @@ const RUN_CONCLUSION_LABELS: Record<string, string> = {
   action_required: "要対応",
 };
 
+/**
+ * `coverage` is a jsonb blob (per-field fill rates the health check writes), so
+ * it arrives untyped. One narrowing here beats casting at each use.
+ */
+function coverageOf(h: Doc<"scraperHealth"> | undefined) {
+  return (h?.coverage as { field: string; present: number; pct: number }[] | undefined) ?? [];
+}
+
 export default function AdminPage() {
   const [scrapeSources, setScrapeSources] = useState<Set<string>>(new Set(["athome"]));
   const toggleSource = (src: string) => setScrapeSources(prev => {
@@ -82,16 +96,9 @@ export default function AdminPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [runsError, setRunsError] = useState<string>("");
   const [isLoadingRuns, setIsLoadingRuns] = useState(false);
-  // Capped well below the 8000 the backend allows: this is a reactive
-  // subscription on a shared table the nightly scraper writes to constantly,
-  // so Convex re-sends the WHOLE result set on every insert anywhere in
-  // `listings`, not just ones relevant to this page. Uncapped, that made this
-  // one admin page (likely left open) a major driver of Database I/O usage —
-  // enough to exceed the free-plan limit and get the deployment disabled.
   const listings = useQuery(api.listings.list, { limit: 300 });
   const orders = useQuery(api.orders.list);
   const deleteListing = useMutation(api.listings.remove);
-  // Scraping runs on GitHub Actions now — see convex/scrapeTrigger.js.
   const triggerScrape = useAction(api.scrapeTrigger.triggerScrape);
   const getRecentRuns = useAction(api.scrapeTrigger.getRecentRuns);
 
@@ -119,28 +126,9 @@ export default function AdminPage() {
       .filter(Boolean) as string[];
   }, [targetWards]);
 
-  // The scraper health probe below talks to scraper-service over HTTP, which only
-  // exists on a developer's own machine (VITE_SCRAPER_URL is baked in at build
-  // time as http://localhost:3001). Gating on DEV keeps that URL — and the
-  // buttons that would silently fail on it — out of the deployed app entirely.
   const isDev = import.meta.env.DEV;
   const scraperUrl = isDev ? (import.meta.env.VITE_SCRAPER_URL as string) : "";
 
-  /**
-   * Manual scrape.
-   *
-   * WAS: fetch(scraperUrl + "/scrape"), then this component wrote every returned
-   * listing and match into Convex. Unreachable from anything but the dev laptop.
-   *
-   * NOW: dispatches .github/workflows/scrape.yml through convex/scrapeTrigger.js.
-   * The runner scrapes AND persists (scraper-service/src/cli.ts ->
-   * convex/ingest.js), including matching against every order, so the order
-   * criteria this function used to assemble and forward are no longer needed —
-   * cli.ts reads them from Convex itself.
-   *
-   * This is asynchronous: a successful return means GitHub queued the run, not
-   * that data exists. The table below fills in on its own via useQuery.
-   */
   const handleScrape = async () => {
     setIsScraping(true);
     const codes = targetCodes.length > 0 ? targetCodes : ["13104"];
@@ -161,19 +149,14 @@ export default function AdminPage() {
       }
 
       setScrapeStatus(SCRAPE_STARTED_MESSAGE);
-      // Best-effort: show the run that was just queued. A failure here says
-      // nothing about the dispatch, which already succeeded, so it is swallowed.
       void refreshRuns();
     } catch (err) {
       setScrapeStatus(`エラー: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      // The dispatch is over even though the run is not; leaving the button
-      // spinning would be waiting for an event that never reaches this browser.
       setIsScraping(false);
     }
   };
 
-  /** Recent workflow runs, so the board can show queued / in-progress / done. */
   const refreshRuns = async () => {
     setIsLoadingRuns(true);
     try {
@@ -199,14 +182,6 @@ export default function AdminPage() {
     await deleteListing({ id });
   };
 
-  // Checks scrapers one at a time and persists each result as it lands, so the
-  // board fills in progressively. A single request for all 19 would take
-  // minutes and time out in the browser.
-  //
-  // LOCAL ONLY. This probes scraper-service directly over HTTP; there is no
-  // hosted scraper to probe, so outside `npm run dev` the buttons that call this
-  // are not rendered at all. The board itself still shows the last results any
-  // developer recorded, because those live in Convex (api.scraperHealth.list).
   const runHealthCheck = async (only?: string) => {
     if (!isDev) return;
     const sources = only ? [only] : Object.keys(SOURCE_LABELS);
@@ -240,7 +215,6 @@ export default function AdminPage() {
             });
           }
         } catch (err) {
-          // A failure to even reach the service is itself a reportable status.
           await recordHealth({
             source: src,
             label: SOURCE_LABELS[src] || src,
@@ -279,462 +253,454 @@ export default function AdminPage() {
 
   const manualListings = listings?.filter((l) => [...scrapeSources].some(s => l.source === s)) ?? listings ?? [];
 
-
-
   return (
     <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* ── Header ── */}
+      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs tracking-wider uppercase mb-1">
-            <Sliders className="w-4 h-4 text-emerald-600" />
+          <div className="eyebrow-pill mb-2.5">
+            <Sliders className="w-3.5 h-3.5" />
             システム＆スクレイパー設定
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
             スクレイピング・データ管理
           </h1>
-          <p className="text-base text-slate-500 mt-1 leading-relaxed">
-            全14不動産ポータルからの手動データ収集、バックエンド接続状態のモニタリング
+          <p className="text-sm text-[var(--text-muted)] font-medium mt-1 max-w-xl leading-relaxed">
+            全19不動産ポータルからの手動データ収集、バックエンド接続状態のリアルタイムモニタリング
           </p>
         </div>
       </div>
 
-      {/* Scraper Health Board */}
-      <Card>
-        <CardHeader className="p-5 border-b border-[var(--border-subtle)]">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
-                <ShieldCheck className="w-5 h-5 text-emerald-700" />
-                スクレイパー稼働状況
-              </CardTitle>
-              <p className="text-sm text-slate-500 mt-1">
-                各ポータルのHTML/CSS変更による取得停止を検知します（検査エリア: 杉並区）
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {healthProgress && (
-                <span className="text-sm font-medium text-slate-600">{healthProgress}</span>
-              )}
-              {isDev ? (
-                <Button
-                  onClick={() => runHealthCheck()}
-                  disabled={isCheckingHealth}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
-                >
-                  {isCheckingHealth ? (
-                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />検査中...</>
-                  ) : (
-                    <><ShieldCheck className="w-4 h-4 mr-2" />全スクレイパー検査</>
-                  )}
-                </Button>
-              ) : (
-                <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 leading-relaxed max-w-sm">
-                  検査の実行はローカル開発環境専用です（スクレイパーサービスに直接接続するため）。以下は最後に記録された結果です。
-                </span>
-              )}
-            </div>
+      {/* ── Scraper Health Board ── */}
+      <div className="bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-6 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[var(--border-subtle)]">
+          <div>
+            <h2 className="flex items-center gap-2.5 text-lg font-extrabold text-[var(--text-primary)]">
+              <ShieldCheck className="w-5 h-5 text-[var(--brand)]" />
+              スクレイパー稼働状況
+            </h2>
+            <p className="text-xs text-[var(--text-muted)] font-medium mt-1">
+              各ポータルのHTML/CSS構造変更による取得停止を自動検知します（検査エリア: 杉並区）
+            </p>
           </div>
-
-          <div className="flex flex-wrap gap-2 mt-4">
-            <Badge className="bg-emerald-100 text-emerald-800 font-bold px-3 py-1">
-              正常 {healthSummary.ok}
-            </Badge>
-            <Badge className="bg-amber-100 text-amber-800 font-bold px-3 py-1">
-              要確認 {healthSummary.degraded}
-            </Badge>
-            <Badge className="bg-red-100 text-red-800 font-bold px-3 py-1">
-              停止 {healthSummary.broken}
-            </Badge>
-            <Badge className="bg-slate-100 text-slate-600 font-bold px-3 py-1">
-              未検査 {healthSummary.unchecked}
-            </Badge>
+          <div className="flex items-center gap-2.5">
+            {healthProgress && (
+              <span className="text-xs font-bold text-[var(--text-secondary)]">{healthProgress}</span>
+            )}
+            {isDev ? (
+              <Button
+                onClick={() => runHealthCheck()}
+                disabled={isCheckingHealth}
+                size="sm"
+                className="rounded-xl shadow-xs"
+              >
+                {isCheckingHealth ? (
+                  <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />検査中...</>
+                ) : (
+                  <><ShieldCheck className="w-3.5 h-3.5 mr-1.5" />全スクレイパー検査</>
+                )}
+              </Button>
+            ) : (
+              <span className="text-[11px] font-bold text-[var(--text-muted)] bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl px-3 py-1.5 leading-relaxed max-w-sm">
+                ローカル環境で直接検査実行可能（以下は最新記録です）
+              </span>
+            )}
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {Object.keys(SOURCE_LABELS).map((src) => {
-              const h = healthBySource[src];
-              const isChecking = checkingSource === src;
-              const tone =
-                !h ? "border-slate-200 bg-slate-50"
-                : h.status === "ok" ? "border-emerald-200 bg-emerald-50/60"
-                : h.status === "degraded" ? "border-amber-200 bg-amber-50/60"
-                : "border-red-200 bg-red-50/60";
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="emerald" className="px-3 py-1 font-bold">
+            正常 {healthSummary.ok}
+          </Badge>
+          <Badge variant="amber" className="px-3 py-1 font-bold">
+            要確認 {healthSummary.degraded}
+          </Badge>
+          <Badge variant="destructive" className="px-3 py-1 font-bold">
+            停止 {healthSummary.broken}
+          </Badge>
+          <Badge variant="neutral" className="px-3 py-1 font-bold">
+            未検査 {healthSummary.unchecked}
+          </Badge>
+        </div>
 
-              return (
-                <div key={src} className={`rounded-xl border p-4 ${tone} ${isChecking ? "ring-2 ring-emerald-400" : ""}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-slate-900 truncate">
-                          {SOURCE_LABELS[src]}
-                        </span>
-                        {isChecking ? (
-                          <Badge className="bg-emerald-600 text-white text-xs font-bold">
-                            検査中
-                          </Badge>
-                        ) : !h ? (
-                          <Badge className="bg-slate-200 text-slate-600 text-xs font-bold">未検査</Badge>
-                        ) : h.status === "ok" ? (
-                          <Badge className="bg-emerald-600 text-white text-xs font-bold">正常</Badge>
-                        ) : h.status === "degraded" ? (
-                          <Badge className="bg-amber-500 text-white text-xs font-bold">要確認</Badge>
-                        ) : (
-                          <Badge className="bg-red-600 text-white text-xs font-bold">停止</Badge>
-                        )}
-                      </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+          {Object.keys(SOURCE_LABELS).map((src) => {
+            const h = healthBySource[src];
+            const isChecking = checkingSource === src;
+            const tone =
+              !h ? "border-[var(--border-subtle)] bg-[var(--bg-page-subtle)]"
+              : h.status === "ok" ? "border-emerald-200/80 bg-emerald-50/40"
+              : h.status === "degraded" ? "border-amber-200/80 bg-amber-50/40"
+              : "border-red-200/80 bg-red-50/40";
 
-                      {h && (
-                        <div className="text-xs text-slate-600 mt-1 font-medium">
-                          {h.listingCount}件取得
-                          {h.durationMs != null && ` ・ ${(h.durationMs / 1000).toFixed(1)}秒`}
-                          {h.checkedAt && ` ・ ${new Date(h.checkedAt).toLocaleString("ja-JP")}`}
-                        </div>
-                      )}
-
-                      {h?.issues?.length > 0 && (
-                        <ul className="mt-2 space-y-1">
-                          {h.issues.map((iss: string, i: number) => (
-                            <li key={i} className="text-xs text-slate-700 leading-snug">
-                              ・{iss}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-
-                      {h?.coverage?.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {h.coverage.map((c: { field: string; present: number; pct: number }) => (
-                            <span
-                              key={c.field}
-                              title={`${c.field}: ${c.present}/${h.listingCount}`}
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                c.pct >= 80 ? "bg-emerald-100 text-emerald-700"
-                                : c.pct >= 50 ? "bg-amber-100 text-amber-700"
-                                : "bg-red-100 text-red-700"
-                              }`}
-                            >
-                              {c.field} {c.pct}%
-                            </span>
-                          ))}
-                        </div>
+            return (
+              <div key={src} className={`rounded-2xl border p-4 transition-all ${tone} ${isChecking ? "ring-2 ring-[var(--brand)]" : ""}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-extrabold text-[var(--text-primary)] text-sm truncate">
+                        {SOURCE_LABELS[src]}
+                      </span>
+                      {isChecking ? (
+                        <Badge variant="brand" className="text-xs">
+                          検査中
+                        </Badge>
+                      ) : !h ? (
+                        <Badge variant="neutral" className="text-xs">未検査</Badge>
+                      ) : h.status === "ok" ? (
+                        <Badge variant="emerald" className="text-xs">正常</Badge>
+                      ) : h.status === "degraded" ? (
+                        <Badge variant="amber" className="text-xs">要確認</Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-xs">停止</Badge>
                       )}
                     </div>
 
-                    {isDev && (
-                      <Button
-                        onClick={() => runHealthCheck(src)}
-                        disabled={isCheckingHealth}
-                        className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-2 py-1 h-auto shrink-0"
-                      >
-                        再検査
-                      </Button>
+                    {h && (
+                      <div className="text-xs text-[var(--text-secondary)] mt-1 font-semibold">
+                        {h.listingCount}件取得
+                        {h.durationMs != null && ` ・ ${(h.durationMs / 1000).toFixed(1)}秒`}
+                        {h.checkedAt && ` ・ ${formatJaDateTime(h.checkedAt)}`}
+                      </div>
+                    )}
+
+                    {(h?.issues?.length ?? 0) > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {h.issues!.map((iss: string, i: number) => (
+                          <li key={i} className="text-xs text-[var(--text-secondary)] leading-snug">
+                            ・{iss}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {coverageOf(h).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {coverageOf(h).map((c) => (
+                          <span
+                            key={c.field}
+                            title={`${c.field}: ${c.present}/${h.listingCount}`}
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                              c.pct >= 80 ? "bg-emerald-100 text-emerald-800"
+                              : c.pct >= 50 ? "bg-amber-100 text-amber-800"
+                              : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {c.field} {c.pct}%
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
+
+                  {isDev && (
+                    <Button
+                      onClick={() => runHealthCheck(src)}
+                      disabled={isCheckingHealth}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs font-bold rounded-xl shrink-0 h-8"
+                    >
+                      再検査
+                    </Button>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Scraper Controls */}
-        <Card className="md:col-span-2 bg-white border border-slate-200/80 shadow-sm rounded-2xl">
-          <CardHeader className="p-6 border-b border-slate-100">
-            <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
-              <Play className="w-5 h-5 text-emerald-700" />
+        <div className="md:col-span-2 bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-5 shadow-xs">
+          <div className="pb-3 border-b border-[var(--border-subtle)]">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold text-[var(--text-primary)]">
+              <Play className="w-5 h-5 text-[var(--brand)]" />
               手動スクレイパー実行コントロール
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6 space-y-5">
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">スキャン対象エリア（オーダー登録エリア）</Label>
-              <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                {targetWards.length === 0 ? (
-                  <span className="text-sm text-slate-500 font-medium">
-                    現在オーダーにエリアが指定されていません（デフォルト: 新宿区 13104）
-                  </span>
-                ) : (
-                  targetWards.map((w) => (
-                    <Badge key={w} className="bg-emerald-100 text-emerald-800 text-xs px-3 py-1 font-bold">
-                      {w}
-                    </Badge>
-                  ))
-                )}
-              </div>
-            </div>
+            </h2>
+          </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-700">
-                収集対象ポータルサイト <span className="text-xs text-slate-400 font-normal">（複数選択で並列収集）</span>
-              </Label>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: "athome", label: "At Home" },
-                  { id: "suumo", label: "SUUMO" },
-                  { id: "homes", label: "LIFULL HOME'S" },
-                  { id: "hatomark", label: "鳩マーク" },
-                  { id: "kenbiya", label: "健美家" },
-                  { id: "rakuten", label: "楽天不動産" },
-                  { id: "nomu", label: "ノムコム" },
-                  { id: "nomu_pro", label: "ノムコム・プロ" },
-                  { id: "mitsui", label: "三井のリハウス" },
-                  { id: "stepon", label: "住友不動産ステップ" },
-                  { id: "tokyu", label: "東急リバブル" },
-                  { id: "mizuho", label: "みずほ不動産販売" },
-                  { id: "mitsubishi_ufj", label: "三菱UFJ不動産販売" },
-                  { id: "odakyu", label: "小田急不動産仲介" },
-                  { id: "keio", label: "京王不動産仲介" },
-                  { id: "asahi", label: "朝日住宅" },
-                  { id: "haseko", label: "長谷工不動産" },
-                  { id: "daikyo", label: "大京穴吹不動産" },
-                  { id: "tokyotatemono", label: "東京建物不動産販売" },
-                ].map(({ id, label }) => {
-                  const isChecked = scrapeSources.has(id);
-                  return (
-                    <button
-                      type="button"
-                      key={id}
-                      onClick={() => toggleSource(id)}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all duration-150 ${
-                        isChecked
-                          ? "bg-emerald-700 text-white shadow-sm"
-                          : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <Button
-              onClick={handleScrape}
-              disabled={isScraping}
-              className="w-full h-12 text-base font-bold gap-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-lg shadow-emerald-700/20"
-            >
-              {isScraping ? (
-                <RefreshCw className="w-5 h-5 animate-spin" />
+          <div className="space-y-2">
+            <Label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">スキャン対象エリア（オーダー登録エリア）</Label>
+            <div className="flex flex-wrap gap-2 p-3 bg-[var(--bg-page-subtle)] rounded-2xl border border-[var(--border-subtle)]">
+              {targetWards.length === 0 ? (
+                <span className="text-xs text-[var(--text-muted)] font-medium">
+                  現在オーダーにエリアが指定されていません（デフォルト: 新宿区 13104）
+                </span>
               ) : (
-                <Play className="w-5 h-5" />
+                targetWards.map((w) => (
+                  <Badge key={w} variant="brand" className="px-3 py-1 font-bold">
+                    {w}
+                  </Badge>
+                ))
               )}
-              {isScraping ? "リクエスト送信中..." : "手動スクレイピング開始"}
-            </Button>
+            </div>
+          </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              実行は GitHub Actions 上で行われます。開始後はこの画面を閉じても処理は継続し、
-              結果は Convex に直接保存されて自動的に反映されます。
-            </p>
+          <div className="space-y-2">
+            <Label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+              収集対象ポータルサイト <span className="text-xs text-[var(--text-muted)] font-normal">（複数選択で並列収集）</span>
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "athome", label: "At Home" },
+                { id: "suumo", label: "SUUMO" },
+                { id: "homes", label: "LIFULL HOME'S" },
+                { id: "hatomark", label: "鳩マーク" },
+                { id: "kenbiya", label: "健美家" },
+                { id: "rakuten", label: "楽天不動産" },
+                { id: "nomu", label: "ノムコム" },
+                { id: "nomu_pro", label: "ノムコム・プロ" },
+                { id: "mitsui", label: "三井のリハウス" },
+                { id: "stepon", label: "住友不動産ステップ" },
+                { id: "tokyu", label: "東急リバブル" },
+                { id: "mizuho", label: "みずほ不動産販売" },
+                { id: "mitsubishi_ufj", label: "三菱UFJ不動産販売" },
+                { id: "odakyu", label: "小田急不動産仲介" },
+                { id: "keio", label: "京王不動産仲介" },
+                { id: "asahi", label: "朝日住宅" },
+                { id: "haseko", label: "長谷工不動産" },
+                { id: "daikyo", label: "大京穴吹不動産" },
+                { id: "tokyotatemono", label: "東京建物不動産販売" },
+              ].map(({ id, label }) => {
+                const isChecked = scrapeSources.has(id);
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    onClick={() => toggleSource(id)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      isChecked
+                        ? "bg-[var(--brand)] text-white shadow-xs"
+                        : "bg-white text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-            {scrapeStatus && (
-              <div
-                className={`p-4 rounded-xl text-sm font-semibold leading-relaxed ${
-                  scrapeStatus.startsWith("エラー")
-                    ? "bg-red-50 text-red-700 border border-red-200"
-                    : scrapeStatus.startsWith("スクレイピングを開始")
-                    ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                    : "bg-slate-100 text-slate-800"
-                }`}
-              >
-                {scrapeStatus}
-              </div>
+          <Button
+            onClick={handleScrape}
+            disabled={isScraping}
+            size="lg"
+            className="w-full h-12 text-base font-extrabold gap-2 rounded-2xl shadow-[0_4px_16px_rgba(22,101,3,0.25)]"
+          >
+            {isScraping ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <Play className="w-5 h-5" />
             )}
+            {isScraping ? "リクエスト送信中..." : "手動スクレイピング開始"}
+          </Button>
 
-            {/* Run status. getRecentRuns is an ACTION (Convex queries cannot
-                fetch), so this does NOT update reactively — it is refreshed on
-                demand and once right after a dispatch. */}
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-sm font-bold text-slate-700">最近の実行状況</Label>
-                <Button
-                  onClick={() => void refreshRuns()}
-                  disabled={isLoadingRuns}
-                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg px-3 py-1 h-auto"
-                >
-                  {isLoadingRuns ? (
-                    <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />取得中</>
-                  ) : (
-                    <><RefreshCw className="w-3.5 h-3.5 mr-1.5" />更新</>
-                  )}
-                </Button>
-              </div>
+          <p className="text-xs text-[var(--text-muted)] font-medium leading-relaxed">
+            実行は GitHub Actions 上で行われます。開始後はこの画面を閉じても処理は継続し、
+            結果は Convex に直接保存されて自動的に反映されます。
+          </p>
 
-              {runsError ? (
-                <div className="p-3 rounded-xl text-xs font-semibold leading-relaxed bg-red-50 text-red-700 border border-red-200">
-                  {runsError}
-                </div>
-              ) : runs.length === 0 ? (
-                <p className="text-xs text-slate-500 font-medium">
-                  「更新」を押すと GitHub Actions の実行履歴を取得します。
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {runs.map((run) => (
-                    <li
-                      key={run.id}
-                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-800">
-                          {RUN_STATUS_LABELS[run.status ?? ""] || run.status || "不明"}
-                          {run.conclusion &&
-                            ` ・ ${RUN_CONCLUSION_LABELS[run.conclusion] || run.conclusion}`}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-medium truncate">
-                          {run.created_at
-                            ? new Date(run.created_at).toLocaleString("ja-JP")
-                            : "—"}
-                        </div>
-                      </div>
-                      {run.html_url && (
-                        <a
-                          href={run.html_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] font-bold text-emerald-700 hover:underline shrink-0"
-                        >
-                          ログを見る
-                        </a>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+          {scrapeStatus && (
+            <div
+              className={`p-4 rounded-2xl text-xs font-bold leading-relaxed ${
+                scrapeStatus.startsWith("エラー")
+                  ? "bg-red-50 text-red-700 border border-red-200"
+                  : scrapeStatus.startsWith("検索を開始")
+                  ? "bg-[var(--brand-soft)] text-[var(--brand)] border border-[var(--brand-border)]"
+                  : "bg-[var(--bg-page-subtle)] text-[var(--text-primary)] border border-[var(--border-subtle)]"
+              }`}
+            >
+              {scrapeStatus}
             </div>
-          </CardContent>
-        </Card>
+          )}
+
+          {/* Run status */}
+          <div className="pt-3 border-t border-[var(--border-subtle)] space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">最近の実行状況</Label>
+              <Button
+                onClick={() => void refreshRuns()}
+                disabled={isLoadingRuns}
+                variant="outline"
+                size="sm"
+                className="rounded-xl h-8 text-xs font-bold"
+              >
+                {isLoadingRuns ? (
+                  <><RefreshCw className="w-3.5 h-3.5 mr-1 animate-spin" />取得中</>
+                ) : (
+                  <><RefreshCw className="w-3.5 h-3.5 mr-1" />履歴更新</>
+                )}
+              </Button>
+            </div>
+
+            {runsError ? (
+              <div className="p-3 rounded-xl text-xs font-bold leading-relaxed bg-red-50 text-red-700 border border-red-200">
+                {runsError}
+              </div>
+            ) : runs.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)] font-medium">
+                「履歴更新」を押すと GitHub Actions の最新実行履歴を取得します。
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {runs.map((run) => (
+                  <li
+                    key={run.id}
+                    className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)]"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-[var(--text-primary)]">
+                        {RUN_STATUS_LABELS[run.status ?? ""] || run.status || "不明"}
+                        {run.conclusion &&
+                          ` ・ ${RUN_CONCLUSION_LABELS[run.conclusion] || run.conclusion}`}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)] font-medium truncate mt-0.5">
+                        {run.created_at
+                          ? formatJaDateTime(new Date(run.created_at).getTime())
+                          : "—"}
+                      </div>
+                    </div>
+                    {run.html_url && (
+                      <a
+                        href={run.html_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-[var(--brand)] hover:underline shrink-0"
+                      >
+                        ログを見る
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
 
         {/* System Status Card */}
-        <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl">
-          <CardHeader className="p-6 border-b border-slate-100">
-            <CardTitle className="flex items-center gap-2 text-lg font-extrabold text-slate-900">
-              <Database className="w-5 h-5 text-emerald-700" />
+        <div className="bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-4 shadow-xs">
+          <div className="pb-3 border-b border-[var(--border-subtle)]">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold text-[var(--text-primary)]">
+              <Database className="w-5 h-5 text-[var(--brand)]" />
               システム接続ステータス
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6 space-y-4">
-            {/* Was: green "稼働中" purely because the VITE_SCRAPER_URL env var was
-                non-empty — it said Active on a phone that could not reach the
-                scraper at all. Scraping now runs on GitHub Actions, so name that
-                instead of asserting a health we do not measure. */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-bold text-slate-700">スクレイピング実行環境</span>
-              <Badge className="bg-emerald-700 text-white font-bold text-xs">
+            </h2>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)]">
+              <span className="text-xs font-bold text-[var(--text-secondary)]">スクレイピング環境</span>
+              <Badge variant="brand" className="font-bold">
                 GitHub Actions
               </Badge>
             </div>
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-bold text-slate-700">Convex DB</span>
-              <Badge className="bg-emerald-700 text-white font-bold text-xs">接続済み</Badge>
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)]">
+              <span className="text-xs font-bold text-[var(--text-secondary)]">Convex リアルタイム DB</span>
+              <Badge variant="emerald" className="font-bold">接続済み</Badge>
             </div>
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-bold text-slate-700">全登録物件数</span>
-              <span className="font-extrabold text-base text-slate-900 font-data">
-                {listings === undefined ? <Skeleton className="h-5 w-12" /> : `${listings.length} 件`}
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)]">
+              <span className="text-xs font-bold text-[var(--text-secondary)]">全登録物件数</span>
+              <span className="font-extrabold text-base text-[var(--text-primary)] font-data">
+                {listings === undefined ? <Skeleton className="h-5 w-12 rounded-lg" /> : `${listings.length} 件`}
               </span>
             </div>
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-sm font-bold text-slate-700">セキュリティ認証</span>
-              <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
-                <ShieldCheck className="w-4 h-4 text-emerald-700" />
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)]">
+              <span className="text-xs font-bold text-[var(--text-secondary)]">認証ガード</span>
+              <span className="text-xs font-bold text-[var(--brand)] flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-[var(--brand)]" />
                 保護済み
               </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* Database Scraped Listings Master Table */}
-      <Card className="bg-white border border-slate-200/80 shadow-sm rounded-2xl overflow-hidden">
-        <CardHeader className="p-6 border-b border-slate-100">
-          <CardTitle className="text-lg font-extrabold text-slate-900 flex items-center justify-between">
-            <span>物件マスターデータベース ({manualListings.length} 件)</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0 overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-slate-50">
-              <TableRow>
-                <TableHead className="text-xs font-bold text-slate-700 py-3">物件所在地</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">区</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">価格 (万円)</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">面積 (㎡)</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">取得ソース</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">ステータス</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700 text-right pr-6">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {listings === undefined ? (
-                <>
-                  <TableRow>
-                    <TableCell colSpan={7} className="p-4">
-                      <Skeleton className="h-6 w-full" />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell colSpan={7} className="p-4">
-                      <Skeleton className="h-6 w-full" />
-                    </TableCell>
-                  </TableRow>
-                </>
-              ) : manualListings.length === 0 ? (
+      <div className="bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-4 shadow-xs">
+        <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
+          <h2 className="text-lg font-extrabold text-[var(--text-primary)]">
+            物件マスターデータベース ({manualListings.length} 件)
+          </h2>
+        </div>
+          <div className="overflow-x-auto rounded-2xl border border-[var(--border-subtle)]">
+            <Table>
+              <TableHeader className="bg-[var(--bg-page-subtle)]">
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-slate-400 font-medium">
-                    登録されている物件がありません。「手動検索開始」を実行してください。
-                  </TableCell>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)] py-3">物件所在地</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)]">区</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)]">価格 (万円)</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)]">面積 (㎡)</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)]">取得ソース</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)]">ステータス</TableHead>
+                  <TableHead className="text-xs font-extrabold text-[var(--text-secondary)] text-right pr-6">操作</TableHead>
                 </TableRow>
-              ) : (
-                manualListings.slice(0, 30).map((listing) => (
-                  <TableRow key={listing._id} className="hover:bg-slate-50/80 transition-colors">
-                    <TableCell className="font-bold text-slate-900 max-w-[240px] truncate text-sm">
-                      {listing.address || "—"}
-                    </TableCell>
-                    <TableCell className="text-sm font-semibold text-slate-700">
-                      {listing.ward || "—"}
-                    </TableCell>
-                    <TableCell className="font-data text-sm font-extrabold text-emerald-700">
-                      {listing.price ? listing.price.toLocaleString() : "—"}
-                    </TableCell>
-                    <TableCell className="font-data text-sm font-semibold text-slate-700">
-                      {listing.area ? listing.area.toFixed(1) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className="bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px]">
-                        {SOURCE_LABELS[listing.source || ""] || listing.source || "手動"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className={`text-[11px] font-bold ${
-                          listing.status === "new"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {listing.status === "new" ? "新着" : listing.status || "一般"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right pr-6">
-                      <button
-                        onClick={() => handleDeleteListing(listing._id)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-slate-100"
-                        title="物件を削除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+              </TableHeader>
+              <TableBody>
+                {listings === undefined ? (
+                  <>
+                    <TableRow>
+                      <TableCell colSpan={7} className="p-4">
+                        <Skeleton className="h-6 w-full" />
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={7} className="p-4">
+                        <Skeleton className="h-6 w-full" />
+                      </TableCell>
+                    </TableRow>
+                  </>
+                ) : manualListings.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-12 text-[var(--text-muted)] font-medium text-xs">
+                      登録されている物件がありません。「手動検索開始」を実行してください。
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                ) : (
+                  manualListings.slice(0, 30).map((listing) => (
+                    <TableRow key={listing._id} className="hover:bg-[var(--bg-surface-hover)] transition-colors">
+                      <TableCell className="font-bold text-[var(--text-primary)] max-w-[240px] truncate text-sm">
+                        {listing.address || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs font-semibold text-[var(--text-secondary)]">
+                        {listing.ward || "—"}
+                      </TableCell>
+                      <TableCell className="font-data text-sm font-extrabold text-[var(--brand)]">
+                        {listing.price ? listing.price.toLocaleString() : "—"}
+                      </TableCell>
+                      <TableCell className="font-data text-xs font-semibold text-[var(--text-secondary)]">
+                        {listing.area ? listing.area.toFixed(1) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="brand">
+                          {SOURCE_LABELS[listing.source || ""] || listing.source || "手動"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={listing.status === "new" ? "emerald" : "neutral"}
+                        >
+                          {listing.status === "new" ? "新着" : listing.status || "一般"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right pr-6">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteListing(listing._id)}
+                          className="h-8 w-8 rounded-xl text-[var(--text-muted)] hover:text-red-600 hover:bg-red-50"
+                          title="物件を削除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
     </div>
   );
 }

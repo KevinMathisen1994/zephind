@@ -83,12 +83,25 @@ export const listOrdersForMatching = query({
 const LISTING_STRING_FIELDS = [
   "address", "ward", "source", "status", "url", "description",
   "layout", "station", "stationName", "title", "propertyType", "zoning", "pdfUrl",
+  // "posted" (情報公開日/掲載日) vs "updated" (更新日). Stored so the UI can label
+  // a re-post date honestly instead of calling it the posting date.
+  "postedDateKind",
+  // "rent" for a listing scraped off a site's 賃貸 vertical, "buy" (or absent)
+  // for a for-sale one. See the schema comment for why this is stamped by the
+  // scraper rather than inferred from which fields are present.
+  "dealType",
 ];
 const LISTING_NUMBER_FIELDS = [
   "price", "area", "landSize", "buildYear", "rooms", "walkMinutes",
   "walkingMinutes", "mlitBenchmark", "score", "latitude", "longitude",
   "buildingCoverageRatio", "floorAreaRatio", "roadWidth", "frontage",
+  // 掲載日 as epoch ms — see scraper-service/src/services/postedDate.ts.
+  "postedAt",
+  // Rental-only economics, all 万円 (deposit/keyMoney as an absolute amount,
+  // not a month-multiple) — additive to `price`, not a replacement.
+  "rent", "managementFee", "deposit", "keyMoney",
 ];
+const LISTING_BOOLEAN_FIELDS = ["isNew", "petsAllowed"];
 
 function normalizeListing(raw, source) {
   const doc = {};
@@ -102,6 +115,9 @@ function normalizeListing(raw, source) {
     const num = Number(value);
     if (Number.isFinite(num)) doc[key] = num;
   }
+  for (const key of LISTING_BOOLEAN_FIELDS) {
+    if (typeof raw[key] === "boolean") doc[key] = raw[key];
+  }
   if (Array.isArray(raw.images)) {
     const images = raw.images.filter((i) => typeof i === "string");
     if (images.length > 0) doc.images = images;
@@ -114,6 +130,115 @@ function normalizeListing(raw, source) {
   doc.status = doc.status || "new";
   return doc;
 }
+
+/**
+ * Of the given urls, which are NOT in the listings table yet.
+ *
+ * The scraper uses this to decide whose detail page is worth opening for a
+ * 掲載日: a listing's posted date never changes, so fetching it once, for
+ * genuinely new inventory only, is the difference between a handful of extra
+ * page loads a night and one per listing per run forever.
+ *
+ * Bounded on purpose: each url is one indexed lookup (by_url), and a query has a
+ * read limit. The caller chunks; a caller that ignores that gets an error rather
+ * than a silently truncated answer.
+ */
+export const unknownListingUrls = query({
+  args: { secret: v.string(), urls: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    assertSecret(args.secret);
+    if (args.urls.length > 300) {
+      throw new Error(
+        `unknownListingUrls: ${args.urls.length} urls in one call — chunk to 300 or fewer`,
+      );
+    }
+    const unknown = [];
+    for (const url of args.urls) {
+      if (!url) continue;
+      const existing = await ctx.db
+        .query("listings")
+        .withIndex("by_url", (q) => q.eq("url", url))
+        .first();
+      if (!existing) unknown.push(url);
+    }
+    return unknown;
+  },
+});
+
+/**
+ * Listings that still have no 掲載日, so a run can go back and fill them in.
+ *
+ * Dates are normally fetched only for URLs the database has never seen (see
+ * unknownListingUrls) — a listing's posted date does not change, so paying for it
+ * once is the point. That leaves every listing found BEFORE 掲載日 scraping
+ * existed with an empty field forever, which is what this fixes.
+ *
+ * Uses the by_postedAt index rather than a filter: as the backfill succeeds the
+ * remaining matches get rarer, and a scan would have to walk further every run to
+ * find them.
+ */
+export const listingsMissingPostedDate = query({
+  args: {
+    secret: v.string(),
+    limit: v.number(),
+    /** Only these sources (the ones known to publish a date). */
+    sources: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    assertSecret(args.secret);
+    const limit = Math.min(Math.max(args.limit, 1), 500);
+    const allowed = args.sources && args.sources.length > 0 ? new Set(args.sources) : null;
+    const rows = await ctx.db
+      .query("listings")
+      .withIndex("by_postedAt", (q) => q.eq("postedAt", undefined))
+      .take(limit * 3);
+    const out = [];
+    for (const row of rows) {
+      if (!row.url) continue;
+      if (allowed && !allowed.has(row.source ?? "")) continue;
+      out.push({ listingId: row._id, url: row.url, source: row.source ?? "" });
+      if (out.length >= limit) break;
+    }
+    return out;
+  },
+});
+
+/** Write the 掲載日 found for existing listings (the backfill's other half). */
+export const savePostedDates = mutation({
+  args: {
+    secret: v.string(),
+    updates: v.array(
+      v.object({
+        listingId: v.string(),
+        postedAt: v.number(),
+        postedDateKind: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    assertSecret(args.secret);
+    if (args.updates.length > 200) {
+      throw new Error(
+        `savePostedDates: ${args.updates.length} updates in one call — chunk to 200 or fewer`,
+      );
+    }
+    let updated = 0;
+    for (const update of args.updates) {
+      const listingId = ctx.db.normalizeId("listings", update.listingId);
+      if (!listingId) continue;
+      const existing = await ctx.db.get(listingId);
+      // Never overwrite a date already recorded: the scrape-time value came from
+      // the same page and a later re-read adds nothing but churn.
+      if (!existing || existing.postedAt != null) continue;
+      await ctx.db.patch(listingId, {
+        postedAt: update.postedAt,
+        postedDateKind: update.postedDateKind,
+      });
+      updated++;
+    }
+    return { updated };
+  },
+});
 
 /**
  * Persist one source+area slice of a scrape run.
@@ -272,6 +397,47 @@ export const ingestScrape = mutation({
       matchesSkipped,
       matchSkipReasons: skipReasons,
     };
+  },
+});
+
+/**
+ * Record who searched, and when, for the orders a run covered.
+ *
+ * A user-initiated search is stamped by convex/scrapeTrigger.js from the caller's
+ * JWT at dispatch time. The NIGHTLY run has no user at all, so those orders had a
+ * blank 実行者 on the card — indistinguishable from "never searched". The cron
+ * caller passes its own label ("自動取得（定期実行）"), which is why triggeredBy is
+ * an argument here rather than an identity lookup: there is no identity to look
+ * up. It is secret-guarded like the rest of this file.
+ */
+export const markScrapeRun = mutation({
+  args: {
+    secret: v.string(),
+    orderIds: v.array(v.string()),
+    triggeredBy: v.string(),
+    at: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    assertSecret(args.secret);
+    if (args.orderIds.length > 100) {
+      throw new Error(
+        `markScrapeRun: ${args.orderIds.length} orders in one call — chunk to 100 or fewer`,
+      );
+    }
+    const at = args.at ?? Date.now();
+    let updated = 0;
+    for (const raw of args.orderIds) {
+      const orderId = ctx.db.normalizeId("orders", raw);
+      if (!orderId) continue;
+      const order = await ctx.db.get(orderId);
+      if (!order) continue;
+      await ctx.db.patch(orderId, {
+        lastScrapeAt: at,
+        lastScrapeBy: args.triggeredBy,
+      });
+      updated++;
+    }
+    return { updated };
   },
 });
 

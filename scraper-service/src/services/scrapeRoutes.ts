@@ -87,6 +87,11 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
 
     // Determine requested property types from first order
     const requestedTypes = criteria.length > 0 ? criteria[0].propertyTypes : undefined;
+    // Same simplification as above (first order only) — an order is one or
+    // the other (never both), so this is only imprecise when mixing a rent
+    // order and a buy order in the same manual request, same as the existing
+    // requestedTypes simplification above.
+    const dealType = criteria.length > 0 ? (criteria[0].dealType ?? "buy") : "buy";
 
     // Build all (source, areaCode) job pairs
     const jobs: Array<{ source: string; code: string }> = [];
@@ -106,7 +111,7 @@ scrapeRoutes.get("/", async (req: Request, res: Response) => {
         acquire(async () => {
           logger.info(`Starting scrape: source=${src} areaCode=${code}`);
           try {
-            const result = await runScraper(src, code, requestedTypes);
+            const result = await runScraper(src, code, requestedTypes, dealType);
             logger.info(`Area ${code} (${src}) raw result: ${result.listings.length} listings found`);
             areaResults.push({ areaCode: code, source: src, total: result.listings.length });
             return result.listings;

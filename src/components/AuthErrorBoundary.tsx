@@ -1,12 +1,12 @@
 import { Component, type ReactNode } from "react";
 
 /**
- * Convex's useQuery throws during render when a query rejects, which takes the
- * whole tree down. The most likely rejection right after enabling per-user data
- * isolation is "not signed in" caused by a missing Clerk JWT template — a
- * configuration problem, not a code bug. A white screen with a stack trace in
- * the console is the least useful way to communicate that, so catch it and say
- * what to do.
+ * Queries throw during render when they reject (TanStack is configured with
+ * throwOnError for exactly this), which would otherwise take the whole tree
+ * down. The most likely rejection is "not signed in" caused by the backend not
+ * accepting the Clerk token — a configuration problem, not a code bug. A white
+ * screen with a stack trace in the console is the least useful way to
+ * communicate that, so catch it and say what to check.
  */
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -40,17 +40,26 @@ export class AuthErrorBoundary extends Component<Props, State> {
           {isAuthError ? (
             <>
               <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-                ログインは成功していますが、バックエンド（Convex）が認証トークンを
-                受け取れていません。Clerk 側の JWT テンプレートを作成すると解決します。
+                ログインは成功していますが、バックエンドが認証トークンを受け取れていません。
+                サーバー側の設定を確認してください（バックエンドのログに理由が出力されます）。
               </p>
               <ol className="mt-4 space-y-2 text-sm text-slate-700 list-decimal list-inside">
-                <li>Clerk ダッシュボード → JWT Templates → New template</li>
-                <li>テンプレート「Convex」を選択</li>
                 <li>
-                  名前を <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-xs">convex</code>{" "}
-                  に設定（小文字・完全一致）
+                  バックエンドが起動しているか（
+                  <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-xs">
+                    {import.meta.env.VITE_API_URL || "VITE_API_URL 未設定"}
+                  </code>
+                  ）
                 </li>
-                <li>保存後、このページを再読み込み</li>
+                <li>
+                  <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-xs">CLERK_FRONTEND_API_URL</code>{" "}
+                  が Clerk の Frontend API URL と一致しているか
+                </li>
+                <li>
+                  <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-xs">CLERK_JWT_AUDIENCE</code>{" "}
+                  が空であるか（既定のセッショントークンには aud が無いため）
+                </li>
+                <li>設定変更後、バックエンドを再起動してこのページを再読み込み</li>
               </ol>
             </>
           ) : (
