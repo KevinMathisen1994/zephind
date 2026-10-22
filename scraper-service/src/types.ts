@@ -52,6 +52,7 @@ export interface PropertyListing {
   totalUnits?: number; // 総戸数
   floor?: number; // 階数
   elevators?: number; // エレベーター数
+  structure?: string; // 建物構造 (鉄筋コンクリート造, 木造, etc.)
   structureType?: string; // 構造 (RC, SRC, S, 木造, etc.)
   layoutType?: string; // 間取りタイプ (ファミリー, 1K, etc.)
 }

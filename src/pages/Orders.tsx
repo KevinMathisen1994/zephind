@@ -1194,14 +1194,11 @@ export default function OrdersPage() {
         layout: listing.layout,
         propertyType: listing.propertyType,
         description: listing.description,
-        yield: listing.yield,
-        structure: listing.structure,
-        // floor / elevators were read off the listing here, but no scraper or
-        // email extractor has ever written them and there is no column for
-        // them — so an order's maxFloor / minElevators / excludeFirstFloor
-        // criteria can never be satisfied from listing data. Left out rather
-        // than passed as a permanent undefined; see the scoring TODO.
+        yield: listing.yield || listing.grossYield || listing.netYield,
+        structure: listing.structure || listing.buildingStructure,
+        floor: listing.floor,
         totalUnits: listing.totalUnits,
+        elevators: listing.elevators,
         dealType: listing.dealType,
         rent: listing.rent,
         managementFee: listing.managementFee,
@@ -4016,6 +4013,68 @@ export default function OrdersPage() {
                                         </div>
                                       </div>
                                     </div>
+
+                                    {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
+                                    {(listing.floor != null ||
+                                      listing.elevators != null ||
+                                      listing.structure ||
+                                      listing.totalUnits != null ||
+                                      listing.roadWidth != null ||
+                                      listing.frontage != null ||
+                                      listing.buildYear != null ||
+                                      listing.buildingCoverageRatio != null ||
+                                      listing.floorAreaRatio != null) && (
+                                      <div className="flex flex-wrap gap-2 pt-1 text-xs text-slate-700">
+                                        {listing.floor != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">階数:</span>
+                                            {listing.floor < 0 ? `地下${-listing.floor}階` : `${listing.floor}階`}
+                                          </span>
+                                        )}
+                                        {listing.elevators != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">EV:</span>
+                                            {listing.elevators === 0 ? "なし" : `${listing.elevators}基`}
+                                          </span>
+                                        )}
+                                        {(listing.structure || listing.structureType) && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">構造:</span>
+                                            {listing.structure || listing.structureType}
+                                          </span>
+                                        )}
+                                        {listing.totalUnits != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">総戸数:</span>
+                                            {listing.totalUnits}戸
+                                          </span>
+                                        )}
+                                        {listing.buildYear != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">築年:</span>
+                                            {listing.buildYear}年 ({new Date().getFullYear() - listing.buildYear}年)
+                                          </span>
+                                        )}
+                                        {listing.roadWidth != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">前面道路:</span>
+                                            幅員{listing.roadWidth}m
+                                          </span>
+                                        )}
+                                        {listing.frontage != null && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">間口:</span>
+                                            {listing.frontage}m
+                                          </span>
+                                        )}
+                                        {(listing.buildingCoverageRatio != null || listing.floorAreaRatio != null) && (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 font-medium">
+                                            <span className="text-slate-400 font-bold">建蔽/容積:</span>
+                                            {listing.buildingCoverageRatio ?? "—"}% / {listing.floorAreaRatio ?? "—"}%
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
 
                                     {/* External Link & Google Maps */}
                                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">

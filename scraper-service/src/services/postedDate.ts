@@ -26,6 +26,9 @@
  * claims a re-post date is the original posting date.
  */
 import { logger } from "../logger";
+import { readDetailsFromPage, type ListingDetailEnrichment } from "./propertyDetail";
+
+export { readDetailsFromPage, type ListingDetailEnrichment };
 
 /** Which label produced the date — a re-post date is not a posting date. */
 export type PostedDateKind = "posted" | "updated";
@@ -342,9 +345,9 @@ export async function fetchPostedDates(
           timeout: (opts.timeoutMs ?? 25000) + 15000,
         });
       }
-      const result = await readPostedDateFromPage(page);
-      if (result.postedAt != null) {
-        dates.set(url, result);
+      const result = await readDetailsFromPage(page);
+      if (Object.keys(result).length > 0) {
+        dates.set(url, result as any);
         found++;
       }
     } catch {
@@ -354,7 +357,7 @@ export async function fetchPostedDates(
   }
 
   logger.info(
-    `[${opts.source}] 掲載日: ${found}/${targets.length} detail page(s) yielded a date`,
+    `[${opts.source}] 詳細・掲載日: ${found}/${targets.length} detail page(s) yielded specifications`,
   );
   return { dates, attempted: targets.length, skipped };
 }

@@ -55,6 +55,7 @@ function assertSecret(req: Request): void {
 const LISTING_STRING_FIELDS = [
   "address", "ward", "source", "status", "url", "description",
   "layout", "station", "stationName", "title", "propertyType", "zoning", "pdfUrl",
+  "structure", "structureType",
   // "posted" (情報公開日/掲載日) vs "updated" (更新日), so the UI can label a
   // re-post date honestly instead of calling it the posting date.
   "postedDateKind",
@@ -65,6 +66,7 @@ const LISTING_NUMBER_FIELDS = [
   "price", "area", "landSize", "buildYear", "rooms", "walkMinutes",
   "walkingMinutes", "mlitBenchmark", "score", "latitude", "longitude",
   "buildingCoverageRatio", "floorAreaRatio", "roadWidth", "frontage",
+  "yield", "totalUnits", "floor", "elevators",
   // 掲載日 as epoch ms — see src/services/postedDate.ts.
   "postedAt",
   // Rental-only economics, all 万円 (deposit/keyMoney absolute, not a
@@ -247,13 +249,20 @@ ingestRouter.post("/scrape", route(async (req) => {
     const fresh = docs.filter((d) => !listingIdByUrl.has(d.url));
     listingsSkipped += docs.length - fresh.length;
     if (fresh.length > 0) {
-      const { data: ins, error: insErr } = await db.raw
+      let insRes = await db.raw
         .from("listings")
         .insert(fresh)
         .select("_id,url");
-      if (insErr) throw new HttpError(500, `ingestScrape insert: ${insErr.message}`);
-      for (const row of ins ?? []) listingIdByUrl.set((row as any).url, (row as any)._id);
-      listingsInserted += (ins ?? []).length;
+      if (insRes.error && (insRes.error.message.includes("floor") || insRes.error.message.includes("elevators"))) {
+        const sanitizedFresh = fresh.map(({ floor, elevators, ...rest }: any) => rest);
+        insRes = await db.raw
+          .from("listings")
+          .insert(sanitizedFresh)
+          .select("_id,url");
+      }
+      if (insRes.error) throw new HttpError(500, `ingestScrape insert: ${insRes.error.message}`);
+      for (const row of insRes.data ?? []) listingIdByUrl.set((row as any).url, (row as any)._id);
+      listingsInserted += (insRes.data ?? []).length;
     }
   }
 
@@ -265,7 +274,16 @@ ingestRouter.post("/scrape", route(async (req) => {
       listingsSkipped++;
       continue;
     }
-    await db.insert("listings", doc);
+    try {
+      await db.insert("listings", doc);
+    } catch (e: any) {
+      if (e?.message && (e.message.includes("floor") || e.message.includes("elevators"))) {
+        const { floor, elevators, ...rest } = doc as any;
+        await db.insert("listings", rest);
+      } else {
+        throw e;
+      }
+    }
     listingsInserted++;
   }
 

@@ -242,9 +242,26 @@ async function enrichPostedDates(
 
   let filled = 0;
   for (const [url, result] of dates) {
+    const r = result as any;
     for (const listing of byUrl.get(url) ?? []) {
-      listing.postedAt = result.postedAt;
-      listing.postedDateKind = result.postedDateKind;
+      if (r.postedAt != null) {
+        listing.postedAt = r.postedAt;
+        listing.postedDateKind = r.postedDateKind;
+      }
+      if (listing.floor == null && r.floor != null) listing.floor = r.floor;
+      if (listing.elevators == null && r.elevators != null) listing.elevators = r.elevators;
+      if (!listing.structure && r.structure) listing.structure = r.structure;
+      if (!listing.structureType && r.structureType) listing.structureType = r.structureType;
+      if (listing.totalUnits == null && r.totalUnits != null) listing.totalUnits = r.totalUnits;
+      if (listing.roadWidth == null && r.roadWidth != null) listing.roadWidth = r.roadWidth;
+      if (listing.frontage == null && r.frontage != null) listing.frontage = r.frontage;
+      if (listing.buildYear == null && r.buildYear != null) listing.buildYear = r.buildYear;
+      if (listing.buildingCoverageRatio == null && r.buildingCoverageRatio != null) {
+        listing.buildingCoverageRatio = r.buildingCoverageRatio;
+      }
+      if (listing.floorAreaRatio == null && r.floorAreaRatio != null) {
+        listing.floorAreaRatio = r.floorAreaRatio;
+      }
       filled++;
     }
   }

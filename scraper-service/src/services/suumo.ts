@@ -307,6 +307,51 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
 
       var layout = getVal("間取り");
 
+      var floorText = getVal("所在階") || getVal("階数") || getVal("階建/階") || getVal("所在階/階数");
+      var floor = null;
+      if (floorText) {
+        var bM = floorText.match(/(?:地下|B)(\\d+)階?/);
+        if (bM) {
+          floor = -parseInt(bM[1], 10);
+        } else {
+          var flM = floorText.match(/(\\d+)階/);
+          if (flM) floor = parseInt(flM[1], 10);
+        }
+      }
+
+      var structText = getVal("建物構造") || getVal("構造") || getVal("構造・階建て");
+      var structure = structText || undefined;
+      var structureType = undefined;
+      if (structText) {
+        if (/SRC|鉄骨鉄筋/.test(structText)) structureType = "SRC";
+        else if (/RC|鉄筋コンクリート/.test(structText)) structureType = "RC";
+        else if (/軽量鉄骨/.test(structText)) structureType = "軽量鉄骨";
+        else if (/鉄骨|S造/.test(structText)) structureType = "S";
+        else if (/木造|W造/.test(structText)) structureType = "木造";
+      }
+
+      var unitsText = getVal("総戸数") || getVal("総戸数（販売戸数）");
+      var totalUnits = null;
+      if (unitsText) {
+        var unM = unitsText.match(/(\\d+)\\s*戸/);
+        if (unM) totalUnits = parseInt(unM[1], 10);
+      }
+
+      var roadText = getVal("前面道路") || getVal("接道状況") || getVal("接道") || getVal("接道方位・幅員");
+      var roadWidth = null;
+      var frontage = null;
+      if (roadText) {
+        var rwM = roadText.match(/(?:幅員|幅)\\s*[:：]?\\s*([0-9.]+)\\s*m/) || roadText.match(/([0-9.]+)\\s*m\\s*(?:公道|私道|道路)/) || roadText.match(/([0-9.]+)\\s*m/);
+        if (rwM) roadWidth = parseFloat(rwM[1]);
+        var frM = roadText.match(/(?:間口|接面)\\s*[:：]?\\s*([0-9.]+)\\s*m/);
+        if (frM) frontage = parseFloat(frM[1]);
+      }
+      var frontageText = getVal("間口") || getVal("接面");
+      if (frontageText && frontage === null) {
+        var frM2 = frontageText.match(/([0-9.]+)\\s*m/);
+        if (frM2) frontage = parseFloat(frM2[1]);
+      }
+
       var ward = "";
       // Strip the prefecture first: /(.{2,4}[区市])/ scanned over
       // "東京都杉並区…" matches "京都杉並区" — it is greedy from the left and
@@ -358,6 +403,12 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         buildingCoverageRatio: bcr != null ? bcr : undefined,
         floorAreaRatio: far != null ? far : undefined,
         layout: layout || undefined,
+        floor: floor != null ? floor : undefined,
+        structure: structure || undefined,
+        structureType: structureType || undefined,
+        totalUnits: totalUnits != null ? totalUnits : undefined,
+        roadWidth: roadWidth != null ? roadWidth : undefined,
+        frontage: frontage != null ? frontage : undefined,
       });
     });
 

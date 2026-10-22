@@ -87,6 +87,14 @@ async function extractPageListings(page: any, wardName: string, label: string): 
       });
       var station = "";
       var walkMinutes = null;
+      var floor = null;
+      var structure = undefined;
+      var structureType = undefined;
+      var totalUnits = null;
+      var roadWidth = null;
+      var buildYear = null;
+      var floorArea = null;
+
       for (var i = 0; i < details.length; i++) {
         var d = details[i];
         var stM = d.match(/交通\\s+(.+?)\\s+徒歩(\\d+)分/);
@@ -94,8 +102,55 @@ async function extractPageListings(page: any, wardName: string, label: string): 
           station = stM[1].trim();
           walkMinutes = parseInt(stM[2]);
         }
+        if (d.includes("所在階") || d.includes("階数") || d.includes("階建/階")) {
+          var bM = d.match(/(?:地下|B)(\\d+)階?/);
+          if (bM) {
+            floor = -parseInt(bM[1], 10);
+          } else {
+            var flM = d.match(/(\\d+)階/);
+            if (flM) floor = parseInt(flM[1], 10);
+          }
+        }
+        if (d.includes("構造")) {
+          structure = d.replace(/.*構造[:：\\s]*/, "").trim();
+          if (/SRC|鉄骨鉄筋/.test(d)) structureType = "SRC";
+          else if (/RC|鉄筋コンクリート/.test(d)) structureType = "RC";
+          else if (/軽量鉄骨/.test(d)) structureType = "軽量鉄骨";
+          else if (/鉄骨|S造/.test(d)) structureType = "S";
+          else if (/木造|W造/.test(d)) structureType = "木造";
+        }
+        if (d.includes("総戸数")) {
+          var unM = d.match(/(\\d+)\\s*戸/);
+          if (unM) totalUnits = parseInt(unM[1], 10);
+        }
+        if (d.includes("接道") || d.includes("前面道路")) {
+          var rwM = d.match(/(?:幅員|幅)\\s*[:：]?\\s*([0-9.]+)\\s*m/) || d.match(/([0-9.]+)\\s*m/);
+          if (rwM) roadWidth = parseFloat(rwM[1]);
+        }
+        if (d.includes("築年月") || d.includes("完成時期")) {
+          var byM = d.match(/(20\\d{2}|19\\d{2})年/);
+          if (byM) buildYear = parseInt(byM[1], 10);
+        }
+        if (d.includes("専有面積") || d.includes("建物面積")) {
+          var faM = d.match(/([\\d.]+)\\s*m[2²]/);
+          if (faM) floorArea = parseFloat(faM[1]);
+        }
       }
 
+      // Fallback to allText if not in .gaiyo_item
+      if (buildYear === null) {
+        var byM2 = allText.match(/(20\\d{2}|19\\d{2})年\\s*\\d{1,2}月/);
+        if (byM2) buildYear = parseInt(byM2[1], 10);
+      }
+      if (structure === undefined) {
+        if (/SRC|鉄骨鉄筋/.test(allText)) { structure = "鉄骨鉄筋コンクリート造"; structureType = "SRC"; }
+        else if (/RC|鉄筋コンクリート/.test(allText)) { structure = "鉄筋コンクリート造"; structureType = "RC"; }
+        else if (/軽量鉄骨/.test(allText)) { structure = "軽量鉄骨造"; structureType = "軽量鉄骨"; }
+        else if (/鉄骨|S造/.test(allText)) { structure = "鉄骨造"; structureType = "S"; }
+        else if (/木造/.test(allText)) { structure = "木造"; structureType = "木造"; }
+      }
+
+      var area = floorArea != null ? floorArea : landSize;
       var fullUrl = link.startsWith("http") ? link : "https://realestate.rakuten.co.jp" + link;
 
       // Derive the ward from the scraped address, not from the injected
@@ -116,12 +171,19 @@ async function extractPageListings(page: any, wardName: string, label: string): 
         // landSize/area used to default to 0 when unparsed. hardFilter's
         // landSizeMin/buildingSizeMin checks only skip on null/undefined,
         // not 0, so that read as "confirmed 0m²" and was hard-rejected.
-        price: price || 0, landSize: landSize || undefined, area: landSize || undefined,
+        price: price || 0, landSize: landSize || undefined, area: area || undefined,
+        floorArea: floorArea || undefined,
         buildingCoverageRatio: bcr, floorAreaRatio: far,
         station: station || undefined, walkMinutes: walkMinutes ?? undefined,
         source: "rakuten", url: fullUrl,
         propertyType: pt || undefined,
         layout: layout || undefined,
+        floor: floor !== null ? floor : undefined,
+        structure: structure || undefined,
+        structureType: structureType || undefined,
+        totalUnits: totalUnits !== null ? totalUnits : undefined,
+        roadWidth: roadWidth !== null ? roadWidth : undefined,
+        buildYear: buildYear !== null ? buildYear : undefined,
       };
     });
     return JSON.stringify(results);

@@ -15,6 +15,8 @@ const LISTING_FIELDS = [
   "address", "ward", "price", "area", "buildYear", "source", "status", "url",
   "description", "title", "rooms", "layout", "station", "walkMinutes",
   "buildingCoverageRatio", "floorAreaRatio", "propertyType",
+  "structure", "structureType", "totalUnits", "floor", "elevators",
+  "roadWidth", "frontage", "yield",
 ] as const;
 
 function num(v: unknown): number | undefined {

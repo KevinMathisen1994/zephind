@@ -48,8 +48,13 @@ export interface Listing extends Row {
   zoning?: string;
   pdfUrl?: string;
   yield?: number;
+  grossYield?: number;
+  netYield?: number;
   structure?: string;
+  buildingStructure?: string;
   structureType?: string;
+  floor?: number;
+  elevators?: number;
   totalUnits?: number;
   /** 掲載日 as epoch ms, as published by the portal. */
   postedAt?: number;

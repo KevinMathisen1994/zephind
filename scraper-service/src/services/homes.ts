@@ -581,6 +581,65 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         }
       });
 
+      // --- Floor area, floor, structure, total units, road, build year, layout ---
+      var floorArea = null;
+      var floor = null;
+      var structure = undefined;
+      var structureType = undefined;
+      var totalUnits = null;
+      var roadWidth = null;
+      var frontage = null;
+      var buildYear = null;
+      var layout = "";
+
+      rows.forEach(function(row) {
+        var th = row.querySelector("th");
+        var td = row.querySelector("td");
+        if (!th || !td) return;
+        var label = th.textContent.replace(/\\s+/g, "");
+        var val = td.textContent.trim().replace(/\\s+/g, " ");
+
+        if (label.includes("専有面積") || label.includes("建物面積")) {
+          var faM = val.match(/([\\d,.]+)\\s*m/);
+          if (faM) floorArea = parseFloat(faM[1].replace(/,/g, ""));
+        }
+        if (label.includes("所在階") || label.includes("階数") || label === "階") {
+          var bM = val.match(/(?:地下|B)(\\d+)階?/);
+          if (bM) {
+            floor = -parseInt(bM[1], 10);
+          } else {
+            var flM = val.match(/(\\d+)階/);
+            if (flM) floor = parseInt(flM[1], 10);
+          }
+        }
+        if (label.includes("建物構造") || label.includes("構造")) {
+          structure = val;
+          if (/SRC|鉄骨鉄筋/.test(val)) structureType = "SRC";
+          else if (/RC|鉄筋コンクリート/.test(val)) structureType = "RC";
+          else if (/軽量鉄骨/.test(val)) structureType = "軽量鉄骨";
+          else if (/鉄骨|S造/.test(val)) structureType = "S";
+          else if (/木造|W造/.test(val)) structureType = "木造";
+        }
+        if (label.includes("総戸数")) {
+          var unM = val.match(/(\\d+)\\s*戸/);
+          if (unM) totalUnits = parseInt(unM[1], 10);
+        }
+        if (label.includes("接道") || label.includes("前面道路")) {
+          var rwM = val.match(/(?:幅員|幅)\\s*[:：]?\\s*([0-9.]+)\\s*m/) || val.match(/([0-9.]+)\\s*m/);
+          if (rwM) roadWidth = parseFloat(rwM[1]);
+          var frM = val.match(/(?:間口|接面)\\s*[:：]?\\s*([0-9.]+)\\s*m/);
+          if (frM) frontage = parseFloat(frM[1]);
+        }
+        if (label.includes("築年月") || label.includes("完成時期")) {
+          var byM = val.match(/(20\\d{2}|19\\d{2})年/);
+          if (byM) buildYear = parseInt(byM[1], 10);
+        }
+        if (label.includes("間取り")) {
+          layout = val;
+        }
+      });
+      var area = floorArea != null ? floorArea : landSize;
+
       // --- Detail URL ---
       var linkEl = el.querySelector("a.prg-bukkenNameAnchor, a.prg-detailLink, a.detailLink");
       var url = linkEl ? linkEl.getAttribute("href") : null;
@@ -594,8 +653,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         // which often show 建物面積 with no 土地面積 row at all). hardFilter's
         // landSizeMin/buildingSizeMin checks only skip on null/undefined,
         // not 0, so that read as "confirmed 0m²" and got hard-rejected.
-        area: landSize || undefined,
+        area: area || undefined,
         landSize: landSize || undefined,
+        floorArea: floorArea || undefined,
         source: "homes",
         url: url || undefined,
         station: station || undefined,
@@ -603,6 +663,14 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         buildingCoverageRatio: bcr !== null ? bcr : undefined,
         floorAreaRatio: far !== null ? far : undefined,
         propertyType: propertyType,
+        floor: floor !== null ? floor : undefined,
+        structure: structure || undefined,
+        structureType: structureType || undefined,
+        totalUnits: totalUnits !== null ? totalUnits : undefined,
+        roadWidth: roadWidth !== null ? roadWidth : undefined,
+        frontage: frontage !== null ? frontage : undefined,
+        buildYear: buildYear !== null ? buildYear : undefined,
+        layout: layout || undefined,
       });
     });
 
