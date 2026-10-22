@@ -22,13 +22,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy source
 COPY . .
 
 # Build TypeScript
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 EXPOSE 3001
 
