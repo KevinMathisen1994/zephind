@@ -553,6 +553,24 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
     market.push({ key: "roadQuality", weight: 5, score: w >= 6 ? 1 : w >= 4 ? 0.7 : w >= 2.7 ? 0.4 : 0.15 });
   }
 
+  // Price drop signal: strong indicator of seller motivation and discount opportunity
+  const hasPriceDrop = listing.priceDropped || (listing.previousPrice != null && listing.price != null && listing.price < listing.previousPrice);
+  if (hasPriceDrop) {
+    const prev = listing.previousPrice;
+    const dropPct = listing.priceDropPct ?? (prev && listing.price ? +(((prev - listing.price) / prev) * 100).toFixed(1) : 0);
+    if (dropPct > 0) {
+      const s = dropPct >= 10 ? 1.0 : dropPct >= 5 ? 0.85 : 0.7;
+      market.push({
+        key: "priceDrop",
+        weight: 12,
+        score: s,
+        previousPrice: prev,
+        currentPrice: listing.price,
+        dropPct,
+      });
+    }
+  }
+
   // ------------------------------------------------------------------ COMBINE
   const fitPct = weighted(fit);
   const marketPct = weighted(market);

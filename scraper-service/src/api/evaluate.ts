@@ -223,7 +223,7 @@ export async function prepareListingInternal(args: any) {
 ${
   isRental
     ? `・賃料: ${args.rent ? `${args.rent.toLocaleString()}万円/月` : "未記載"}\n・管理費: ${args.managementFee ? `${args.managementFee}万円/月` : "なし/未記載"}\n・敷金/礼金: ${args.deposit != null ? `${args.deposit}万円` : "未記載"} / ${args.keyMoney != null ? `${args.keyMoney}万円` : "未記載"}\n・ペット: ${args.petsAllowed === true ? "相談可" : args.petsAllowed === false ? "不可" : "未記載"}`
-    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円${listingPricePerSqm ? `（平米単価: ${listingPricePerSqm}万円/㎡）` : ""}` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
+    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円${listingPricePerSqm ? `（平米単価: ${listingPricePerSqm}万円/㎡）` : ""}${args.priceDropped && args.previousPrice ? ` 【★値下げ物件: 前回${args.previousPrice.toLocaleString()}万円より${args.priceDropPct ? ` -${args.priceDropPct}%` : ""} 値下げ】` : ""}` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
 }
 ・土地面積: ${args.landSize ? `${args.landSize}㎡` : "要確認"}
 ・延床/専有面積: ${args.area ? `${args.area}㎡` : "要確認"}
@@ -492,6 +492,10 @@ ${
     amenityCount: nearbyTotalCount,
     comparables,
     dataWarnings,
+    priceDropped: args.priceDropped,
+    previousPrice: args.previousPrice,
+    initialPrice: args.initialPrice,
+    priceDropPct: args.priceDropPct,
   };
 
   return {

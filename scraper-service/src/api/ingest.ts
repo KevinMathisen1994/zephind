@@ -74,8 +74,10 @@ const LISTING_NUMBER_FIELDS = [
   // Rental-only economics, all 万円 (deposit/keyMoney absolute, not a
   // month-multiple) — additive to `price`, not a replacement.
   "rent", "managementFee", "deposit", "keyMoney",
+  // Price change tracking
+  "previousPrice", "initialPrice", "priceDropPct", "priceChangedAt",
 ];
-const LISTING_BOOLEAN_FIELDS = ["isNew", "petsAllowed"];
+const LISTING_BOOLEAN_FIELDS = ["isNew", "petsAllowed", "priceDropped"];
 
 function normalizeListing(raw: any, source: string): Record<string, any> {
   const doc: Record<string, any> = {};
@@ -240,15 +242,65 @@ ingestRouter.post("/scrape", route(async (req) => {
 
   // One lookup for every url in the batch instead of one per listing.
   if (docs.length > 0) {
-    const rows = await db.selectIn("listings", "_id,url", "url", docs.map((d) => d.url));
-    for (const row of rows) listingIdByUrl.set(row.url, row._id);
+    const rows = await db.selectIn("listings", "_id,url,price,previousPrice,initialPrice", "url", docs.map((d) => d.url));
+    const existingByUrl = new Map<string, any>();
+    for (const row of rows) {
+      listingIdByUrl.set(row.url, row._id);
+      existingByUrl.set(row.url, row);
+    }
 
-    // SKIP existing rather than PATCH, deliberately. A listing row accumulates
-    // downstream state the scraper does not know about — score, mlitBenchmark, a
-    // status moved off "new" by a human — and a nightly patch from a thin scrape
-    // payload would keep clobbering it. Price changes are therefore NOT picked
-    // up on an existing url; that is the accepted trade-off.
-    const fresh = docs.filter((d) => !listingIdByUrl.has(d.url));
+    // Track price changes on existing listings:
+    // Listings stay on portals for months and sellers drop their ask. When a scraper
+    // sees an existing URL with a changed price, update the price, record previousPrice,
+    // and re-score any existing matches with the new bargain price.
+    for (const d of docs) {
+      const existing = existingByUrl.get(d.url);
+      if (!existing) continue;
+
+      if (d.price != null && existing.price != null && d.price !== existing.price) {
+        const isDrop = d.price < existing.price;
+        const prevPrice = existing.price;
+        const initPrice = existing.initialPrice ?? existing.price;
+        const dropPct = isDrop ? Math.round(((prevPrice - d.price) / prevPrice) * 1000) / 10 : null;
+
+        const patchData: Record<string, any> = {
+          price: d.price,
+          previousPrice: prevPrice,
+          initialPrice: initPrice,
+          priceDropped: isDrop,
+          priceChangedAt: Date.now(),
+        };
+        if (dropPct != null) {
+          patchData.priceDropPct = dropPct;
+        }
+
+        try {
+          await db.patch("listings", existing._id, patchData);
+          logger.info(`[Price change] ${d.url}: ${prevPrice}万 -> ${d.price}万 (${isDrop ? `-${dropPct}% drop` : "increase"})`);
+
+          if (isDrop) {
+            // Re-evaluate existing matches for this listing with the new lower price
+            db.list("matching", { where: { listingId: existing._id } }).then((affected) => {
+              if (affected && affected.length > 0) {
+                const matchIds = affected.map((m) => m._id);
+                evaluateMatchIdsServer(matchIds).catch((err) =>
+                  logger.warn(`[Price drop re-evaluate] failed: ${err}`)
+                );
+              }
+            }).catch(() => {});
+          }
+        } catch (err: any) {
+          // If columns previousPrice / priceDropped do not exist in schema yet, fallback to price only
+          if (err?.message && (err.message.includes("previousPrice") || err.message.includes("priceDropped"))) {
+            try {
+              await db.patch("listings", existing._id, { price: d.price });
+            } catch {}
+          }
+        }
+      }
+    }
+
+    const fresh = docs.filter((d) => !existingByUrl.has(d.url));
     listingsSkipped += docs.length - fresh.length;
     if (fresh.length > 0) {
       let insRes = await db.raw

@@ -17,6 +17,7 @@ const LISTING_FIELDS = [
   "buildingCoverageRatio", "floorAreaRatio", "propertyType",
   "structure", "structureType", "totalUnits", "floor", "elevators",
   "roadWidth", "frontage", "yield",
+  "previousPrice", "initialPrice", "priceDropPct", "priceDropped", "priceChangedAt",
 ] as const;
 
 function num(v: unknown): number | undefined {

@@ -58,6 +58,7 @@ import {
   Star,
   Paperclip,
   AlertTriangle,
+  TrendingDown,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -66,6 +67,16 @@ import type { Doc, Id } from "../lib/dataModel";
 
 const GMAPS_KEY = import.meta.env
   .VITE_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string;
+
+/**
+ * The ローカル runner drives the scraper on THIS machine (`npm run dev:scraper`),
+ * so it can only ever work when the app itself is served from localhost. On a
+ * deployed origin the option would just produce connection errors, so it is
+ * hidden there and the runner is pinned to GitHub Actions.
+ */
+const IS_LOCALHOST =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname);
 
 /**
  * Where the LOCAL scraper service listens (`npm run dev:scraper`).
@@ -1084,12 +1095,13 @@ export default function OrdersPage() {
    * (working tree, needs the dev server). Remembered per browser: whoever is
    * developing scrapers wants local every time, and everyone else never does.
    */
-  const [runner, setRunner] = useState<ScrapeRunner>(
-    () =>
-      (localStorage.getItem("zephind_scrape_runner") as ScrapeRunner) ||
-      "github",
-  );
+  const [runner, setRunner] = useState<ScrapeRunner>(() => {
+    const stored = localStorage.getItem("zephind_scrape_runner");
+    // A stored "local" preference must not leak onto a deployed origin.
+    return stored === "local" && IS_LOCALHOST ? "local" : "github";
+  });
   const chooseRunner = (next: ScrapeRunner) => {
+    if (next === "local" && !IS_LOCALHOST) return;
     setRunner(next);
     localStorage.setItem("zephind_scrape_runner", next);
   };
@@ -1199,6 +1211,10 @@ export default function OrdersPage() {
         floor: listing.floor,
         totalUnits: listing.totalUnits,
         elevators: listing.elevators,
+        previousPrice: listing.previousPrice,
+        initialPrice: listing.initialPrice,
+        priceDropPct: listing.priceDropPct,
+        priceDropped: listing.priceDropped,
         dealType: listing.dealType,
         rent: listing.rent,
         managementFee: listing.managementFee,
@@ -1346,6 +1362,10 @@ export default function OrdersPage() {
             floor: listing.floor,
             totalUnits: listing.totalUnits,
             elevators: listing.elevators,
+            previousPrice: listing.previousPrice,
+            initialPrice: listing.initialPrice,
+            priceDropPct: listing.priceDropPct,
+            priceDropped: listing.priceDropped,
             dealType: listing.dealType,
             rent: listing.rent,
             managementFee: listing.managementFee,
@@ -3259,7 +3279,6 @@ export default function OrdersPage() {
                             </select>
                             <Button
                               size="sm"
-                              className="h-9 text-xs font-bold gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-sm"
                               onClick={() => handleScrapeOrder(order)}
                               title={
                                 runner === "local"
@@ -3267,7 +3286,7 @@ export default function OrdersPage() {
                                   : "GitHub Actions（公開済みコード）で取得します。PCを閉じても実行が続きます。"
                               }
                             >
-                              <Play className="w-3.5 h-3.5" />
+                              <Play className="h-3.5 w-3.5" />
                               手動検索
                             </Button>
                           </div>
@@ -3275,52 +3294,62 @@ export default function OrdersPage() {
                           {/* Where the scrape runs. GitHub executes the COMMITTED
                               code and survives closing the laptop; ローカル runs the
                               working tree, which is the only way to test a scraper
-                              change before pushing it. */}
-                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-                            {(
-                              [
-                                { key: "github", label: "GitHub", icon: Cloud },
-                                {
-                                  key: "local",
-                                  label: "ローカル",
-                                  icon: Laptop,
-                                },
-                              ] as const
-                            ).map((opt) => (
-                              <button
-                                key={opt.key}
-                                type="button"
-                                onClick={() => chooseRunner(opt.key)}
-                                title={
-                                  opt.key === "local"
-                                    ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
-                                    : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
-                                }
-                                className={`flex items-center gap-1 px-2.5 h-8 rounded-lg text-[11px] font-bold transition-all ${
-                                  runner === opt.key
-                                    ? "bg-white text-emerald-800 shadow-xs"
-                                    : "text-slate-500 hover:text-slate-800"
-                                }`}
-                              >
-                                <opt.icon className="w-3.5 h-3.5" />
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
+                              change before pushing it — and only works from
+                              localhost, so it is not offered elsewhere. */}
+                          {IS_LOCALHOST ? (
+                            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] p-0.5">
+                              {(
+                                [
+                                  { key: "github", label: "GitHub", icon: Cloud },
+                                  {
+                                    key: "local",
+                                    label: "ローカル",
+                                    icon: Laptop,
+                                  },
+                                ] as const
+                              ).map((opt) => (
+                                <button
+                                  key={opt.key}
+                                  type="button"
+                                  onClick={() => chooseRunner(opt.key)}
+                                  title={
+                                    opt.key === "local"
+                                      ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
+                                      : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
+                                  }
+                                  className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-[4px] px-2.5 text-[11px] font-medium transition-colors ${
+                                    runner === opt.key
+                                      ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(23,21,15,0.06)]"
+                                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                  }`}
+                                >
+                                  <opt.icon className="h-3.5 w-3.5" />
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <span
+                              className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 text-[11px] font-medium text-[var(--text-muted)]"
+                              title="GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
+                            >
+                              <Cloud className="h-3.5 w-3.5" />
+                              GitHub Actions
+                            </span>
+                          )}
 
                           {matchCount > 0 && (
                             <>
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-9 text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg"
                                 onClick={() => handleBatchEvaluate(order)}
                                 title="通常は取得後に自動評価されます。タブを閉じていた等で未評価が残った場合の予備操作です。"
                                 disabled={evaluatingOrderId === order._id}
                               >
                                 {evaluatingOrderId === order._id ? (
                                   <>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--brand)]" />
                                     評価中
                                     {evalProgress[order._id] &&
                                     evalProgress[order._id].total > 0
@@ -3338,14 +3367,13 @@ export default function OrdersPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="h-9 text-xs font-bold gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg"
                                 onClick={() => handleBatchEvaluate(order, true)}
                                 title="評価済みの物件も含め、この注文の全物件を評価し直します。"
                                 disabled={evaluatingOrderId === order._id}
                               >
                                 {evaluatingOrderId === order._id ? (
                                   <>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--brand)]" />
                                     評価中
                                     {evalProgress[order._id] &&
                                     evalProgress[order._id].total > 0
@@ -3839,12 +3867,27 @@ export default function OrdersPage() {
 
                                   <div className="flex items-center gap-4 shrink-0 text-slate-700">
                                     {listing?.price && (
-                                      <span className="text-base font-black text-slate-900 font-data">
-                                        {listing.price.toLocaleString()}
-                                        <span className="text-xs font-normal ml-0.5 text-slate-600">
-                                          万円
-                                        </span>
-                                      </span>
+                                      <div className="flex flex-col items-end">
+                                        <div className="flex items-center gap-1.5">
+                                          {(listing.priceDropped || (listing.previousPrice && listing.price < listing.previousPrice)) && (
+                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                                              <TrendingDown className="w-3 h-3 text-rose-500" />
+                                              値下げ{listing.priceDropPct ? ` -${listing.priceDropPct}%` : ""}
+                                            </span>
+                                          )}
+                                          <span className="text-base font-black text-slate-900 font-data">
+                                            {listing.price.toLocaleString()}
+                                            <span className="text-xs font-normal ml-0.5 text-slate-600">
+                                              万円
+                                            </span>
+                                          </span>
+                                        </div>
+                                        {listing.previousPrice && listing.price < listing.previousPrice && (
+                                          <span className="text-[11px] text-slate-400 line-through font-data">
+                                            {listing.previousPrice.toLocaleString()} 万円
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
 
                                     {listing?.landSize && (
@@ -3895,6 +3938,15 @@ export default function OrdersPage() {
                                             ? `${listing.price.toLocaleString()} 万円`
                                             : "—"}
                                         </div>
+                                        {(listing.priceDropped || (listing.previousPrice && listing.price < listing.previousPrice)) && (
+                                          <div className="text-xs font-bold text-rose-600 flex items-center gap-1 mt-0.5">
+                                            <TrendingDown className="w-3.5 h-3.5" />
+                                            <span>
+                                              前回: {listing.previousPrice?.toLocaleString()} 万円
+                                              {listing.priceDropPct ? ` (${listing.priceDropPct}% DOWN)` : ""}
+                                            </span>
+                                          </div>
+                                        )}
                                       </div>
                                       {/* 土地面積 and 専有/建物面積 are different numbers
                                       and both are filterable, so showing whichever

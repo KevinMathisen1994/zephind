@@ -56,6 +56,12 @@ export interface Listing extends Row {
   floor?: number;
   elevators?: number;
   totalUnits?: number;
+  /** Price change tracking */
+  previousPrice?: number;
+  initialPrice?: number;
+  priceDropPct?: number;
+  priceDropped?: boolean;
+  priceChangedAt?: number;
   /** 掲載日 as epoch ms, as published by the portal. */
   postedAt?: number;
   /** "posted" (first published) or "updated" (a re-post). */

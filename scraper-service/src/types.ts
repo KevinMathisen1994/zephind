@@ -55,6 +55,13 @@ export interface PropertyListing {
   structure?: string; // 建物構造 (鉄筋コンクリート造, 木造, etc.)
   structureType?: string; // 構造 (RC, SRC, S, 木造, etc.)
   layoutType?: string; // 間取りタイプ (ファミリー, 1K, etc.)
+
+  // Price change tracking
+  previousPrice?: number; // 直前価格 (万円)
+  initialPrice?: number; // 初回価格 (万円)
+  priceDropPct?: number; // 値下げ率 (%)
+  priceDropped?: boolean; // 値下げフラグ
+  priceChangedAt?: number; // 価格変更日時 (epoch ms)
 }
 
 export interface ScrapeResult {
