@@ -2941,9 +2941,37 @@ export default function OrdersPage() {
 
       {/* Orders List Section */}
       <div className="space-y-4">
-        <h2 className="text-lg font-extrabold text-[var(--text-primary)]">
-          一覧
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-extrabold text-[var(--text-primary)]">
+            一覧
+          </h2>
+          {orders && orders.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                const allExpanded = orders.every((o) => expandedOrders.has(o._id));
+                if (allExpanded) {
+                  setExpandedOrders(new Set());
+                } else {
+                  setExpandedOrders(new Set(orders.map((o) => o._id)));
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] text-xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer select-none shadow-2xs"
+            >
+              {orders.every((o) => expandedOrders.has(o._id)) ? (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  すべて折りたたむ
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  すべて展開
+                </>
+              )}
+            </button>
+          )}
+        </div>
 
         {/* Live GitHub Actions run banner */}
         {activeRun && (orders ?? []).some(isMyRun) && (
@@ -3003,68 +3031,87 @@ export default function OrdersPage() {
                 <CardHeader className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] p-5">
                   <div className="flex flex-col gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CardTitle>
-                          {order.name || `オーダー #${order._id.slice(0, 6)}`}
-                        </CardTitle>
-                        {(order.status === "completed" || matchCount === 0) && (
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              const nextStatus =
-                                order.status === "completed"
-                                  ? "pending"
-                                  : "completed";
-                              await updateOrder({
-                                id: order._id,
-                                status: nextStatus,
-                              });
-                            }}
-                            className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
-                              order.status === "completed"
-                                ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
-                                : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
-                            }`}
-                            title="クリックで完了/未完了を切り替えます"
-                          >
-                            {order.status === "completed" ? "✓ 完了" : "未検索"}
-                          </button>
-                        )}
-                        {isMyRun(order) && (
-                          <Badge
-                            variant="brand"
-                            className="gap-1.5 font-bold py-1 px-2.5 shrink-0"
-                          >
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>
-                              {activeRun?.status === "queued"
-                                ? "取得待機中"
-                                : "取得中"}
+                      <div
+                        className="flex items-center justify-between gap-3 cursor-pointer group select-none py-0.5"
+                        onClick={() => toggleOrderExpanded(order._id)}
+                        title={isCardExpanded ? "クリックして物件一覧を折りたたむ" : "クリックして物件一覧を展開"}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <CardTitle className="group-hover:text-[var(--brand)] transition-colors flex items-center gap-2">
+                            <span className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform duration-200 text-[var(--text-muted)] group-hover:text-[var(--brand)] ${isCardExpanded ? "rotate-90 text-[var(--brand)]" : ""}`}>
+                              <ChevronRight className="w-4 h-4" />
                             </span>
-                          </Badge>
-                        )}
-                        {matchCount > 0 && (
-                          <Badge className="font-extrabold">
-                            {matchCount} 件
-                          </Badge>
-                        )}
-                        {order.dealType === "rent" && (
-                          <Badge variant="neutral">借りる</Badge>
-                        )}
-
-                        {(() => {
-                          const customer = customers?.find(
-                            (c) => c._id === order.customerId,
-                          );
-                          if (!customer) return null;
-                          return (
-                            <Badge variant="neutral" className="gap-1">
-                              <Users className="w-3 h-3" />
-                              {customer.name}
-                              {customer.phone ? ` (${customer.phone})` : ""}
+                            <span>{order.name || `オーダー #${order._id.slice(0, 6)}`}</span>
+                          </CardTitle>
+                          {(order.status === "completed" || matchCount === 0) && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const nextStatus =
+                                  order.status === "completed"
+                                    ? "pending"
+                                    : "completed";
+                                await updateOrder({
+                                  id: order._id,
+                                  status: nextStatus,
+                                });
+                              }}
+                              className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
+                                order.status === "completed"
+                                  ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
+                                  : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
+                              }`}
+                              title="クリックで完了/未完了を切り替えます"
+                            >
+                              {order.status === "completed" ? "✓ 完了" : "未検索"}
+                            </button>
+                          )}
+                          {isMyRun(order) && (
+                            <Badge
+                              variant="brand"
+                              className="gap-1.5 font-bold py-1 px-2.5 shrink-0"
+                            >
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>
+                                {activeRun?.status === "queued"
+                                  ? "取得待機中"
+                                  : "取得中"}
+                              </span>
                             </Badge>
-                          );
-                        })()}
+                          )}
+                          {matchCount > 0 && (
+                            <Badge className="font-extrabold cursor-pointer">
+                              {matchCount} 件
+                            </Badge>
+                          )}
+                          {order.dealType === "rent" && (
+                            <Badge variant="neutral">借りる</Badge>
+                          )}
+
+                          {(() => {
+                            const customer = customers?.find(
+                              (c) => c._id === order.customerId,
+                            );
+                            if (!customer) return null;
+                            return (
+                              <Badge variant="neutral" className="gap-1">
+                                <Users className="w-3 h-3" />
+                                {customer.name}
+                                {customer.phone ? ` (${customer.phone})` : ""}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Top-right collapse/expand indicator */}
+                        <div className="shrink-0 flex items-center gap-1.5 text-xs text-[var(--text-muted)] group-hover:text-[var(--brand)] font-semibold transition-colors">
+                          <span className="text-[11px] hidden sm:inline">
+                            {isCardExpanded ? "折りたたむ" : "展開する"}
+                          </span>
+                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] group-hover:border-[var(--brand-border)] transition-all ${isCardExpanded ? "rotate-180 text-[var(--brand)]" : ""}`}>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
                       </div>
 
                       {/* Criteria Details */}
@@ -3496,9 +3543,11 @@ export default function OrdersPage() {
                 </CardHeader>
 
                 {/* Matched Listings Drawer */}
-                {isCardExpanded && matchCount > 0 && orderMatchList && (
+                {isCardExpanded && (
                   <CardContent className="p-5 space-y-2">
-                    <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                    {matchCount > 0 && orderMatchList ? (
+                      <>
+                        <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
                       <div className="min-w-0 space-y-2">
                         <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                           抽出物件一覧 ({matchCount}件)
@@ -4482,31 +4531,33 @@ export default function OrdersPage() {
                         </>
                       );
                     })()}
+                      </>
+                    ) : (
+                    <div className="py-8 text-center text-xs text-[var(--text-muted)] font-medium">
+                      このオーダーにマッチする物件はまだありません。「手動検索」を実行して最新物件を取得してください。
+                    </div>
+                  )}
                   </CardContent>
                 )}
 
-                {/* Bottom accordion toggle — always the last thing in the card,
-                    whether collapsed (button to reveal) or expanded (button to
-                    hide again), so it stays reachable at the bottom either way. */}
-                {matchCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => toggleOrderExpanded(order._id)}
-                    className="w-full flex items-center justify-center gap-1.5 py-3 text-xs font-bold text-[var(--brand)] hover:bg-[var(--brand-soft)] border-t border-[var(--border-subtle)] transition-colors"
-                  >
-                    {isCardExpanded ? (
-                      <>
-                        <ChevronUp className="w-4 h-4" />
-                        物件一覧を閉じる
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="w-4 h-4" />
-                        物件一覧を表示 ({matchCount}件) — クリックして物件を見る
-                      </>
-                    )}
-                  </button>
-                )}
+                {/* Bottom accordion toggle */}
+                <button
+                  type="button"
+                  onClick={() => toggleOrderExpanded(order._id)}
+                  className="w-full flex items-center justify-center gap-1.5 py-3 text-xs font-bold text-[var(--brand)] hover:bg-[var(--brand-soft)] border-t border-[var(--border-subtle)] transition-colors cursor-pointer select-none"
+                >
+                  {isCardExpanded ? (
+                    <>
+                      <ChevronUp className="w-4 h-4" />
+                      物件一覧を閉じる
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-4 h-4" />
+                      物件一覧を表示 ({matchCount}件) — クリックして展開
+                    </>
+                  )}
+                </button>
               </Card>
             );
           })
