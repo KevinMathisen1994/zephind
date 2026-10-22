@@ -75,6 +75,25 @@ const cases = [
     criteria: { wards: ["板橋区"] },
     ctx: { marketAvgPrice: 4200, amenityCount: null, currentYear: CY },
   },
+  {
+    name: "9. Large unit (120㎡, 18,000万円) compared by ㎡ (150万円/㎡ vs ward comp 160万円/㎡)",
+    why: "gross price (18,000万) exceeds ward avg (10,000万), but unit price (150万/㎡) is below market (160万/㎡) → must NOT be disqualified as overpriced",
+    expect: [75, 95],
+    listing: { ward: "港区", price: 18000, propertyType: "マンション", area: 120, yield: 6.5,
+      walkMinutes: 5, roadWidth: 8, structure: "RC", buildYear: 2018 },
+    criteria: { wards: ["港区"], priceMax: 20000, propertyTypes: ["マンション"], minYield: 5.5,
+      walkMinutesMax: 10, structureTypes: ["RC"] },
+    ctx: { marketAvgPrice: 10000, marketAvgPricePerSqm: 160, amenityCount: 40, currentYear: CY },
+  },
+  {
+    name: "10. Compact studio (30㎡, 4,500万円) compared by ㎡ (150万円/㎡ vs ward comp 150万円/㎡)",
+    why: "gross price (4,500万) is half ward gross avg (9,000万 for 60㎡), but unit price is at market (150万/㎡) → scored at market, not as a false 50% discount",
+    expect: [65, 85],
+    listing: { ward: "渋谷区", price: 4500, propertyType: "マンション", area: 30, yield: 5.2,
+      walkMinutes: 6, roadWidth: 6, structure: "RC", buildYear: 2015 },
+    criteria: { wards: ["渋谷区"], priceMax: 6000, propertyTypes: ["マンション"] },
+    ctx: { marketAvgPrice: 9000, marketAvgPricePerSqm: 150, amenityCount: 35, currentYear: CY },
+  },
 ];
 
 let pass = 0, fail = 0;

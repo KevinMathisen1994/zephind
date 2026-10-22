@@ -6,7 +6,7 @@
  */
 import { Router, type Request } from "express";
 import { db } from "../db";
-import { requireOwned, requireUserId } from "../auth/authz";
+import { HttpError, requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
 // Pure JS module, deliberately untyped (see tsconfig checkJs).
 import { computeMatchScore, mlitTypeForListing, wardCityCode } from "../lib/scoring.js";
@@ -194,16 +194,11 @@ async function callRaxChat(apiKey: string, payload: unknown): Promise<any> {
   }
 }
 
-export const evaluateRouter = Router();
-
-evaluateRouter.post("/", route(async (req: Request) => {
-  // Unauthenticated callers could otherwise burn LLM / Places / MLIT quota.
-  // The writes below are separately ownership-checked; this stops the spend.
-  requireUserId(req);
-  const apiKey = process.env.RAX_API_KEY;
-  if (!apiKey) return { error: "RAX_API_KEY not configured" };
-
-  const args: any = req.body ?? {};
+/**
+ * Market context and deterministic score for one listing. No LLM call, so a
+ * batch can gather several of these in parallel and share one Rax request.
+ */
+async function prepareListing(req: Request, args: any) {
   const c: any = args.orderCriteria || {};
   const isRental = (args.dealType ?? c.dealType) === "rent";
 
@@ -215,17 +210,23 @@ evaluateRouter.post("/", route(async (req: Request) => {
   // 1. Property summary. Rent and price/yield are mutually exclusive (a listing
   // is one or the other), so which line prints is decided by dealType, not by
   // which field happens to be set.
+  const isLand = ["土地", "用地", "宅地"].some((t) => (args.propertyType || "").includes(t));
+  const listingArea = isLand ? (args.landSize || args.area) : (args.area || args.landSize);
+  const listingPricePerSqm = listingArea && args.price ? Math.round((args.price / listingArea) * 10) / 10 : null;
+
   const propertySummary = `
 【物件概要】
 ・所在地: ${args.address || ""} ${args.ward || ""}
 ${
   isRental
     ? `・賃料: ${args.rent ? `${args.rent.toLocaleString()}万円/月` : "未記載"}\n・管理費: ${args.managementFee ? `${args.managementFee}万円/月` : "なし/未記載"}\n・敷金/礼金: ${args.deposit != null ? `${args.deposit}万円` : "未記載"} / ${args.keyMoney != null ? `${args.keyMoney}万円` : "未記載"}\n・ペット: ${args.petsAllowed === true ? "相談可" : args.petsAllowed === false ? "不可" : "未記載"}`
-    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
+    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円${listingPricePerSqm ? `（平米単価: ${listingPricePerSqm}万円/㎡）` : ""}` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
 }
 ・土地面積: ${args.landSize ? `${args.landSize}㎡` : "要確認"}
 ・延床/専有面積: ${args.area ? `${args.area}㎡` : "要確認"}
 ・物件種別: ${args.propertyType || "未記載"}
+・間取り/総戸数: ${args.layout || (args.rooms ? `${args.rooms}室` : "未記載")} / ${args.totalUnits ? `${args.totalUnits}戸` : "未記載"}
+・間口: ${args.frontage ? `${args.frontage}m` : "未記載"}
 ・構造/築年: ${args.structure || "構造未記載"} / ${args.buildYear ? `${args.buildYear}年築` : "築年未記載"}
 ・最寄駅: ${args.station || ""} ${args.walkMinutes !== undefined ? `(徒歩${args.walkMinutes}分)` : ""}
 ・前面道路幅員: ${args.roadWidth ? `${args.roadWidth}m` : "未記載"}
@@ -330,6 +331,7 @@ ${
   // filtering to this listing's type happens below.
   let historicalInfo = "";
   let marketAvgPrice: number | null = null;
+  let marketAvgPricePerSqm: number | null = null;
   let comparables: any[] = [];
   const reinfolibKey = process.env.REINFOLIB_API_KEY;
   if (reinfolibKey && args.ward) {
@@ -388,14 +390,27 @@ ${
             const avg = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
             const min = Math.round(Math.min(...prices));
             const max = Math.round(Math.max(...prices));
+
+            const ppsmItems = items.filter((i: any) => i.price && i.area && i.area > 0);
+            const avgPpsm = ppsmItems.length > 0
+              ? +(ppsmItems.reduce((a: number, b: any) => a + (b.price / b.area), 0) / ppsmItems.length).toFixed(1)
+              : null;
+
             lines.push(
-              `・${year}年: ${items.length}件の取引（${targetType}）| 平均価格: ${avg.toLocaleString()}万円 (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
+              `・${year}年: ${items.length}件の取引（${targetType}）| 平均価格: ${avg.toLocaleString()}万円${avgPpsm ? `（平均単価: ${avgPpsm}万円/㎡）` : ""} (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
             );
           }
         }
         if (allPrices.length > 0) {
           marketAvgPrice = Math.round(allPrices.reduce((a, b) => a + b, 0) / allPrices.length);
         }
+        const validPpsmList = allItems
+          .filter((i: any) => i.price && i.area && i.area > 0)
+          .map((i: any) => i.price / i.area);
+        if (validPpsmList.length > 0) {
+          marketAvgPricePerSqm = +(validPpsmList.reduce((a: number, b: number) => a + b, 0) / validPpsmList.length).toFixed(1);
+        }
+
         if (lines.length > 0) {
           historicalInfo =
             `\n\n【${args.ward}における国土交通省の実取引相場データ（${targetType}）】\n` + lines.join("\n");
@@ -403,14 +418,18 @@ ${
 
         // Similar sold properties, closest in size, so a human (and the model)
         // can see WHICH comps back the price call instead of one averaged number.
-        const targetArea = args.landSize || args.area;
+        const targetArea = listingArea;
         if (allItems.length > 0) {
           comparables = allItems
-            .filter((i: any) => i.area != null)
+            .filter((i: any) => i.area != null && i.area > 0)
             .sort((a: any, b: any) =>
               targetArea ? Math.abs(a.area - targetArea) - Math.abs(b.area - targetArea) : b.price - a.price,
             )
-            .slice(0, 5);
+            .slice(0, 5)
+            .map((cItem: any) => ({
+              ...cItem,
+              pricePerSqm: cItem.area && cItem.area > 0 ? +(cItem.price / cItem.area).toFixed(1) : null,
+            }));
         }
         if (allItems.length === 0) {
           dataWarnings.push(
@@ -420,7 +439,8 @@ ${
 
         if (comparables.length > 0) {
           const compLines = comparables.map((cItem: any) => {
-            const areaTxt = cItem.area != null ? `${cItem.area}㎡` : "面積不明";
+            const ppsmTxt = cItem.pricePerSqm != null ? `（${cItem.pricePerSqm}万円/㎡）` : "";
+            const areaTxt = cItem.area != null ? `${cItem.area}㎡${ppsmTxt}` : "面積不明";
             const stationTxt = cItem.station
               ? `${cItem.station}駅${cItem.walkMinutes ? ` 徒歩${cItem.walkMinutes}分` : ""}`
               : "最寄駅不明";
@@ -441,6 +461,7 @@ ${
   // then trust.
   const assessment = computeMatchScore(args, c, {
     marketAvgPrice,
+    marketAvgPricePerSqm,
     amenityCount: nearbyTotalCount,
   });
   const score = assessment.score;
@@ -455,44 +476,6 @@ ${
       : "【要確認事項】特になし",
   ].join("\n\n");
 
-  const fullPrompt = `
-あなたは東京の不動産投資ファンドおよび大手売買仲介のトップブローカー（査定責任者）です。
-以下の【顧客の購入ニーズ】、【物件概要】、【周辺インフラ環境】、【国土交通省の成約相場データ】を精密に比較対照し、プロの投資判断および顧客提案用の評価レポートを作成してください。
-
-${orderSummary}
-
-${propertySummary}
-${nearbyInfo}
-${historicalInfo}
-
-${verdictBrief}
-
-【出力フォーマット指示】
-必ず以下の4つの見出し（①〜④）をそのまま使用し、プロの不動産実務者としての視点と客観的なデータに基づいてわかりやすく記述してください。
-
-① 顧客ニーズ適合度
-（顧客の希望条件「価格、利回り、エリア、駅徒歩、道路幅員、構造、階数、こだわり等」に対する当物件の合致状況を明記）
-
-② 物件の強み・投資メリット
-（立地、資産性、周辺環境、収益性、将来の出口戦略など）
-
-③ 留意点・主要リスク
-（道路条件、耐震・築年数、法令制限、設備・管理面などの検討事項）
-
-④ プロの総合アドバイス・提案方針
-（買主顧客へ提示する際のポイントや交渉戦略のまとめ）
-
-※ 採点は既に確定しています。点数を自分で計算・変更・出力しないでください。
-※ 上記【確定スコア】${score}点と矛盾しない論調で記述してください（低評価なら明確に低評価として、率直に書くこと）。
-※【致命的な不適合】がある場合は、①と③で必ず明示し、他の長所で相殺できない旨を明記してください。
-※【要確認事項】は③に「現地調査・売主資料での確認が必要な項目」として列挙してください。推測で埋めないこと。
-`.trim();
-
-  // Built once, up front, so every return path below (success, a Rax AI error
-  // payload, or a thrown network error) has the same shape to persist and
-  // return. This used to happen only on the success path, so any Rax AI hiccup
-  // threw away the already-computed score and left the listing looking
-  // permanently "unevaluated".
   const scoreDetail = {
     fitPct: assessment.fitPct,
     marketPct: assessment.marketPct,
@@ -501,25 +484,99 @@ ${verdictBrief}
     unverified: assessment.unverified,
     breakdown: assessment.breakdown,
     marketAvgPrice,
+    marketAvgPricePerSqm,
+    listingPricePerSqm,
     amenityCount: nearbyTotalCount,
     comparables,
     dataWarnings,
   };
 
-  /** Persist the deterministic score even when the AI narrative fails. */
-  const persistScore = async (evaluationText: string) => {
-    if (!args.matchId) return;
-    try {
-      // One patch, not three round trips — ownership was checked up front.
-      await db.patch("matching", args.matchId, {
-        evaluation: evaluationText,
-        score,
-        scoreDetail,
-      });
-    } catch (dbErr) {
-      console.error("[Rax AI] DB save failed:", dbErr);
-    }
+  return {
+    matchId: args.matchId as string | undefined,
+    score,
+    scoreDetail,
+    assessment,
+    orderSummary,
+    listingSection: `${propertySummary}${nearbyInfo}${historicalInfo}\n\n${verdictBrief}`,
   };
+}
+
+type Prepared = Awaited<ReturnType<typeof prepareListing>>;
+
+/** Persist the deterministic score even when the AI narrative fails. */
+async function persistScore(p: Prepared, evaluation: string) {
+  if (!p.matchId) return;
+  try {
+    // One patch, not three round trips — ownership was checked up front.
+    await db.patch("matching", p.matchId, { evaluation, score: p.score, scoreDetail: p.scoreDetail });
+  } catch (dbErr) {
+    console.error("[Rax AI] DB save failed:", dbErr);
+  }
+}
+
+const fallbackText = (message: string, score: number) =>
+  `AI解説の生成に失敗しました（${message}）。スコアは社内査定ロジックによる確定値です。\n\n【プロの総合投資スコア: ${score}点】`;
+
+/** Splits a batch reply on its `=== 物件N ===` markers. Index i holds 物件(i+1). */
+export function splitBatchReply(content: string, count: number): (string | undefined)[] {
+  const out: (string | undefined)[] = new Array(count).fill(undefined);
+  const parts = content.split(/^[=＝]{2,}\s*物件\s*(\d+)\s*[=＝]{2,}\s*$/m);
+  // split with a capture group yields [preamble, n1, body1, n2, body2, ...]
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const idx = Number(parts[i]) - 1;
+    if (idx >= 0 && idx < count && parts[i + 1].trim()) out[idx] = parts[i + 1].trim();
+  }
+  if (count === 1 && !out[0] && content.trim()) out[0] = content.trim();
+  return out;
+}
+
+/**
+ * One Rax call for every listing in `items`. Rax allows ~15 calls/minute, so
+ * five listings per call is five times the throughput of one call each.
+ */
+async function evaluatePrepared(apiKey: string, items: Prepared[]) {
+  // A batch from the Orders page shares one order; print it once, not five times.
+  const sharedOrder = items.every((p) => p.orderSummary === items[0].orderSummary);
+  const sections = items.map((p, i) =>
+    `=== 物件${i + 1} ===\n${sharedOrder ? "" : `${p.orderSummary}\n\n`}${p.listingSection}`,
+  );
+
+  const fullPrompt = `
+あなたは東京の不動産投資ファンドおよび大手売買仲介のトップブローカー（査定責任者）です。
+以下の${items.length}件の物件それぞれについて、【顧客の購入ニーズ】、【物件概要】、【周辺インフラ環境】、【国土交通省の成約相場データ】を精密に比較対照し、プロの投資判断および顧客提案用の評価レポートを作成してください。各物件は独立して評価し、他の物件の情報を混同しないこと。
+
+${sharedOrder ? items[0].orderSummary : ""}
+
+${sections.join("\n\n")}
+
+【出力フォーマット指示】
+物件ごとに、必ず「=== 物件N ===」（Nは上記の物件番号）だけの行から書き始め、全${items.length}件を番号順に出力してください。
+各物件について、以下の4つの見出し（①〜④）をそのまま使用し、プロの不動産実務者としての視点と客観的なデータに基づいてわかりやすく記述してください。
+
+① 顧客ニーズ適合度
+（顧客の希望条件「価格、利回り、エリア、駅徒歩、道路幅員、構造、階数、こだわり等」に対する当物件の合致状況を明記）
+
+② 物件の強み・投資メリット
+（立地、資産性、周辺環境、収益性、将来の出口戦略など。周辺施設データと成約相場・類似取引事例を具体的に引用すること）
+
+③ 留意点・主要リスク
+（道路条件、耐震・築年数、法令制限、設備・管理面などの検討事項）
+
+④ プロの総合アドバイス・提案方針
+（買主顧客へ提示する際のポイントや交渉戦略のまとめ）
+
+※ 採点は既に確定しています。点数を自分で計算・変更・出力しないでください。
+※ 各物件の【確定スコア】と矛盾しない論調で記述してください（低評価なら明確に低評価として、率直に書くこと）。
+※【致命的な不適合】がある場合は、①と③で必ず明示し、他の長所で相殺できない旨を明記してください。
+※【要確認事項】は③に「現地調査・売主資料での確認が必要な項目」として列挙してください。推測で埋めないこと。
+`.trim();
+
+  const fail = async (message: string) =>
+    Promise.all(items.map(async (p) => {
+      const evaluation = fallbackText(message, p.score);
+      await persistScore(p, evaluation);
+      return { matchId: p.matchId, error: message, evaluation, score: p.score, scoreDetail: p.scoreDetail };
+    }));
 
   try {
     const data = await callRaxChat(apiKey, {
@@ -533,57 +590,73 @@ ${verdictBrief}
         { role: "user", content: fullPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 2500,
+      max_tokens: 2500 * items.length,
       stream: false,
     });
 
     if (data.error) {
       console.error("[Rax AI] API error:", data.error);
-      const message = data.error.message || JSON.stringify(data.error);
-      const fallback = `AI解説の生成に失敗しました（${message}）。スコアは社内査定ロジックによる確定値です。\n\n【プロの総合投資スコア: ${score}点】`;
-      await persistScore(fallback);
-      return { error: message, evaluation: fallback, score, scoreDetail };
+      return fail(data.error.message || JSON.stringify(data.error));
     }
-    let evaluation = data.choices?.[0]?.message?.content || "評価レスポンスなし";
-    evaluation = evaluation.replace(/アrea/gi, "エリア").replace(/A-rea/gi, "エリア");
+    const content: string = data.choices?.[0]?.message?.content || "";
+    const texts = splitBatchReply(content, items.length);
 
-    // The score is computed in code, NOT read back from the model. This used to
-    // parse 【プロの総合投資スコア: XX点】 out of the model's own prose, which
-    // made the deterministic scorer dead code and saved a temperature-0.7
-    // sample: byte-identical inputs measured 82 and then 72, which is what
-    // produced the phantom 98 -> 88 -> 98 "regressions".
-    const scoreTagPattern = /\n*【プロの総合投資スコア[：:\s]*\d{1,3}点?】\s*$/;
-    const strayScore = evaluation.match(scoreTagPattern);
-    if (strayScore) evaluation = evaluation.replace(scoreTagPattern, "");
-    evaluation = `${evaluation.trim()}\n\n【プロの総合投資スコア: ${score}点】`;
+    return Promise.all(items.map(async (p, i) => {
+      if (!texts[i]) {
+        const message = `AI応答に物件${i + 1}の解説が含まれていませんでした`;
+        const evaluation = fallbackText(message, p.score);
+        await persistScore(p, evaluation);
+        return { matchId: p.matchId, error: message, evaluation, score: p.score, scoreDetail: p.scoreDetail };
+      }
+      let evaluation = texts[i]!.replace(/アrea/gi, "エリア").replace(/A-rea/gi, "エリア");
+      // The score is computed in code, NOT read back from the model: a
+      // temperature-0.7 sample gave 82 then 72 for byte-identical inputs.
+      const scoreTagPattern = /\n*【プロの総合投資スコア[：:\s]*\d{1,3}点?】\s*$/;
+      const strayScore = evaluation.match(scoreTagPattern);
+      if (strayScore) evaluation = evaluation.replace(scoreTagPattern, "");
+      evaluation = `${evaluation.trim()}\n\n【プロの総合投資スコア: ${p.score}点】`;
 
-    console.log(
-      `[Broker score] match=${args.matchId || "?"} score=${score} ` +
-        `fit=${assessment.fitPct?.toFixed(2) ?? "n/a"} market=${assessment.marketPct?.toFixed(2) ?? "n/a"} ` +
-        `completeness=${assessment.completeness} marketAvg=${marketAvgPrice ?? "none"} ` +
-        `amenities=${nearbyTotalCount ?? "none"}` +
-        (strayScore ? ` (model also guessed ${strayScore[0].replace(/\D/g, "")}, discarded)` : ""),
-      JSON.stringify({
-        disqualifiers: assessment.disqualifiers,
-        unverified: assessment.unverified,
-        requirement: assessment.breakdown.requirement,
-        market: assessment.breakdown.market,
-      }),
-    );
+      const a = p.assessment;
+      console.log(
+        `[Broker score] match=${p.matchId || "?"} score=${p.score} ` +
+          `fit=${a.fitPct?.toFixed(2) ?? "n/a"} market=${a.marketPct?.toFixed(2) ?? "n/a"} ` +
+          `completeness=${a.completeness} marketAvg=${p.scoreDetail.marketAvgPrice ?? "none"} ` +
+          `amenities=${p.scoreDetail.amenityCount ?? "none"} batch=${items.length}` +
+          (strayScore ? ` (model also guessed ${strayScore[0].replace(/\D/g, "")}, discarded)` : ""),
+      );
 
-    await persistScore(evaluation);
-
-    // scoreDetail is surfaced so the UI can show WHY a listing scored as it did,
-    // and so regressions are diagnosable without re-running the model.
-    return { evaluation, score, model: data.model, scoreDetail };
+      await persistScore(p, evaluation);
+      return { matchId: p.matchId, evaluation, score: p.score, model: data.model, scoreDetail: p.scoreDetail };
+    }));
   } catch (err) {
     console.error("[Rax AI] Request failed:", err);
-    const message = err instanceof Error ? err.message : String(err);
-    // The score no longer depends on the model, so persist and return it even
-    // when the narrative call fails — a listing without prose still ranks
-    // correctly, and no longer looks "unevaluated".
-    const fallback = `AI解説の生成に失敗しました（${message}）。スコアは社内査定ロジックによる確定値です。\n\n【プロの総合投資スコア: ${score}点】`;
-    await persistScore(fallback);
-    return { error: message, evaluation: fallback, score, scoreDetail };
+    return fail(err instanceof Error ? err.message : String(err));
   }
+}
+
+export const evaluateRouter = Router();
+
+evaluateRouter.post("/", route(async (req: Request) => {
+  // Unauthenticated callers could otherwise burn LLM / Places / MLIT quota.
+  requireUserId(req);
+  const apiKey = process.env.RAX_API_KEY;
+  if (!apiKey) return { error: "RAX_API_KEY not configured" };
+  const [result] = await evaluatePrepared(apiKey, [await prepareListing(req, req.body ?? {})]);
+  return result;
+}));
+
+export const MAX_BATCH = 5;
+
+/** Body: { items: EvaluateArgs[] } (≤ MAX_BATCH). Returns { results } in the same order. */
+evaluateRouter.post("/batch", route(async (req: Request) => {
+  requireUserId(req);
+  const apiKey = process.env.RAX_API_KEY;
+  if (!apiKey) return { error: "RAX_API_KEY not configured" };
+  const items = req.body?.items;
+  if (!Array.isArray(items) || items.length === 0 || items.length > MAX_BATCH) {
+    throw new HttpError(400, `items must be an array of 1-${MAX_BATCH} listings`);
+  }
+  // Ownership is checked inside prepareListing, before any LLM spend.
+  const prepared = await Promise.all(items.map((args: any) => prepareListing(req, args ?? {})));
+  return { results: await evaluatePrepared(apiKey, prepared) };
 }));

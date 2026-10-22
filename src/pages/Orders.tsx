@@ -112,6 +112,7 @@ type InspectedMail = {
 type ComparableTrade = {
   price: number;
   area?: number | null;
+  pricePerSqm?: number | null;
   district?: string;
   station?: string;
   walkMinutes?: string;
@@ -121,6 +122,8 @@ type ComparableTrade = {
 
 type EvaluationScoreDetail = {
   marketAvgPrice?: number | null;
+  marketAvgPricePerSqm?: number | null;
+  listingPricePerSqm?: number | null;
   amenityCount?: number | null;
   comparables?: ComparableTrade[];
   dataWarnings?: string[];
@@ -749,6 +752,7 @@ export default function OrdersPage() {
     return fetchedListings;
   }, [matches, matchListingIds.length, fetchedListings]);
   const evaluateListing = useAction(api.evaluate.evaluateListing);
+  const evaluateBatch = useAction(api.evaluate.evaluateBatch);
   // Read-only mailbox connection (convex/mailIngest.js) — a DIFFERENT feature
   // from the removed proposal-SEND integration: this reads broker emails and
   // matches them against orders, it never sends anything.
@@ -1318,59 +1322,64 @@ export default function OrdersPage() {
     try {
       for (let i = 0; i < unevaluatedMatches.length; i += BATCH_SIZE) {
         const chunk = unevaluatedMatches.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-          chunk.map(async (m) => {
-            const listing = listings?.find((l) => l._id === m.listingId);
-            if (!listing) return;
-            try {
-              const result = await evaluateListing({
-                matchId: m._id,
-                address: listing.address,
-                ward: listing.ward,
-                price: listing.price,
-                landSize: listing.landSize,
-                area: listing.area,
-                buildingCoverageRatio: listing.buildingCoverageRatio,
-                floorAreaRatio: listing.floorAreaRatio,
-                walkMinutes: listing.walkMinutes,
-                station: listing.station,
-                buildYear: listing.buildYear,
-                roadWidth: listing.roadWidth,
-                frontage: listing.frontage,
-                rooms: listing.rooms,
-                layout: listing.layout,
-                propertyType: listing.propertyType,
-                description: listing.description,
-                yield: listing.yield || listing.grossYield || listing.netYield,
-                structure: listing.structure || listing.buildingStructure,
-                floor: listing.floor,
-                totalUnits: listing.totalUnits,
-                elevators: listing.elevators,
-                dealType: listing.dealType,
-                rent: listing.rent,
-                managementFee: listing.managementFee,
-                deposit: listing.deposit,
-                keyMoney: listing.keyMoney,
-                petsAllowed: listing.petsAllowed,
-                orderCriteria,
-              });
-              if (result?.evaluation) {
-                setEvaluations((prev) => ({
-                  ...prev,
-                  [m._id]: result.evaluation,
-                }));
-              }
-              if (result?.scoreDetail) {
-                setScoreDetails((prev) => ({
-                  ...prev,
-                  [m._id]: result.scoreDetail as EvaluationScoreDetail,
-                }));
-              }
-            } catch (err) {
-              console.error("Evaluation error for match", m._id, err);
+        // One request per chunk: the server makes a single LLM call for all of
+        // them, which is what keeps us under Rax's ~15 calls/minute.
+        const items = chunk.flatMap((m) => {
+          const listing = listings?.find((l) => l._id === m.listingId);
+          if (!listing) return [];
+          return [{
+            matchId: m._id,
+            address: listing.address,
+            ward: listing.ward,
+            price: listing.price,
+            landSize: listing.landSize,
+            area: listing.area,
+            buildingCoverageRatio: listing.buildingCoverageRatio,
+            floorAreaRatio: listing.floorAreaRatio,
+            walkMinutes: listing.walkMinutes,
+            station: listing.station,
+            buildYear: listing.buildYear,
+            roadWidth: listing.roadWidth,
+            frontage: listing.frontage,
+            rooms: listing.rooms,
+            layout: listing.layout,
+            propertyType: listing.propertyType,
+            description: listing.description,
+            yield: listing.yield || listing.grossYield || listing.netYield,
+            structure: listing.structure || listing.buildingStructure,
+            floor: listing.floor,
+            totalUnits: listing.totalUnits,
+            elevators: listing.elevators,
+            dealType: listing.dealType,
+            rent: listing.rent,
+            managementFee: listing.managementFee,
+            deposit: listing.deposit,
+            keyMoney: listing.keyMoney,
+            petsAllowed: listing.petsAllowed,
+            orderCriteria,
+          }];
+        });
+        try {
+          const { results = [], error } = (await evaluateBatch({ items })) ?? {};
+          if (error) console.error("Batch evaluation error", error);
+          for (const result of results) {
+            if (!result?.matchId) continue;
+            if (result.evaluation) {
+              setEvaluations((prev) => ({
+                ...prev,
+                [result.matchId]: result.evaluation,
+              }));
             }
-          }),
-        );
+            if (result.scoreDetail) {
+              setScoreDetails((prev) => ({
+                ...prev,
+                [result.matchId]: result.scoreDetail as EvaluationScoreDetail,
+              }));
+            }
+          }
+        } catch (err) {
+          console.error("Evaluation error for batch", items.map((x) => x.matchId), err);
+        }
 
         setEvalProgress((prev) => ({
           ...prev,
@@ -2157,18 +2166,13 @@ export default function OrdersPage() {
   const totalEvaluatedCount = Object.keys(evaluations).length;
 
   return (
-    <div className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
+    <div className="page-shell space-y-5">
       {/* ── Page Header ── */}
-      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-5">
+      <div className="page-header">
         <div>
-          <div className="brand-divider mb-1">
-            <FileText className="w-3.5 h-3.5" />
-            自動マッチング＆物件評価システム
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            物件検索
-          </h1>
-          <p className="text-sm text-[var(--text-muted)] mt-1">
+          <div className="eyebrow-pill">Property Search</div>
+          <h1 className="page-title">物件検索</h1>
+          <p className="page-subtitle">
             買主希望条件の登録、全14不動産ポータル横断検索、物件評価を一括管理
           </p>
         </div>
@@ -2177,44 +2181,39 @@ export default function OrdersPage() {
             if (showForm) resetForm();
             setShowForm(!showForm);
           }}
-          className="h-11 px-5 text-sm font-bold gap-2 rounded-xl"
-          style={{
-            background: showForm ? "var(--bg-surface-hover)" : "var(--brand)",
-            color: showForm ? "var(--text-primary)" : "#fff",
-            boxShadow: showForm ? "none" : "0 4px 14px rgba(26,113,0,0.25)",
-          }}
+          variant={showForm ? "outline" : "default"}
         >
-          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showForm ? "キャンセル" : "作成"}
+          {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {showForm ? "キャンセル" : "新規オーダー作成"}
         </Button>
       </div>
 
       {/* ── Mail connection: read broker emails (物件紹介) and auto-match them
           against every order, same as a scraped listing. Read-only — this
           never sends anything (see ProposalModal for that, unrelated). ── */}
-      <div className="p-4 rounded-2xl bg-white border border-[var(--border-subtle)] shadow-xs space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Mail className="w-4 h-4 text-[var(--brand)]" />
-            <span className="text-sm font-bold text-[var(--text-primary)]">
+      <div className="rounded-2xl border border-[var(--border-subtle)] bg-white p-4 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Mail className="h-4 w-4 shrink-0 text-[var(--brand)]" />
+            <span className="text-sm font-semibold text-[var(--text-primary)]">
               メール連携
             </span>
-            <span className="text-xs text-[var(--text-muted)]">
+            <span className="truncate text-xs text-[var(--text-muted)]">
               仲介会社からの物件紹介メールを自動で抽出・照合します
             </span>
           </div>
+          <div className="flex shrink-0 items-center gap-1.5">
           {(mailAccounts?.length ?? 0) > 0 && (
             <Button
               size="sm"
               variant="outline"
               disabled={syncingMail}
               onClick={() => void handleSyncMailNow()}
-              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
             >
               {syncingMail ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="h-3.5 w-3.5" />
               )}
               今すぐ同期
             </Button>
@@ -2226,12 +2225,11 @@ export default function OrdersPage() {
               variant="outline"
               disabled={inspecting}
               onClick={() => void handleInspectMail()}
-              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
             >
               {inspecting ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Mail className="w-3.5 h-3.5" />
+                <Mail className="h-3.5 w-3.5" />
               )}
               同期メールを確認
             </Button>
@@ -2241,12 +2239,12 @@ export default function OrdersPage() {
               size="sm"
               variant="outline"
               onClick={() => setShowMailRules(true)}
-              className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <SlidersHorizontal className="h-3.5 w-3.5" />
               取り込み設定
             </Button>
           )}
+          </div>
         </div>
 
         {mailNotice && (
@@ -2313,7 +2311,7 @@ export default function OrdersPage() {
       </div>
 
       {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
           {
             icon: FileCheck2,
@@ -2325,44 +2323,44 @@ export default function OrdersPage() {
           },
           {
             icon: CheckCircle2,
-            color: "#0d9488",
-            bg: "#f0fdfa",
+            color: "var(--info)",
+            bg: "var(--info-soft)",
             label: "検索完了",
             value: activeOrdersCount,
             loading: orders === undefined,
           },
           {
             icon: Building2,
-            color: "#d97706",
-            bg: "#fffbeb",
+            color: "var(--warning)",
+            bg: "var(--warning-soft)",
             label: "全検索結果",
             value: totalMatchesCount,
             loading: matches === undefined,
           },
           {
             icon: FileText,
-            color: "#7c3aed",
-            bg: "#f5f3ff",
+            color: "var(--success)",
+            bg: "var(--success-soft)",
             label: "評価完了数",
             value: totalEvaluatedCount,
             loading: false,
           },
         ].map((kpi, i) => (
           <div key={i} className="kpi-card">
-            <div
-              className="flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-xl shrink-0"
-              style={{ background: kpi.bg, color: kpi.color }}
-            >
-              <kpi.icon className="w-4 h-4 md:w-5 md:h-5" />
+            <div className="flex items-start justify-between gap-2">
+              <span className="stat-label">{kpi.label}</span>
+              <span
+                className="kpi-icon"
+                style={{ background: kpi.bg, color: kpi.color }}
+              >
+                <kpi.icon className="h-[15px] w-[15px]" />
+              </span>
             </div>
-            <div className="min-w-0">
-              <div className="text-[10px] md:text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-                {kpi.label}
-              </div>
-              <div className="text-lg md:text-xl font-extrabold text-[var(--text-primary)] font-data tracking-tight">
-                {kpi.loading ? <Skeleton className="h-6 w-10" /> : kpi.value}
-              </div>
-            </div>
+            {kpi.loading ? (
+              <Skeleton className="h-7 w-16" />
+            ) : (
+              <div className="stat-value">{kpi.value}</div>
+            )}
           </div>
         ))}
       </div>
@@ -4062,14 +4060,21 @@ export default function OrdersPage() {
                                             scoreDetail.comparables.length >
                                               0 && (
                                               <div className="mt-2 rounded-lg border border-emerald-100 bg-white/70 p-3">
-                                                <div className="text-[11px] font-bold text-emerald-900 mb-1.5">
-                                                  類似取引事例（国交省データ・面積が近い順）
-                                                  {scoreDetail.marketAvgPrice !=
-                                                    null && (
-                                                    <span className="ml-2 font-normal text-slate-500">
-                                                      平均{" "}
-                                                      {scoreDetail.marketAvgPrice.toLocaleString()}
-                                                      万円
+                                                <div className="text-[11px] font-bold text-emerald-900 mb-1.5 flex flex-wrap items-baseline gap-x-2">
+                                                  <span>類似取引事例（国交省データ・面積が近い順）</span>
+                                                  {scoreDetail.marketAvgPrice != null && (
+                                                    <span className="font-normal text-slate-500">
+                                                      平均 {scoreDetail.marketAvgPrice.toLocaleString()}万円
+                                                    </span>
+                                                  )}
+                                                  {scoreDetail.marketAvgPricePerSqm != null && (
+                                                    <span className="font-semibold text-emerald-700">
+                                                      相場単価: {scoreDetail.marketAvgPricePerSqm.toLocaleString()}万円/㎡
+                                                    </span>
+                                                  )}
+                                                  {scoreDetail.listingPricePerSqm != null && (
+                                                    <span className="font-normal text-slate-600">
+                                                      （当物件: {scoreDetail.listingPricePerSqm}万円/㎡）
                                                     </span>
                                                   )}
                                                 </div>
@@ -4088,6 +4093,11 @@ export default function OrdersPage() {
                                                           {comp.area != null
                                                             ? `${comp.area}㎡`
                                                             : "面積不明"}
+                                                          {comp.pricePerSqm != null && (
+                                                            <span className="ml-1 text-emerald-700 text-[10px]">
+                                                              ({comp.pricePerSqm}万円/㎡)
+                                                            </span>
+                                                          )}
                                                         </span>
                                                         <span>
                                                           {comp.district || ""}

@@ -193,10 +193,10 @@ const W = {
 /**
  * @param {object} listing  raw listing fields (all optional)
  * @param {object} criteria buyer orderCriteria (all optional)
- * @param {object} ctx      { marketAvgPrice, amenityCount }
+ * @param {object} ctx      { marketAvgPrice, marketAvgPricePerSqm, amenityCount }
  */
 export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
-  const { marketAvgPrice = null, amenityCount = null } = ctx;
+  const { marketAvgPrice = null, marketAvgPricePerSqm = null, amenityCount = null } = ctx;
 
   const fit = []; // {key, weight, score}
   const market = []; // {key, weight, score}
@@ -431,7 +431,56 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
   // Price vs real MLIT ward comps. Buying below comps IS the return: it is
   // either instant resale/refinance equity or a lower cost basis under the same
   // rent roll, i.e. a straightforwardly higher effective yield.
-  if (marketAvgPrice && listing.price != null) {
+  // When unit area and average price per ㎡ are available, comparing price per ㎡
+  // prevents small units from falsely scoring as bargains and prevents large units
+  // from being unfairly disqualified as overpriced.
+  const listingArea = isLand
+    ? (listing.landSize ?? listing.area)
+    : (listing.area ?? listing.landSize);
+  const usePpsm =
+    marketAvgPricePerSqm != null &&
+    listingArea != null &&
+    listingArea > 0 &&
+    listing.price != null;
+
+  if (usePpsm) {
+    const listingPpsm = listing.price / listingArea;
+    const r = listingPpsm / marketAvgPricePerSqm;
+    const ppsmRound = Math.round(listingPpsm * 10) / 10;
+    const expectedPrice = Math.round(marketAvgPricePerSqm * listingArea);
+
+    const suspicious = r < 0.25;
+    const s = suspicious
+      ? 0.55
+      : r <= 0.7 ? 1 : r <= 0.85 ? 0.88 : r <= 1.0 ? 0.72 : r <= 1.1 ? 0.55
+      : r <= 1.25 ? 0.35 : r <= 1.5 ? 0.18 : 0.05;
+    market.push({
+      key: "vsMarket",
+      weight: 40,
+      score: s,
+      mode: "ppsm",
+      pricePerSqm: ppsmRound,
+      marketAvgPricePerSqm,
+      expectedPrice,
+      ratio: +r.toFixed(2),
+    });
+    if (suspicious) {
+      unverified.push(
+        `平米単価が区相場単価（${marketAvgPricePerSqm}万円/㎡）の25%未満（当物件: ${ppsmRound}万円/㎡） — 借地権・再建築不可・持分等の可能性、要確認`,
+      );
+    }
+    if (r > 1.5) {
+      disqualify(
+        `相場単価比+50%超の割高（単価${ppsmRound}万円/㎡・総額${listing.price}万円 / 相場単価${marketAvgPricePerSqm}万円/㎡・想定相場${expectedPrice}万円）`,
+        58,
+      );
+    } else if (r > 1.3) {
+      disqualify(
+        `相場単価比+30%超の割高（単価${ppsmRound}万円/㎡・総額${listing.price}万円 / 相場単価${marketAvgPricePerSqm}万円/㎡・想定相場${expectedPrice}万円）`,
+        72,
+      );
+    }
+  } else if (marketAvgPrice && listing.price != null) {
     const r = listing.price / marketAvgPrice;
     // A price far below ward comps is far more often bad data or an encumbrance
     // (借地権, 再建築不可, 持分売買) than a genuine bargain. Don't hand it a
@@ -442,11 +491,20 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
       ? 0.55
       : r <= 0.7 ? 1 : r <= 0.85 ? 0.88 : r <= 1.0 ? 0.72 : r <= 1.1 ? 0.55
       : r <= 1.25 ? 0.35 : r <= 1.5 ? 0.18 : 0.05;
-    market.push({ key: "vsMarket", weight: 40, score: s });
-    if (suspicious)
+    market.push({
+      key: "vsMarket",
+      weight: 40,
+      score: s,
+      mode: "gross",
+      listingPrice: listing.price,
+      marketAvgPrice,
+      ratio: +r.toFixed(2),
+    });
+    if (suspicious) {
       unverified.push(
         `価格が区平均（${marketAvgPrice}万円）の25%未満 — 借地権・再建築不可・持分等の可能性、要確認`,
       );
+    }
     // Being well above real recent comps is its own problem, independent of the
     // buyer's ceiling: a broker won't call an overpriced listing a strong buy
     // just because the client could technically afford it.

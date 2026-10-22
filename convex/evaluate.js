@@ -126,13 +126,17 @@ export const evaluateListing = action({
     // exclusive (a listing is one or the other — see the schema comment on
     // orders.dealType), so which line prints is decided by dealType, not by
     // which field happens to be set.
+    const isLand = ["土地", "用地", "宅地"].some((t) => (args.propertyType || "").includes(t));
+    const listingArea = isLand ? (args.landSize || args.area) : (args.area || args.landSize);
+    const listingPricePerSqm = listingArea && args.price ? Math.round((args.price / listingArea) * 10) / 10 : null;
+
     const propertySummary = `
 【物件概要】
 ・所在地: ${args.address || ""} ${args.ward || ""}
 ${
   isRental
     ? `・賃料: ${args.rent ? `${args.rent.toLocaleString()}万円/月` : "未記載"}\n・管理費: ${args.managementFee ? `${args.managementFee}万円/月` : "なし/未記載"}\n・敷金/礼金: ${args.deposit != null ? `${args.deposit}万円` : "未記載"} / ${args.keyMoney != null ? `${args.keyMoney}万円` : "未記載"}\n・ペット: ${args.petsAllowed === true ? "相談可" : args.petsAllowed === false ? "不可" : "未記載"}`
-    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
+    : `・価格: ${args.price ? `${args.price.toLocaleString()}万円${listingPricePerSqm ? `（平米単価: ${listingPricePerSqm}万円/㎡）` : ""}` : "未記載"}\n・想定利回り: ${args.yield ? `${args.yield}%` : "要確認"}`
 }
 ・土地面積: ${args.landSize ? `${args.landSize}㎡` : "要確認"}
 ・延床/専有面積: ${args.area ? `${args.area}㎡` : "要確認"}
@@ -284,6 +288,7 @@ ${
     // any property type; filtering to the listing's own type happens below.
     let historicalInfo = "";
     let marketAvgPrice = null; // used later as a real-comp signal in scoring
+    let marketAvgPricePerSqm = null;
     let comparables = []; // closest-matching sold comps, for "is this priced right"
     const reinfolibKey = process.env.REINFOLIB_API_KEY;
     if (reinfolibKey && args.ward) {
@@ -360,8 +365,13 @@ ${
               );
               const min = Math.round(Math.min(...prices));
               const max = Math.round(Math.max(...prices));
+              const ppsmItems = items.filter((i) => i.price && i.area && i.area > 0);
+              const avgPpsm = ppsmItems.length > 0
+                ? +(ppsmItems.reduce((a, b) => a + (b.price / b.area), 0) / ppsmItems.length).toFixed(1)
+                : null;
+
               lines.push(
-                `・${year}年: ${items.length}件の取引（${targetType}）| 平均価格: ${avg.toLocaleString()}万円 (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
+                `・${year}年: ${items.length}件の取引（${targetType}）| 平均価格: ${avg.toLocaleString()}万円${avgPpsm ? `（平均単価: ${avgPpsm}万円/㎡）` : ""} (範囲: ${min.toLocaleString()}〜${max.toLocaleString()}万円)`,
               );
             }
           }
@@ -370,6 +380,13 @@ ${
               allPrices.reduce((a, b) => a + b, 0) / allPrices.length,
             );
           }
+          const validPpsmList = allItems
+            .filter((i) => i.price && i.area && i.area > 0)
+            .map((i) => i.price / i.area);
+          if (validPpsmList.length > 0) {
+            marketAvgPricePerSqm = +(validPpsmList.reduce((a, b) => a + b, 0) / validPpsmList.length).toFixed(1);
+          }
+
           if (lines.length > 0) {
             historicalInfo =
               `\n\n【${args.ward}における国土交通省の実取引相場データ（${targetType}）】\n` +
@@ -379,16 +396,20 @@ ${
           // Similar sold properties, closest in size to this listing, so a
           // human (and the model) can see *which* comps back the price call
           // instead of just a single averaged number.
-          const targetArea = args.landSize || args.area;
+          const targetArea = listingArea;
           if (allItems.length > 0) {
             comparables = allItems
-              .filter((i) => i.area != null)
+              .filter((i) => i.area != null && i.area > 0)
               .sort((a, b) =>
                 targetArea
                   ? Math.abs(a.area - targetArea) - Math.abs(b.area - targetArea)
                   : b.price - a.price,
               )
-              .slice(0, 5);
+              .slice(0, 5)
+              .map((cItem) => ({
+                ...cItem,
+                pricePerSqm: cItem.area && cItem.area > 0 ? +(cItem.price / cItem.area).toFixed(1) : null,
+              }));
           }
           if (allItems.length === 0) {
             dataWarnings.push(
@@ -398,7 +419,8 @@ ${
 
           if (comparables.length > 0) {
             const compLines = comparables.map((cItem) => {
-              const areaTxt = cItem.area != null ? `${cItem.area}㎡` : "面積不明";
+              const ppsmTxt = cItem.pricePerSqm != null ? `（${cItem.pricePerSqm}万円/㎡）` : "";
+              const areaTxt = cItem.area != null ? `${cItem.area}㎡${ppsmTxt}` : "面積不明";
               const stationTxt = cItem.station
                 ? `${cItem.station}駅${cItem.walkMinutes ? ` 徒歩${cItem.walkMinutes}分` : ""}`
                 : "最寄駅不明";
@@ -422,6 +444,7 @@ ${
     // number we then trust.
     const assessment = computeMatchScore(args, c, {
       marketAvgPrice,
+      marketAvgPricePerSqm,
       amenityCount: nearbyTotalCount,
     });
     const score = assessment.score;
@@ -485,6 +508,8 @@ ${verdictBrief}
       unverified: assessment.unverified,
       breakdown: assessment.breakdown,
       marketAvgPrice,
+      marketAvgPricePerSqm,
+      listingPricePerSqm,
       amenityCount: nearbyTotalCount,
       comparables,
       dataWarnings,
