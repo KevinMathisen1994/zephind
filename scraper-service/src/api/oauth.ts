@@ -8,6 +8,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { completeOAuth } from "../services/mailIngest";
+import { oauthRedirectTo } from "../lib/mailData";
 
 /**
  * Small self-closing page for the OAuth popup. The connect flow runs in a popup
@@ -44,43 +45,69 @@ function html(res: Response, status: number, body: string) {
 
 export const oauthRouter = Router();
 
+/**
+ * Sends the browser back to the app with the outcome in the query string.
+ * Supabase's functions domain serves text/html as text/plain (anti-phishing),
+ * so the result page cannot render there; the app (src/main.tsx) handles it.
+ * Falls back to the HTML page when there is no safe app URL to return to.
+ */
+function finish(res: Response, redirectTo: string | undefined, status: number, page: { ok: boolean; title: string; detail: string }) {
+  const allowed = (process.env.CLERK_ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  let target: URL | null = null;
+  try {
+    target = redirectTo ? new URL(redirectTo) : null;
+  } catch {
+    target = null;
+  }
+  // Only return to our own frontend; the URL comes from the start request body.
+  if (target && /^https?:$/.test(target.protocol) && (allowed.length === 0 || allowed.includes(target.origin))) {
+    target.searchParams.set("mailOAuth", page.ok ? "ok" : "error");
+    target.searchParams.set("mailOAuthMsg", `${page.title}\n${page.detail}`);
+    res.redirect(302, target.toString());
+    return;
+  }
+  html(res, status, resultPage(page));
+}
+
 async function callback(req: Request, res: Response, provider: string) {
   const code = typeof req.query.code === "string" ? req.query.code : null;
   const state = typeof req.query.state === "string" ? req.query.state : null;
   const error = typeof req.query.error === "string" ? req.query.error : null;
+  // Read before completeOAuth consumes the state row.
+  const redirectTo = state ? await oauthRedirectTo(state).catch(() => undefined) : undefined;
 
   if (error) {
     const description = typeof req.query.error_description === "string" ? req.query.error_description : "";
-    html(res, 400, resultPage({
+    finish(res, redirectTo, 400, {
       ok: false,
       title: "メールアカウントを接続できませんでした",
       detail: `${error}${description ? `\n${description}` : ""}`,
-    }));
+    });
     return;
   }
 
   if (!code || !state) {
-    html(res, 400, resultPage({
+    finish(res, redirectTo, 400, {
       ok: false,
       title: "メールアカウントを接続できませんでした",
       detail: "認証情報が不足しています（code / state）。もう一度お試しください。",
-    }));
+    });
     return;
   }
 
   try {
     const result = await completeOAuth(provider, code, state);
-    html(res, 200, resultPage({
+    finish(res, redirectTo, 200, {
       ok: true,
       title: `${result.label} を接続しました`,
-      detail: `${result.email}\nこのウィンドウは自動で閉じます。届いた物件紹介メールが自動で抽出・照合されます。`,
-    }));
+      detail: `${result.email}\n届いた物件紹介メールが自動で抽出・照合されます。`,
+    });
   } catch (err) {
-    html(res, 500, resultPage({
+    finish(res, redirectTo, 500, {
       ok: false,
       title: "メールアカウントを接続できませんでした",
       detail: err instanceof Error ? err.message : String(err),
-    }));
+    });
   }
 }
 

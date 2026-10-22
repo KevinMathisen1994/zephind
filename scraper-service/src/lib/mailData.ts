@@ -50,6 +50,12 @@ export async function saveOAuthState(row: {
   await db.insert("oauthStates", row);
 }
 
+/** Where the browser should land after the callback, without consuming the state. */
+export async function oauthRedirectTo(state: string): Promise<string | undefined> {
+  const row = await db.first("oauthStates", { where: { state } });
+  return (row?.redirectTo as string | undefined) || undefined;
+}
+
 /** Single-use, whether or not it has expired. */
 export async function consumeOAuthState(state: string): Promise<Doc | null> {
   const row = await db.first("oauthStates", { where: { state } });

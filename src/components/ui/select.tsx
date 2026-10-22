@@ -31,7 +31,7 @@ export function Select({ children, className = "", value, onValueChange, ...prop
   return (
     <select
       className={cn(
-        "flex h-10 w-full cursor-pointer appearance-none items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22 fill=%22none%22 stroke=%22%23857e74%22 stroke-width=%221.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22m3 5.5 4 4 4-4%22/%3E%3C/svg%3E')] bg-[length:14px_14px] bg-[position:right_12px_center] bg-no-repeat px-3.5 pr-9 text-sm font-medium text-[var(--text-primary)] transition-[border-color,box-shadow] duration-150 focus:border-[var(--text-primary)] focus:shadow-[0_0_0_3px_rgba(200,67,43,0.14)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "flex h-10 w-full cursor-pointer appearance-none items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22 fill=%22none%22 stroke=%22%23857e74%22 stroke-width=%221.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22m3 5.5 4 4 4-4%22/%3E%3C/svg%3E')] bg-[length:14px_14px] bg-[position:right_12px_center] bg-no-repeat px-3.5 pr-9 text-sm font-medium text-[var(--text-primary)] transition-[border-color,box-shadow] duration-150 focus:border-[var(--text-primary)] focus:shadow-[0_0_0_3px_rgba(26,113,0,0.14)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       value={value}

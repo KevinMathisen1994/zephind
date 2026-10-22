@@ -15,24 +15,24 @@
     "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   --radius: 6px;
 
-  /* ── Zephind · "Ledger" — paper, ink, one vermilion accent ───────── */
+  /* ── Zephind · "Ledger" — paper, ink, emerald green accent ───────── */
   --bg-page: #f6f3ec;
   --bg-surface: #fffdf9;
   --bg-surface-hover: #faf7f0;
   --bg-page-subtle: #f1ede4;
   --bg-surface-sunken: #f1ede4;
-  --bg-brand: #f9f1e9;
+  --bg-brand: #f0f7ed;
 
   --text-primary: #17150f;
   --text-secondary: #56514a;
   --text-muted: #857e74;
   --text-placeholder: #a9a29a;
 
-  --brand: #c8432b;
-  --brand-hover: #a93420;
-  --brand-soft: #fbeee9;
-  --brand-border: #edcdc2;
-  --brand-ink: #6f1f11;
+  --brand: #1a7100;
+  --brand-hover: #155d00;
+  --brand-soft: #f0f7ed;
+  --brand-border: #caddc4;
+  --brand-ink: #114e02;
 
   --ink: #17150f;
   --ink-soft: #23201a;
@@ -50,7 +50,7 @@
   --info: #2c4a7c;
   --info-soft: #eef1f7;
 
-  --ring-color: rgba(200, 67, 43, 0.55);
+  --ring-color: rgba(26, 113, 0, 0.55);
 
   /* ── Elevation — near-flat, rules do the separating ──────────────── */
   --shadow-xs: 0 1px 0 rgba(23, 21, 15, 0.035);
@@ -197,8 +197,8 @@
 
   /* ── selection ── */
   ::selection {
-    background: #f4d7cc;
-    color: #4a160b;
+    background: #d4e8d0;
+    color: #1a3d12;
   }
 }
 
@@ -418,7 +418,7 @@
   .field:focus {
     outline: none;
     border-color: var(--text-primary);
-    box-shadow: 0 0 0 3px rgba(200, 67, 43, 0.14);
+    box-shadow: 0 0 0 3px rgba(26, 113, 0, 0.14);
   }
 
   /* Subtle brand divider label */
