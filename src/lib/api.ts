@@ -34,7 +34,7 @@ const withoutId = (a: any) => {
 
 export const api = {
   orders: {
-    list: endpoint({ method: "GET", key: "orders", path: () => "/api/orders" }),
+    list: endpoint({ method: "GET", key: "orders", path: () => "/api/orders", refetchInterval: 3000 }),
     get: endpoint({ method: "GET", key: "orders.get", path: (a) => `/api/orders/${id(a)}` }),
     create: endpoint({
       method: "POST", key: "orders.create", path: () => "/api/orders",

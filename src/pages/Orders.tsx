@@ -914,12 +914,23 @@ export default function OrdersPage() {
   // The OAuth popup posts back here on completion (see convex/http.js
   // resultPage) — Convex's own reactivity then refreshes mailAccounts.
   useEffect(() => {
+    const fallback = (ok: boolean) => (ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "zephind-oauth") {
-        setMailNotice(e.data.ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
+        setMailNotice(e.data.message || fallback(e.data.ok));
       }
     };
     window.addEventListener("message", onMessage);
+
+    // Popup blocked: the OAuth flow ran in this tab and landed back with the result.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("mailOAuth") && !window.opener) {
+      setMailNotice(params.get("mailOAuthMsg") || fallback(params.get("mailOAuth") === "ok"));
+      params.delete("mailOAuth");
+      params.delete("mailOAuthMsg");
+      const query = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+    }
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
@@ -1037,7 +1048,7 @@ export default function OrdersPage() {
         // the badge sticks permanently (nothing else ever tells the app it ended).
         if (!live) {
           for (const o of ordersRef.current ?? []) {
-            if (o.scrapingStatus === "dispatched" || o.scrapeRunId != null) {
+            if (o.scrapingStatus === "dispatched") {
               void updateOrder({
                 id: o._id,
                 scrapingStatus: "completed",
@@ -1499,7 +1510,7 @@ export default function OrdersPage() {
       // written here would be a spinner with nothing left to clear it.
       await updateOrder({
         id: order._id,
-        isScraping: false,
+        isScraping: true,
         scrapingStatus: `${siteLabel} を検索中...`,
         activeSource: sources.length === 1 ? sources[0] : "all",
       });
@@ -3447,8 +3458,30 @@ export default function OrdersPage() {
                       </div>
                     </div>
 
-                    {/* Scrape notice */}
-                    {scrapeNotice[order._id] && (
+                    {/* Active Scrape Live Status Banner */}
+                    {(order.isScraping || (order.scrapingStatus && order.scrapingStatus.includes("検索中")) || isMyRun(order) || localRunOrderId === order._id) ? (
+                      <div className="mt-2.5 p-3.5 rounded-xl text-xs font-bold leading-relaxed bg-emerald-50 text-emerald-950 border border-emerald-200 flex flex-wrap items-center justify-between gap-3 shadow-2xs animate-in fade-in duration-200">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="font-extrabold text-emerald-900 text-sm flex items-center gap-2 flex-wrap">
+                              <span>現在スクレイピング中:</span>
+                              <span className="text-emerald-950 font-mono bg-white px-2 py-0.5 rounded border border-emerald-300 shadow-2xs">
+                                {getOrderSiteLabel(order)}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-normal text-emerald-700 mt-0.5">
+                              {localRunOrderId === order._id ? "ローカル（このPC）でスクレイパーを実行しています。" : "GitHub Actions クラウドで実行中。"} 取得された物件はリアルタイムで自動反映されます。
+                            </div>
+                          </div>
+                        </div>
+                        {order.activeSource && SOURCE_LABELS[order.activeSource] && (
+                          <span className="px-2.5 py-1 bg-white text-emerald-800 border border-emerald-300 rounded-md text-[11px] font-bold shrink-0">
+                            {SOURCE_LABELS[order.activeSource]}
+                          </span>
+                        )}
+                      </div>
+                    ) : scrapeNotice[order._id] ? (
                       <div
                         className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed whitespace-pre-line ${
                           scrapeNotice[order._id].kind === "error"
@@ -3458,7 +3491,7 @@ export default function OrdersPage() {
                       >
                         {scrapeNotice[order._id].text}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </CardHeader>
 

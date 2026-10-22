@@ -13,30 +13,26 @@ import { logger } from "../logger";
  * It carries no `aud` claim, so the audience check below only runs when
  * CLERK_JWT_AUDIENCE is explicitly set (i.e. if you do go back to a template).
  */
-const issuer = process.env.CLERK_FRONTEND_API_URL || process.env.CLERK_JWT_ISSUER_DOMAIN;
-if (!issuer) {
-  throw new Error(
-    "CLERK_FRONTEND_API_URL (or CLERK_JWT_ISSUER_DOMAIN) must be set — without it " +
-      "every request fails closed as unauthenticated.",
-  );
+let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getIssuer(): string {
+  const iss = process.env.CLERK_FRONTEND_API_URL || process.env.CLERK_JWT_ISSUER_DOMAIN;
+  if (!iss) {
+    throw new Error(
+      "CLERK_FRONTEND_API_URL (or CLERK_JWT_ISSUER_DOMAIN) must be set — without it " +
+        "every request fails closed as unauthenticated.",
+    );
+  }
+  return iss;
 }
 
-// Only enforced when set. Clerk's default session token has no `aud`, so a
-// non-empty value here means "a custom JWT template is in use".
-const audience = process.env.CLERK_JWT_AUDIENCE || undefined;
-
-/**
- * Clerk puts the requesting origin in `azp`. Checking it stops a token minted
- * for a different app on the same Clerk instance from being replayed here.
- * Comma-separated; unset means no check, which is the right default for local
- * development against a dev Clerk instance.
- */
-const allowedParties = (process.env.CLERK_ALLOWED_ORIGINS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-const jwks = createRemoteJWKSet(new URL(`${issuer.replace(/\/$/, "")}/.well-known/jwks.json`));
+function getJwks() {
+  if (!cachedJwks) {
+    const iss = getIssuer();
+    cachedJwks = createRemoteJWKSet(new URL(`${iss.replace(/\/$/, "")}/.well-known/jwks.json`));
+  }
+  return cachedJwks;
+}
 
 export interface Identity {
   subject: string;
@@ -57,6 +53,14 @@ declare global {
 }
 
 export async function verifyBearer(token: string): Promise<Identity> {
+  const issuer = getIssuer();
+  const jwks = getJwks();
+  const audience = process.env.CLERK_JWT_AUDIENCE || undefined;
+  const allowedParties = (process.env.CLERK_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const { payload } = await jwtVerify(token, jwks, {
     issuer,
     ...(audience ? { audience } : {}),
@@ -105,8 +109,8 @@ export async function attachIdentity(req: Request, _res: Response, next: NextFun
       // a signed-out user.
       logger.warn(
         `[auth] rejected a bearer token on ${req.method} ${req.path}: ` +
-          `${(err as Error).message} (expected issuer ${issuer}` +
-          `${audience ? `, audience ${audience}` : ", no audience check"})`,
+          `${(err as Error).message} (expected issuer ${process.env.CLERK_FRONTEND_API_URL || process.env.CLERK_JWT_ISSUER_DOMAIN}` +
+          `${process.env.CLERK_JWT_AUDIENCE ? `, audience ${process.env.CLERK_JWT_AUDIENCE}` : ", no audience check"})`,
       );
     }
   } else if (req.path.startsWith("/api/") && !req.path.startsWith("/api/ingest")) {
