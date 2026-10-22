@@ -37,3 +37,7 @@ convex-export/
 
 # Supabase CLI temp files
 supabase/.temp/
+
+# Built by `npm run build:edge` in scraper-service
+supabase/functions/api/bundle.js
+supabase/.temp

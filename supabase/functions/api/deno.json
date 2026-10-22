@@ -1,0 +1,15 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.116.0",
+    "axios": "npm:axios@1.17.0",
+    "cheerio": "npm:cheerio@1.2.0",
+    "cors": "npm:cors@2.8.6",
+    "dotenv": "npm:dotenv@16.6.1",
+    "express": "npm:express@4.22.2",
+    "jose": "npm:jose@6.2.12",
+    "pdf-parse": "npm:pdf-parse@1.1.1",
+    "winston": "npm:winston@3.19.0",
+    "zod": "npm:zod@3.25.76",
+    "pdf-parse/": "npm:/pdf-parse@1.1.1/"
+  }
+}
