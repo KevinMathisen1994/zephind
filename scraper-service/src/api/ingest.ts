@@ -25,6 +25,7 @@ import { db } from "../db";
 import { HttpError } from "../auth/authz";
 import { logger } from "../logger";
 import { route } from "./handler";
+import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
 
 /**
@@ -441,5 +442,12 @@ ingestRouter.post("/progress", route(async (req) => {
       scrapingStatus: statusText || `${source} を検索中...`,
     });
   }
+  return { ok: true };
+}));
+
+/** Mail sync + server evaluation. pg_cron calls this on Supabase; the Node server uses its own timer. */
+ingestRouter.post("/background", route(async (req) => {
+  assertSecret(req);
+  await runBackgroundTasks();
   return { ok: true };
 }));

@@ -34,18 +34,7 @@ export function startCrons() {
     }
     running = true;
     try {
-      await syncAllAccounts();
-    } catch (e) {
-      logger.error("[cron] mail sync failed: " + ((e as Error).stack || e));
-    }
-
-    try {
-      const evaluated = await evaluateUnevaluatedMatches(15);
-      if (evaluated > 0) {
-        logger.info(`[cron] evaluated ${evaluated} match(es) on server`);
-      }
-    } catch (e) {
-      logger.error("[cron] server auto-evaluation failed: " + ((e as Error).stack || e));
+      await runBackgroundTasks();
     } finally {
       running = false;
     }
@@ -53,4 +42,22 @@ export function startCrons() {
 
   setInterval(() => void tick(), INTERVAL_MS).unref();
   logger.info(`[cron] background tasks scheduled every ${INTERVAL_MS / 60000} minutes`);
+}
+
+/** One pass of the background work. Also called by pg_cron via POST /api/ingest/background. */
+export async function runBackgroundTasks() {
+  try {
+    await syncAllAccounts();
+  } catch (e) {
+    logger.error("[cron] mail sync failed: " + ((e as Error).stack || e));
+  }
+
+  try {
+    const evaluated = await evaluateUnevaluatedMatches(15);
+    if (evaluated > 0) {
+      logger.info(`[cron] evaluated ${evaluated} match(es) on server`);
+    }
+  } catch (e) {
+    logger.error("[cron] server auto-evaluation failed: " + ((e as Error).stack || e));
+  }
 }
