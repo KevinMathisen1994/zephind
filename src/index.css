@@ -5,40 +5,60 @@
 @import "tw-animate-css";
 
 :root {
-  --font-jp-sans:
-    "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic",
-    Meiryo, "Noto Sans JP", sans-serif;
-  --font-ibm-plex-mono: "IBM Plex Mono", monospace;
-  --radius: 12px;
+  /* ── Type ────────────────────────────────────────────────────────── */
+  --font-ui:
+    "Zen Kaku Gothic New", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", system-ui, sans-serif;
+  --font-display: "DM Serif Display", "Times New Roman", serif;
+  --font-jp-sans: var(--font-ui);
+  --font-ibm-plex-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --radius: 6px;
 
-  /* ── Zephind · Japanese Professional Palette ── */
-  --bg-page: #f6f8f7;
-  --bg-surface: #ffffff;
-  --bg-surface-hover: #f9faf9;
-  --bg-brand: #f1f7ef;
+  /* ── Zephind · "Ledger" — paper, ink, one vermilion accent ───────── */
+  --bg-page: #f6f3ec;
+  --bg-surface: #fffdf9;
+  --bg-surface-hover: #faf7f0;
+  --bg-page-subtle: #f1ede4;
+  --bg-surface-sunken: #f1ede4;
+  --bg-brand: #f9f1e9;
 
-  --text-primary: #1a1f1b;
-  --text-secondary: #5a635d;
-  --text-muted: #939b95;
-  --text-placeholder: #b4bdb7;
+  --text-primary: #17150f;
+  --text-secondary: #56514a;
+  --text-muted: #857e74;
+  --text-placeholder: #a9a29a;
 
-  --brand: #1a7100;
-  --brand-hover: #155d00;
-  --brand-soft: #f0f7ed;
-  --brand-border: #caddc4;
+  --brand: #c8432b;
+  --brand-hover: #a93420;
+  --brand-soft: #fbeee9;
+  --brand-border: #edcdc2;
+  --brand-ink: #6f1f11;
 
-  --border-subtle: #eaeeea;
-  --border-default: #dde1dd;
-  --border-strong: #c8cdc8;
+  --ink: #17150f;
+  --ink-soft: #23201a;
 
-  --ring-color: #1a7100;
-  --shadow-xs: 0 1px 2px rgba(10, 20, 10, 0.04);
-  --shadow-sm:
-    0 1px 3px rgba(10, 20, 10, 0.05), 0 1px 2px rgba(10, 20, 10, 0.04);
-  --shadow-md:
-    0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.04);
-  --shadow-lg:
-    0 8px 32px rgba(10, 20, 10, 0.08), 0 2px 8px rgba(10, 20, 10, 0.04);
+  --border-subtle: #e8e2d8;
+  --border-default: #dcd5c9;
+  --border-strong: #c6bdae;
+
+  --success: #1f6b45;
+  --success-soft: #ecf5f0;
+  --warning: #96601a;
+  --warning-soft: #faf0e2;
+  --danger: #b3261e;
+  --danger-soft: #fbeceb;
+  --info: #2c4a7c;
+  --info-soft: #eef1f7;
+
+  --ring-color: rgba(200, 67, 43, 0.55);
+
+  /* ── Elevation — near-flat, rules do the separating ──────────────── */
+  --shadow-xs: 0 1px 0 rgba(23, 21, 15, 0.035);
+  --shadow-sm: 0 1px 2px rgba(23, 21, 15, 0.05);
+  --shadow-md: 0 4px 14px -6px rgba(23, 21, 15, 0.16);
+  --shadow-lg: 0 12px 36px -14px rgba(23, 21, 15, 0.22);
+  --shadow-ambient:
+    0 32px 80px -32px rgba(23, 21, 15, 0.32), 0 4px 12px rgba(23, 21, 15, 0.06);
 
   /* shadcn-compatible semantic aliases */
   --background: var(--bg-page);
@@ -51,15 +71,15 @@
   --primary-foreground: #ffffff;
   --secondary: var(--bg-surface-hover);
   --secondary-foreground: var(--text-primary);
-  --muted: #f6f8f7;
+  --muted: var(--bg-page-subtle);
   --muted-foreground: var(--text-muted);
   --accent: var(--brand-soft);
-  --accent-foreground: #14532d;
-  --destructive: #dc2626;
+  --accent-foreground: var(--brand-ink);
+  --destructive: #b3261e;
   --destructive-foreground: #ffffff;
   --border: var(--border-subtle);
   --input: var(--border-default);
-  --ring: var(--ring-color);
+  --ring: var(--brand);
 }
 
 @theme inline {
@@ -82,10 +102,27 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --font-sans: var(--font-ui);
+  --font-serif: var(--font-display);
+  --font-mono: var(--font-ibm-plex-mono);
+
+  /* Sharp, architectural corners — deliberately not the SaaS pillow */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 14px;
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
 }
 
 /* ─────────────────────────────
@@ -93,9 +130,11 @@
    ───────────────────────────── */
 @layer base {
   html {
-    font-size: 15.5px;
+    font-size: 15px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
   }
 
   * {
@@ -105,11 +144,36 @@
   body {
     background: var(--bg-page);
     color: var(--text-primary);
-    font-family: var(--font-jp-sans);
+    font-family: var(--font-ui);
     font-feature-settings: "palt" 1;
     font-size: 1rem;
-    line-height: 1.75;
-    letter-spacing: 0.01em;
+    line-height: 1.65;
+    letter-spacing: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  /* Numbers line up in tables, KPI rows and stat blocks */
+  .font-data,
+  table,
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment everywhere — never remove the ring */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 
   /* ── cursor restoration (tailwind v4 compat) ── */
@@ -133,78 +197,60 @@
 
   /* ── selection ── */
   ::selection {
-    background: #d4e8d0;
-    color: #1a3d12;
+    background: #f4d7cc;
+    color: #4a160b;
   }
 }
 
 /* ─────────────────────────────
-   Typography scale (no !important)
+   Typography scale — dense, aligned, one step per role
    ───────────────────────────── */
 @layer base {
   .text-xs {
     font-size: 0.75rem;
-    line-height: 1.15rem;
+    line-height: 1.05rem;
+    letter-spacing: 0.012em;
   }
   .text-sm {
-    font-size: 0.85rem;
-    line-height: 1.4rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
   }
   .text-base {
-    font-size: 0.95rem;
-    line-height: 1.65rem;
+    font-size: 0.9375rem;
+    line-height: 1.5rem;
   }
   .text-lg {
-    font-size: 1.1rem;
-    line-height: 1.7rem;
+    font-size: 1.0625rem;
+    line-height: 1.6rem;
+    letter-spacing: -0.012em;
   }
   .text-xl {
-    font-size: 1.3rem;
-    line-height: 1.85rem;
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    letter-spacing: -0.018em;
   }
   .text-2xl {
-    font-size: 1.55rem;
-    line-height: 2.1rem;
+    font-size: 1.5rem;
+    line-height: 1.95rem;
+    letter-spacing: -0.024em;
   }
   .text-3xl {
-    font-size: 1.8rem;
+    font-size: 1.875rem;
     line-height: 2.3rem;
-  }
-
-  @media (min-width: 768px) {
-    .text-xs {
-      font-size: 0.8125rem;
-      line-height: 1.35rem;
-    }
-    .text-sm {
-      font-size: 0.9rem;
-      line-height: 1.55rem;
-    }
-    .text-base {
-      font-size: 1rem;
-      line-height: 1.8rem;
-    }
-    .text-lg {
-      font-size: 1.15rem;
-      line-height: 1.9rem;
-    }
-    .text-xl {
-      font-size: 1.45rem;
-      line-height: 2.15rem;
-    }
-    .text-2xl {
-      font-size: 1.75rem;
-      line-height: 2.45rem;
-    }
-    .text-3xl {
-      font-size: 2.1rem;
-      line-height: 2.85rem;
-    }
+    letter-spacing: -0.03em;
   }
 }
 
 .font-data {
   font-family: var(--font-ibm-plex-mono), monospace;
+}
+
+/* Japanese glyphs bloom at 800 — the system tops out at 700, including for
+   the existing `font-extrabold` call sites, so headings stay crisp not heavy. */
+@layer utilities {
+  .font-extrabold {
+    font-weight: 700;
+  }
 }
 
 /* ─────────────────────────────
@@ -219,106 +265,234 @@
   }
 }
 .skeleton-shimmer {
-  background: linear-gradient(110deg, #eef0ee 25%, #e2e5e2 37%, #eef0ee 63%);
+  background: linear-gradient(110deg, #efe9de 25%, #e6dfd2 37%, #efe9de 63%);
   background-size: 200% 100%;
-  animation: shimmer 1.6s infinite ease-in-out;
+  animation: shimmer 1.4s infinite ease-in-out;
 }
 
 /* ─────────────────────────────
    Custom scrollbar
    ───────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c8cdc8;
+  background: #d6cfc2;
+  border: 2px solid transparent;
+  background-clip: content-box;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a5aba5;
-}
-
-html {
-  scroll-behavior: smooth;
+  background: #b8ae9d;
+  background-clip: content-box;
 }
 
 /* ─────────────────────────────
    Shared component-level utilities
    ───────────────────────────── */
+@layer components {
+  /* Page canvas — soft brand wash over a faint dot grid */
+  .app-bg {
+    background-color: var(--bg-page);
+    background-image: radial-gradient(
+      1200px 520px at 45% -18%,
+      #fffdf8 0%,
+      transparent 72%
+    );
+  }
 
-/* Clean High-End Card Containers */
-.bezel-container {
-  @apply rounded-2xl transition-all duration-200;
+  /* Standard page frame for every route */
+  .page-shell {
+    @apply mx-auto w-full max-w-[1280px] space-y-6 px-4 py-6 md:px-8 md:py-9;
+  }
+
+  /* Sidebar panel — ink rail, the one dark surface in the product */
+  .sidebar-surface {
+    background-color: var(--ink);
+    background-image: linear-gradient(180deg, #1c1913 0%, #121009 100%);
+  }
+
+  /* Page masthead — a printed section head, not a floating card */
+  .page-header {
+    @apply flex flex-col justify-between gap-5 border-b border-[var(--border-default)] pb-5 md:flex-row md:items-end md:pb-6;
+  }
+
+  .page-title {
+    @apply text-[1.75rem] font-bold leading-[1.15] tracking-[-0.03em] text-[var(--text-primary)] md:text-[2rem];
+  }
+
+  /* The masthead action never stretches into a full-width bar */
+  .page-header > button,
+  .page-header > a {
+    align-self: flex-start;
+  }
+  @media (min-width: 768px) {
+    .page-header > button,
+    .page-header > a {
+      align-self: flex-end;
+    }
+  }
+
+  .page-subtitle {
+    @apply mt-2 max-w-2xl text-sm font-normal leading-relaxed text-[var(--text-secondary)];
+  }
+
+  /* Clean card containers — rules, not shadows */
+  .bezel-container {
+    @apply rounded-xl transition-colors duration-200;
+  }
+
+  .bezel-core {
+    @apply rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors duration-200;
+  }
+
+  .bezel-container:hover .bezel-core {
+    border-color: var(--border-strong);
+  }
+
+  /* Content card */
+  .section-card {
+    @apply rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 md:p-6;
+  }
+
+  /* Eyebrow — a measured rule plus letterspaced kicker */
+  .eyebrow-pill {
+    @apply mb-3 flex w-fit items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--brand)];
+    font-family: var(--font-ibm-plex-mono);
+  }
+  .eyebrow-pill::before {
+    content: "";
+    height: 1px;
+    width: 18px;
+    flex: none;
+    background: var(--brand);
+  }
+
+  /* KPI stat tiles — flat ledger cells */
+  .kpi-card {
+    @apply relative flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 md:p-[18px];
+    transition:
+      border-color 0.18s ease,
+      background-color 0.18s ease;
+  }
+  .kpi-card:hover {
+    border-color: var(--border-strong);
+    background-color: var(--bg-surface-hover);
+  }
+
+  .kpi-icon {
+    @apply flex h-7 w-7 items-center justify-center rounded-[4px] border border-[var(--border-subtle)];
+  }
+
+  .stat-label {
+    @apply text-[9.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)];
+    font-family: var(--font-ibm-plex-mono);
+  }
+
+  .stat-value {
+    font-family: var(--font-ibm-plex-mono);
+    font-variant-numeric: tabular-nums;
+    @apply text-[1.5rem] font-medium leading-none tracking-[-0.04em] text-[var(--text-primary)];
+  }
+
+  /* Toolbar strip (search + filters) */
+  .toolbar {
+    @apply flex flex-col items-stretch gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 md:flex-row md:items-center;
+  }
+
+  /* Form field, used anywhere a raw input is rendered */
+  .field {
+    @apply h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3.5 text-sm font-medium text-[var(--text-primary)];
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .field::placeholder {
+    color: var(--text-placeholder);
+    font-weight: 400;
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 3px rgba(200, 67, 43, 0.14);
+  }
+
+  /* Subtle brand divider label */
+  .brand-divider {
+    @apply mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)];
+    font-family: var(--font-ibm-plex-mono);
+  }
+
+  /* Tab / pill group */
+  .pill-group {
+    @apply flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] p-1;
+  }
+
+  .pill {
+    @apply rounded-[4px] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-all duration-150;
+  }
+  .pill-active {
+    @apply bg-[var(--text-primary)] text-[var(--bg-surface)];
+  }
+  .pill-inactive {
+    @apply hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)];
+  }
+
+  /* Empty-state card */
+  .empty-state {
+    @apply rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-14 text-center;
+  }
+
+  /* Legacy focus helper, kept so existing markup keeps working */
+  .focus-brand:focus-visible {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(20, 104, 58, 0.14);
+  }
 }
 
-.bezel-core {
-  @apply rounded-2xl bg-white text-[var(--text-primary)] border border-[var(--border-subtle)] transition-all duration-200;
-  box-shadow: 0 1px 3px rgba(10, 20, 10, 0.04), 0 1px 2px rgba(10, 20, 10, 0.02);
+/* Page load: panels settle in sequence */
+@keyframes page-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.bezel-container:hover .bezel-core {
-  box-shadow: 0 4px 16px rgba(10, 20, 10, 0.06), 0 2px 4px rgba(10, 20, 10, 0.03);
-  border-color: var(--border-default);
+.page-shell > * {
+  animation: page-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.page-shell > *:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.page-shell > *:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.page-shell > *:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.page-shell > *:nth-child(n + 5) {
+  animation-delay: 0.16s;
 }
 
-/* Eyebrow badge */
-.eyebrow-pill {
-  @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-[var(--brand)] bg-[var(--brand-soft)] border border-[var(--brand-border)] w-fit;
+/* Respect the OS setting — kill ornamental motion, keep state changes instant */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
-
-/* KPI stat cards — consistent across all pages */
-.kpi-card {
-  @apply bg-white rounded-2xl border border-[var(--border-subtle)] p-4 md:p-5 flex items-center gap-3 md:gap-4;
-  box-shadow: var(--shadow-xs);
-  transition:
-    box-shadow 0.2s ease,
-    transform 0.15s ease;
-}
-.kpi-card:hover {
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
-}
-
-/* Page header card */
-.page-header {
-  @apply bg-white rounded-2xl border border-[var(--border-subtle)] p-6 md:p-8;
-  box-shadow: var(--shadow-xs);
-}
-
-/* Subtle brand-dot divider */
-.brand-divider {
-  @apply flex items-center gap-2 text-[#1a7100] font-bold text-xs tracking-wider uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* Tab / pill group */
-.pill-group {
-  @apply flex flex-wrap items-center gap-1 bg-[#f1f3f1] p-1 rounded-xl;
-}
-
-.pill {
-  @apply px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-150;
-}
-.pill-active {
-  @apply bg-white text-[#1a1f1b] shadow-sm;
-}
-.pill-inactive {
-  @apply text-[#5a635d] hover:text-[#1a1f1b];
-}
-
-/* Empty-state card */
-.empty-state {
-  @apply border border-[var(--border-subtle)] rounded-2xl bg-white p-12 text-center;
-}
-
-/* Smooth focus ring override */
-.focus-brand:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(26, 113, 0, 0.15);
-  border-color: var(--brand);
-}
-

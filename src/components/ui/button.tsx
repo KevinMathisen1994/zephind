@@ -8,27 +8,26 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<string, string> = {
   default:
-    "bg-[var(--brand)] text-white shadow-[0_2px_8px_rgba(22,101,3,0.2),inset_0_1px_1px_rgba(255,255,255,0.25)] hover:bg-[var(--brand-hover)] hover:shadow-[0_4px_16px_rgba(22,101,3,0.3)] active:scale-[0.98] border border-[rgba(255,255,255,0.12)]",
+    "bg-[var(--brand)] text-white shadow-[0_1px_0_rgba(0,0,0,0.08)] hover:bg-[var(--brand-hover)] active:translate-y-px",
   outline:
-    "border border-[var(--border-default)] bg-white text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.8)] hover:bg-[var(--bg-surface-hover)] hover:border-[var(--border-strong)] hover:shadow-[0_2px_6px_rgba(0,0,0,0.05)] active:scale-[0.98]",
+    "border border-[var(--text-primary)]/25 bg-transparent text-[var(--text-primary)] hover:border-[var(--text-primary)]/50 hover:bg-[var(--bg-page-subtle)] active:translate-y-px",
   ghost:
-    "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)] active:scale-[0.98]",
+    "text-[var(--text-secondary)] hover:bg-[var(--bg-page-subtle)] hover:text-[var(--text-primary)] active:translate-y-px",
   destructive:
-    "bg-red-600 text-white shadow-[0_2px_8px_rgba(220,38,38,0.25),inset_0_1px_1px_rgba(255,255,255,0.2)] hover:bg-red-700 active:scale-[0.98]",
+    "bg-[var(--danger)] text-white hover:bg-[#931d17] active:translate-y-px",
   secondary:
-    "bg-[var(--bg-brand)] text-[var(--brand)] border border-[var(--brand-border)] hover:bg-[#e4efe0] active:scale-[0.98]",
+    "border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)] active:translate-y-px",
   glass:
-    "bg-white/80 backdrop-blur-md border border-white/60 text-[var(--text-primary)] shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:bg-white active:scale-[0.98]",
-  link:
-    "text-[var(--brand)] underline-offset-4 hover:underline",
+    "border border-[var(--border-default)] bg-[var(--bg-surface)]/90 text-[var(--text-primary)] hover:bg-[var(--bg-surface)] active:translate-y-px",
+  link: "text-[var(--brand)] underline-offset-4 hover:underline",
 };
 
 const sizeStyles: Record<string, string> = {
-  default: "h-10 px-4 py-2 rounded-xl text-sm",
-  sm: "h-8 px-3 rounded-lg text-xs tracking-wide",
-  lg: "h-12 px-6 rounded-2xl text-base tracking-tight font-bold",
-  pill: "h-11 px-5 rounded-full text-sm font-bold",
-  icon: "h-10 w-10 rounded-xl",
+  default: "h-10 px-4 rounded-lg text-sm",
+  sm: "h-8 px-3 rounded-md text-xs",
+  lg: "h-11 px-5 rounded-lg text-sm",
+  pill: "h-9 px-4 rounded-full text-sm",
+  icon: "h-8 w-8 rounded-md",
 };
 
 export function Button({
@@ -41,7 +40,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "group inline-flex items-center justify-center gap-2 whitespace-nowrap font-bold transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-brand disabled:pointer-events-none disabled:opacity-40 cursor-pointer select-none",
+        "group inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap font-semibold tracking-[0.01em] transition-[background-color,border-color,color,transform] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:pointer-events-none disabled:opacity-40",
         variantStyles[variant],
         sizeStyles[size],
         className,

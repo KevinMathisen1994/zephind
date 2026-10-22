@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { wardLabelToCode } from "../lib/tokyoWards";
-import { Play, RefreshCw, Database, Trash2, Sliders, ShieldCheck, ExternalLink } from "lucide-react";
+import { Play, RefreshCw, Database, Trash2, ShieldCheck, ExternalLink } from "lucide-react";
 import type { Doc, Id } from "../lib/dataModel";
 import { formatJaDateTime } from "../lib/dateFormat";
 
@@ -254,18 +254,13 @@ export default function AdminPage() {
   const manualListings = listings?.filter((l) => [...scrapeSources].some(s => l.source === s)) ?? listings ?? [];
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
+    <div className="page-shell">
       {/* ── Header ── */}
-      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="page-header">
         <div>
-          <div className="eyebrow-pill mb-2.5">
-            <Sliders className="w-3.5 h-3.5" />
-            システム＆スクレイパー設定
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            スクレイピング・データ管理
-          </h1>
-          <p className="text-sm text-[var(--text-muted)] font-medium mt-1 max-w-xl leading-relaxed">
+          <div className="eyebrow-pill">Data Operations</div>
+          <h1 className="page-title">スクレイピング・データ管理</h1>
+          <p className="page-subtitle">
             全19不動産ポータルからの手動データ収集、バックエンド接続状態のリアルタイムモニタリング
           </p>
         </div>

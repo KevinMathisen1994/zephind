@@ -31,9 +31,9 @@ export class AuthErrorBoundary extends Component<Props, State> {
     );
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
-        <div className="max-w-xl w-full bg-white border border-slate-200 rounded-2xl shadow-sm p-8">
-          <h1 className="text-xl font-extrabold text-slate-900">
+      <div className="app-bg flex min-h-screen items-center justify-center px-4 py-12">
+        <div className="w-full max-w-xl rounded-2xl border border-[var(--border-subtle)] bg-white p-8 shadow-sm">
+          <h1 className="text-xl font-bold tracking-[-0.02em] text-[var(--text-primary)]">
             {isAuthError ? "認証の設定が未完了です" : "エラーが発生しました"}
           </h1>
 
@@ -68,13 +68,13 @@ export class AuthErrorBoundary extends Component<Props, State> {
             </p>
           )}
 
-          <pre className="mt-5 p-3 rounded-xl bg-slate-900 text-slate-100 text-xs overflow-x-auto whitespace-pre-wrap">
+          <pre className="mt-5 overflow-x-auto whitespace-pre-wrap rounded-xl bg-[#121815] p-3 font-mono text-xs text-[#e6ece8]">
             {error.message}
           </pre>
 
           <button
             onClick={() => window.location.reload()}
-            className="mt-5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold"
+            className="mt-5 cursor-pointer rounded-xl bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-hover)]"
           >
             再読み込み
           </button>

@@ -3,7 +3,7 @@ import { cn } from "../../lib/utils";
 
 export function Table({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className="relative w-full overflow-auto rounded-xl border border-[var(--border-subtle)]">
+    <div className="relative w-full overflow-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
       <table className={cn("w-full caption-bottom text-sm", className)}>
         {children}
       </table>
@@ -12,7 +12,16 @@ export function Table({ children, className = "" }: { children: ReactNode; class
 }
 
 export function TableHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <thead className={cn("bg-[var(--bg-surface-hover)]", className)}>{children}</thead>;
+  return (
+    <thead
+      className={cn(
+        "sticky top-0 z-10 bg-[var(--bg-surface)] shadow-[inset_0_-1px_0_var(--border-default)]",
+        className,
+      )}
+    >
+      {children}
+    </thead>
+  );
 }
 
 export function TableBody({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -23,7 +32,7 @@ export function TableRow({ children, className = "" }: { children: ReactNode; cl
   return (
     <tr
       className={cn(
-        "transition-colors hover:bg-[var(--bg-surface-hover)]/70",
+        "transition-colors duration-150 hover:bg-[var(--bg-surface-hover)]",
         className,
       )}
     >
@@ -36,7 +45,7 @@ export function TableHead({ children, className = "" }: { children?: ReactNode; 
   return (
     <th
       className={cn(
-        "h-11 px-4 text-left align-middle text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]",
+        "h-9 whitespace-nowrap px-4 text-left align-middle text-[9.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]",
         className,
       )}
     >

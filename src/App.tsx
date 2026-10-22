@@ -43,19 +43,24 @@ export default function App() {
         </AuthErrorBoundary>
       </SignedIn>
       <SignedOut>
-        <div className="min-h-screen flex flex-col items-center justify-center gap-8 bg-slate-50 px-4 py-12">
+        <div className="app-bg flex min-h-screen flex-col items-center justify-center gap-8 px-4 py-12">
           <div className="text-center">
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+            <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-[4px] bg-[var(--brand)] font-serif text-[19px] leading-none text-white">
+              Z
+            </div>
+            <h1 className="font-serif text-[28px] leading-none tracking-[0.01em] text-[var(--text-primary)]">
               Zephind
             </h1>
-            <p className="mt-1 text-sm font-medium text-slate-500">
-              不動産インテリジェンス
+            <p className="mt-2 font-mono text-[9.5px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
+              Property Intelligence
             </p>
-            <p className="mt-4 text-sm font-medium text-slate-600">
+            <p className="mt-5 text-sm font-medium text-[var(--text-secondary)]">
               続けるにはログインしてください
             </p>
           </div>
-          <SignIn routing="virtual" />
+          <div className="w-full max-w-md rounded-2xl border border-[var(--border-subtle)] bg-white p-1 shadow-sm">
+            <SignIn routing="virtual" />
+          </div>
         </div>
       </SignedOut>
     </>

@@ -91,6 +91,14 @@ async function readJson(response: Response, label: string): Promise<any> {
 
 /** Where the provider sends the browser back to. Must match the console config. */
 function redirectUri(provider: string) {
+  // Escape hatch: if the provider console already has a different URI registered
+  // (a different port, a tunnel domain, or a `/api` prefix added by a proxy),
+  // point the app at THAT value instead of moving the registration. The exact
+  // string must match the console byte-for-byte — this is the value that
+  // "redirect_uri is not valid" is complaining about.
+  const override = process.env[`${provider.toUpperCase()}_OAUTH_REDIRECT_URI`];
+  if (override) return override;
+
   const siteUrl = process.env.PUBLIC_BACKEND_URL;
   if (!siteUrl) throw new Error("PUBLIC_BACKEND_URL is not set on this service");
   return `${siteUrl.replace(/\/$/, "")}/oauth/${provider}/callback`;

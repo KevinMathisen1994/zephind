@@ -57,6 +57,7 @@ import {
   Laptop,
   Star,
   Paperclip,
+  AlertTriangle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -267,8 +268,8 @@ const INCOME_TYPES = ["マンション", "一棟マンション", "アパート"
  * question from "when was it posted".
  */
 const SORT_OPTIONS = [
-  { key: "score", label: "評価スコア順" },
   { key: "newest", label: "掲載が新しい順" },
+  { key: "score", label: "評価スコア順" },
   { key: "oldest", label: "掲載が古い順" },
   { key: "foundNewest", label: "取得日時が新しい順" },
   { key: "priceAsc", label: "価格が安い順" },
@@ -1133,9 +1134,7 @@ export default function OrdersPage() {
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({});
-  // Per-order sort of the extracted listings. Score-first is the default because
-  // that is what the evaluation exists for; the rest are the orderings someone
-  // actually asks for when scanning a long list.
+  // Per-order sort of the extracted listings. Newest-first is the default.
   const [sortKey, setSortKey] = useState<Record<string, SortKey>>({});
   /** Per-order quick filter; absent means すべて. */
   const [listFilter, setListFilter] = useState<Record<string, string>>({});
@@ -2191,123 +2190,155 @@ export default function OrdersPage() {
       {/* ── Mail connection: read broker emails (物件紹介) and auto-match them
           against every order, same as a scraped listing. Read-only — this
           never sends anything (see ProposalModal for that, unrelated). ── */}
-      <div className="rounded-2xl border border-[var(--border-subtle)] bg-white p-4 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <Mail className="h-4 w-4 shrink-0 text-[var(--brand)]" />
-            <span className="text-sm font-semibold text-[var(--text-primary)]">
-              メール連携
+      <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+        {/* Header: identity + actions */}
+        <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3.5">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand)]">
+              <Mail className="h-4 w-4" />
             </span>
-            <span className="truncate text-xs text-[var(--text-muted)]">
-              仲介会社からの物件紹介メールを自動で抽出・照合します
-            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-[13px] font-semibold tracking-[0.01em] text-[var(--text-primary)]">
+                  メール連携
+                </h2>
+                {(mailAccounts?.length ?? 0) > 0 && (
+                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    {mailAccounts?.length} 件接続中
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+                仲介会社からの物件紹介メールを自動で抽出・照合します
+              </p>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-          {(mailAccounts?.length ?? 0) > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={syncingMail}
-              onClick={() => void handleSyncMailNow()}
-            >
-              {syncingMail ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              今すぐ同期
-            </Button>
-          )}
-          {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
-          {(mailAccounts?.length ?? 0) > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={inspecting}
-              onClick={() => void handleInspectMail()}
-            >
-              {inspecting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Mail className="h-3.5 w-3.5" />
-              )}
-              同期メールを確認
-            </Button>
-          )}
-          {(mailAccounts?.length ?? 0) > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowMailRules(true)}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              取り込み設定
-            </Button>
-          )}
+
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            {(mailAccounts?.length ?? 0) > 0 && (
+              <Button
+                size="sm"
+                disabled={syncingMail}
+                onClick={() => void handleSyncMailNow()}
+              >
+                {syncingMail ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                今すぐ同期
+              </Button>
+            )}
+            {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
+            {(mailAccounts?.length ?? 0) > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={inspecting}
+                onClick={() => void handleInspectMail()}
+              >
+                {inspecting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Mail className="h-3.5 w-3.5" />
+                )}
+                同期メールを確認
+              </Button>
+            )}
+            {(mailAccounts?.length ?? 0) > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowMailRules(true)}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                取り込み設定
+              </Button>
+            )}
           </div>
         </div>
 
-        {mailNotice && (
-          <div className="text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-page-subtle)] rounded-lg px-3 py-2 whitespace-pre-line">
-            {mailNotice}
+        {/* Connected accounts — one row each, status at a glance */}
+        {(mailAccounts?.length ?? 0) > 0 && (
+          <div className="divide-y divide-[var(--border-subtle)] border-t border-[var(--border-subtle)]">
+            {(mailAccounts ?? []).map((account) => (
+              <div
+                key={account._id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                <span className="w-16 shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  {account.provider === "gmail" ? "Gmail" : "Outlook"}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-[var(--text-primary)]">
+                  {account.email}
+                </span>
+                {account.needsReconnect ? (
+                  <Badge variant="destructive">要再接続</Badge>
+                ) : (
+                  <Badge variant="emerald">接続済み</Badge>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void disconnectMailAccount({ id: account._id })}
+                  className="cursor-pointer text-[10.5px] text-[var(--text-muted)] underline underline-offset-2 transition-colors hover:text-[var(--danger)]"
+                >
+                  解除
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          {(mailAccounts ?? []).map((account) => (
-            <div
-              key={account._id}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
-                account.needsReconnect
-                  ? "bg-red-50 border-red-200 text-red-800"
-                  : "bg-emerald-50 border-emerald-200 text-emerald-900"
-              }`}
-            >
-              {account.provider === "gmail" ? "Gmail" : "Outlook"}: {account.email}
-              {account.needsReconnect && "（要再接続）"}
-              <button
-                type="button"
-                onClick={() => void disconnectMailAccount({ id: account._id })}
-                className="text-[11px] underline opacity-70 hover:opacity-100"
-              >
-                解除
-              </button>
-            </div>
-          ))}
+        {/* Last sync / auth problem */}
+        {mailNotice && (
+          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-2.5 text-[11.5px] leading-relaxed text-[#7d2a24]">
+            <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
+            <p className="whitespace-pre-line">{mailNotice}</p>
+          </div>
+        )}
 
-          {(mailProviders ?? [])
-            .filter((p) => p.available)
-            .filter((p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider))
-            .map((p) => (
-              <Button
-                key={p.provider}
-                size="sm"
-                variant="outline"
-                disabled={connectingMailProvider === p.provider}
-                onClick={() => void handleConnectMail(p.provider)}
-                className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
-              >
-                {connectingMailProvider === p.provider ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Mail className="w-3.5 h-3.5" />
-                )}
-                {p.label}を接続
-              </Button>
-            ))}
+        {/* Connect a provider */}
+        {((mailProviders ?? []).filter((p) => p.available).length > 0 ||
+          (mailProviders ?? []).filter((p) => !p.available).length > 0) && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] px-4 py-2.5">
+            <span className="mr-1 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+              受信箱を追加
+            </span>
+            {(mailProviders ?? [])
+              .filter((p) => p.available)
+              .filter(
+                (p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider),
+              )
+              .map((p) => (
+                <Button
+                  key={p.provider}
+                  size="sm"
+                  variant="outline"
+                  disabled={connectingMailProvider === p.provider}
+                  onClick={() => void handleConnectMail(p.provider)}
+                >
+                  {connectingMailProvider === p.provider ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5" />
+                  )}
+                  {p.label}を接続
+                </Button>
+              ))}
 
-          {(mailProviders ?? [])
-            .filter((p) => !p.available)
-            .map((p) => (
-              <span
-                key={p.provider}
-                className="text-[11px] text-[var(--text-muted)] font-medium"
-                title={p.unavailableReason}
-              >
-                {p.label}: 未設定
-              </span>
-            ))}
-        </div>
+            {(mailProviders ?? [])
+              .filter((p) => !p.available)
+              .map((p) => (
+                <span
+                  key={p.provider}
+                  className="text-[11px] text-[var(--text-muted)]"
+                  title={p.unavailableReason}
+                >
+                  {p.label}: 未設定
+                </span>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* ── KPI cards ── */}
@@ -3470,7 +3501,7 @@ export default function OrdersPage() {
                       <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--text-muted)]">
                         並び順
                         <select
-                          value={sortKey[order._id] || "score"}
+                          value={sortKey[order._id] || "newest"}
                           onChange={(e) => {
                             setSortKey((prev) => ({
                               ...prev,
@@ -3497,7 +3528,7 @@ export default function OrdersPage() {
                     {(() => {
                       const pageSize = showLimit[order._id] || 10;
                       const page = currentPage[order._id] || 1;
-                      const activeSort: SortKey = sortKey[order._id] || "score";
+                      const activeSort: SortKey = sortKey[order._id] || "newest";
                       // When a listing lacks the sort field it goes last in every
                       // ordering rather than being treated as 0 円 / 1970年.
                       const LAST = Number.POSITIVE_INFINITY;
@@ -3511,6 +3542,11 @@ export default function OrdersPage() {
                         ),
                       );
                       const sortedMatches = [...visibleMatches].sort((a, b) => {
+                        // Ties fall back to a fixed key: the API returns rows in
+                        // Postgres heap order, which shifts on every update/refetch.
+                        return compareMatches(a, b) || a._id.localeCompare(b._id);
+                      });
+                      function compareMatches(a: Doc<"matching">, b: Doc<"matching">): number {
                         const la = matchedListing(a.listingId ?? "");
                         const lb = matchedListing(b.listingId ?? "");
                         // A broker emailed this directly — surface it ahead of
@@ -3547,7 +3583,7 @@ export default function OrdersPage() {
                               (matchScore(a, evaluations) ?? 0)
                             );
                         }
-                      });
+                      }
                       const totalMatches = sortedMatches.length;
                       const totalPages = Math.max(
                         1,

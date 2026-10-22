@@ -146,5 +146,12 @@ app.use("/", localRunRoutes);
 
 app.listen(PORT, () => {
   logger.info(`Zephind backend running on port ${PORT}`);
+  // Print the exact OAuth callback URLs. These must appear byte-for-byte in the
+  // Google / Azure app registrations, or the provider answers
+  // "redirect_uri is not valid" before the user ever reaches our callback.
+  const base = (process.env.PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
+  logger.info(
+    `Mail OAuth callbacks: ${process.env.OUTLOOK_OAUTH_REDIRECT_URI || `${base}/oauth/outlook/callback`} | ${process.env.GMAIL_OAUTH_REDIRECT_URI || `${base}/oauth/gmail/callback`}`,
+  );
   startCrons();
 });

@@ -157,6 +157,10 @@ export const api = {
       method: "POST", key: "evaluate", path: () => "/api/evaluate",
       body: (a) => a, invalidates: ["matching"],
     }),
+    evaluateBatch: endpoint({
+      method: "POST", key: "evaluate.batch", path: () => "/api/evaluate/batch",
+      body: (a) => a, invalidates: ["matching"],
+    }),
   },
 
   scrapeTrigger: {

@@ -128,65 +128,62 @@ export default function CustomersPage() {
   };
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
+    <div className="page-shell">
       {/* ── Page Header ── */}
-      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="page-header">
         <div>
-          <div className="eyebrow-pill mb-2.5">
-            <Users className="w-3.5 h-3.5" />
-            顧客データベース
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            顧客管理 (買主)
-          </h1>
-          <p className="text-sm text-[var(--text-muted)] font-medium mt-1 max-w-xl leading-relaxed">
+          <div className="eyebrow-pill">Customer Registry</div>
+          <h1 className="page-title">顧客管理</h1>
+          <p className="page-subtitle">
             買主情報の登録、連絡先管理、希望物件オーダーとの紐付けが一括で行えます
           </p>
         </div>
-        <Button onClick={handleOpenCreate} size="lg" className="shadow-[0_4px_20px_rgba(22,101,3,0.25)]">
-          <Plus className="w-4 h-4 mr-1" />
+        <Button onClick={handleOpenCreate}>
+          <Plus className="h-4 w-4" />
           新規顧客登録
         </Button>
       </div>
 
       {/* ── KPI cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
           { icon: Users, color: "var(--brand)", bg: "var(--brand-soft)", label: "登録顧客数", value: customers?.length, loading: customers === undefined },
-          { icon: FileCheck2, color: "#0d9488", bg: "#f0fdfa", label: "連携済みオーダー数", value: orders?.filter((o) => !!o.customerId).length, loading: orders === undefined },
-          { icon: Building, color: "#6366f1", bg: "#eef2ff", label: "法人顧客数", value: customers?.filter((c) => !!c.company).length, loading: customers === undefined },
+          { icon: FileCheck2, color: "var(--info)", bg: "var(--info-soft)", label: "連携済みオーダー数", value: orders?.filter((o) => !!o.customerId).length, loading: orders === undefined },
+          { icon: Building, color: "var(--warning)", bg: "var(--warning-soft)", label: "法人顧客数", value: customers?.filter((c) => !!c.company).length, loading: customers === undefined },
         ].map((kpi, i) => (
-          <div key={i} className="kpi-card group">
-            <div
-              className="flex items-center justify-center w-11 h-11 rounded-2xl shrink-0 shadow-xs transition-transform group-hover:scale-105"
-              style={{ background: kpi.bg, color: kpi.color }}
-            >
-              <kpi.icon className="w-5 h-5" />
+          <div key={i} className="kpi-card">
+            <div className="flex items-start justify-between gap-2">
+              <span className="stat-label">{kpi.label}</span>
+              <span
+                className="kpi-icon"
+                style={{ background: kpi.bg, color: kpi.color }}
+              >
+                <kpi.icon className="h-[15px] w-[15px]" />
+              </span>
             </div>
-            <div className="min-w-0">
-              <div className="text-[11px] font-bold text-[var(--text-muted)] tracking-wider uppercase">{kpi.label}</div>
-              <div className="text-xl md:text-2xl font-extrabold text-[var(--text-primary)] font-data tracking-tight mt-0.5">
-                {kpi.loading ? <Skeleton className="h-7 w-12 rounded-lg" /> : kpi.value}
-              </div>
-            </div>
+            {kpi.loading ? (
+              <Skeleton className="h-7 w-16" />
+            ) : (
+              <div className="stat-value">{kpi.value}</div>
+            )}
           </div>
         ))}
       </div>
 
       {/* ── Search bar ── */}
-      <div className="flex items-center gap-4 bg-white p-3.5 rounded-2xl border border-[var(--border-subtle)] shadow-[0_1px_3px_rgba(0,0,0,0.02),inset_0_1px_1px_rgba(255,255,255,0.9)]">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
+      <div className="toolbar">
+        <div className="relative w-full flex-1 md:max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="氏名・電話・メール・会社名で検索..."
-            className="w-full pl-10 pr-4 py-2.5 bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl text-sm font-semibold text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_rgba(22,101,3,0.15)] transition-all"
+            className="field pl-9"
           />
         </div>
-        <Badge variant="neutral" className="px-3 py-1 font-bold">
-          該当: {filteredCustomers.length} 件
+        <Badge variant="neutral" className="ml-auto px-2.5 py-1 font-semibold">
+          該当 {filteredCustomers.length} 件
         </Badge>
       </div>
 
@@ -196,27 +193,27 @@ export default function CustomersPage() {
           {[1, 2, 3].map((n) => <Skeleton key={n} className="h-52 w-full rounded-2xl" />)}
         </div>
       ) : filteredCustomers.length === 0 ? (
-        <div className="p-16 border border-[var(--border-subtle)] rounded-3xl bg-white text-center shadow-xs">
-          <Users className="w-12 h-12 text-[var(--text-muted)]/30 mx-auto mb-4" />
-          <p className="text-base font-bold text-[var(--text-secondary)]">登録されている顧客がありません</p>
-          <p className="text-xs text-[var(--text-muted)] mt-1.5 font-medium">「新規顧客登録」から顧客情報を追加してください。</p>
+        <div className="empty-state">
+          <Users className="mx-auto mb-3 h-8 w-8 text-[var(--text-placeholder)]" />
+          <p className="text-sm font-semibold text-[var(--text-secondary)]">登録されている顧客がありません</p>
+          <p className="mt-1 text-xs font-medium text-[var(--text-muted)]">「新規顧客登録」から顧客情報を追加してください。</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredCustomers.map((c) => {
             const orderCount = getCustomerOrdersCount(c._id);
             return (
               <div
                 key={c._id}
-                className="bg-white rounded-2xl border border-[var(--border-subtle)] p-5 flex flex-col justify-between h-full space-y-4 shadow-xs hover:border-[var(--border-default)] hover:shadow-sm transition-all duration-200"
+                className="flex h-full flex-col justify-between space-y-4 rounded-2xl border border-[var(--border-subtle)] bg-white p-5 shadow-xs transition-[border-color,box-shadow] duration-200 hover:border-[var(--border-default)] hover:shadow-sm"
               >
-                <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--border-subtle)]">
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[var(--brand-soft)] to-[#ddead8] text-[var(--brand)] font-extrabold flex items-center justify-center text-base border border-[var(--brand-border)] shadow-xs shrink-0">
+                <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] pb-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--brand-soft)] text-sm font-semibold text-[var(--brand-ink)]">
                       {c.name.slice(0, 1)}
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-base font-extrabold text-[var(--text-primary)] truncate tracking-tight">{c.name}</h3>
+                      <h3 className="truncate text-[15px] font-semibold tracking-[-0.015em] text-[var(--text-primary)]">{c.name}</h3>
                       {c.company ? (
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] truncate mt-0.5">
                           <Building className="w-3 h-3 text-[var(--text-muted)]" />

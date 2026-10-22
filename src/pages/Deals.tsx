@@ -82,55 +82,51 @@ export default function DealsPage() {
     }, 0);
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
+    <div className="page-shell">
       {/* ── Page Header ── */}
-      <div className="page-header flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="page-header">
         <div>
-          <div className="eyebrow-pill mb-2.5">
-            <Handshake className="w-3.5 h-3.5" />
-            成約トラッキング & パイプライン
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            案件・提案管理
-          </h1>
-          <p className="text-sm text-[var(--text-muted)] font-medium mt-1 max-w-xl leading-relaxed">
+          <div className="eyebrow-pill">Pipeline & Deals</div>
+          <h1 className="page-title">案件・提案管理</h1>
+          <p className="page-subtitle">
             買主への物件提案履歴、交渉ステータス、成約完了案件を統合管理します
           </p>
         </div>
       </div>
 
       {/* ── KPI Financial Bento Grid ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
           { icon: Handshake, color: "var(--brand)", bg: "var(--brand-soft)", label: "総提案案件数", value: totalDeals, loading: deals === undefined },
-          { icon: Clock, color: "#d97706", bg: "#fffbeb", label: "交渉中案件数", value: negotiatingCount, loading: deals === undefined },
+          { icon: Clock, color: "var(--warning)", bg: "var(--warning-soft)", label: "交渉中案件数", value: negotiatingCount, loading: deals === undefined },
           { icon: Award, color: "var(--brand)", bg: "var(--brand-soft)", label: "成約完了数", value: closedWonCount, loading: deals === undefined, highlight: true },
-          { icon: TrendingUp, color: "#4f46e5", bg: "#eef2ff", label: "成約取引総額", value: `${closedWonVolume.toLocaleString()} 万円`, loading: deals === undefined, valueSmall: true },
+          { icon: TrendingUp, color: "var(--info)", bg: "var(--info-soft)", label: "成約取引総額", value: `${closedWonVolume.toLocaleString()} 万円`, loading: deals === undefined, valueSmall: true },
         ].map((kpi, i) => (
-          <div
-            key={i}
-            className={`kpi-card group ${kpi.highlight ? "border-[var(--brand-border)] bg-gradient-to-br from-white to-[var(--brand-soft)]/50" : ""}`}
-          >
-            <div
-              className={`flex items-center justify-center w-11 h-11 rounded-2xl shrink-0 shadow-xs transition-transform group-hover:scale-105 ${kpi.highlight ? "bg-[var(--brand)] text-white shadow-[0_2px_8px_rgba(22,101,3,0.3)]" : ""}`}
-              style={kpi.highlight ? {} : { background: kpi.bg, color: kpi.color }}
-            >
-              <kpi.icon className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className={`text-[11px] font-bold tracking-wider uppercase ${kpi.highlight ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>
+          <div key={i} className="kpi-card">
+            <div className="flex items-start justify-between gap-2">
+              <span className={`stat-label ${kpi.highlight ? "text-[var(--brand)]" : ""}`}>
                 {kpi.label}
-              </div>
-              <div className={`${kpi.valueSmall ? "text-base md:text-lg" : "text-xl md:text-2xl"} font-extrabold text-[var(--text-primary)] font-data tracking-tight mt-0.5`}>
-                {kpi.loading ? <Skeleton className="h-7 w-14 rounded-lg" /> : kpi.value}
-              </div>
+              </span>
+              <span
+                className={`kpi-icon ${kpi.highlight ? "bg-[#0d3f26] text-white" : ""}`}
+                style={kpi.highlight ? {} : { background: kpi.bg, color: kpi.color }}
+              >
+                <kpi.icon className="h-[15px] w-[15px]" />
+              </span>
             </div>
+            {kpi.loading ? (
+              <Skeleton className="h-7 w-20" />
+            ) : (
+              <div className={`stat-value ${kpi.valueSmall ? "text-xl" : ""}`}>
+                {kpi.value}
+              </div>
+            )}
           </div>
         ))}
       </div>
 
       {/* ── Filter Island & Search ── */}
-      <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-3.5 rounded-2xl border border-[var(--border-subtle)] shadow-[0_1px_3px_rgba(0,0,0,0.02),inset_0_1px_1px_rgba(255,255,255,0.9)]">
+      <div className="toolbar items-stretch md:items-center">
         <div className="pill-group w-full md:w-auto">
           {[
             { key: "all", label: `全件 (${totalDeals})` },
@@ -148,14 +144,14 @@ export default function DealsPage() {
             </button>
           ))}
         </div>
-        <div className="relative w-full md:w-72 md:ml-auto">
-          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
+        <div className="relative w-full md:ml-auto md:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="件名・顧客名で検索..."
-            className="w-full pl-10 pr-4 py-2 bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl text-sm font-semibold text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_rgba(22,101,3,0.15)] transition-all"
+            className="field pl-9"
           />
         </div>
       </div>
