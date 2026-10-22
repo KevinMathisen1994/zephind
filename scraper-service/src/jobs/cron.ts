@@ -1,12 +1,16 @@
 import { logger } from "../logger";
 import { syncAllAccounts } from "../services/mailIngest";
+import { evaluateUnevaluatedMatches } from "../api/evaluate";
 
 /**
- * Scheduled mailbox sync. Ported from convex/crons.js.
+ * Scheduled mailbox sync and server-side match evaluation. Ported from convex/crons.js.
  *
  * Every connected mailbox, checked for new 物件紹介 mail. 15 minutes balances
  * "new listings show up reasonably fast" against Gmail/Graph API quota and LLM
  * extraction cost (one call per new email, not per poll).
+ *
+ * Also checks for unevaluated matches (from scrapes or mail) and evaluates them on
+ * the server, keeping the UI fast and removing the need to keep the Orders tab open.
  *
  * setInterval, not a cron table: this service is a single long-lived process, so
  * there is no scheduler to register with. Running two instances would double the
@@ -25,7 +29,7 @@ export function startCrons() {
     // A sync that outruns the interval must not overlap itself: two passes over
     // the same mailbox would double every LLM call.
     if (running) {
-      logger.warn("[cron] previous mail sync still running, skipping this tick");
+      logger.warn("[cron] previous background job still running, skipping this tick");
       return;
     }
     running = true;
@@ -33,11 +37,20 @@ export function startCrons() {
       await syncAllAccounts();
     } catch (e) {
       logger.error("[cron] mail sync failed: " + ((e as Error).stack || e));
+    }
+
+    try {
+      const evaluated = await evaluateUnevaluatedMatches(15);
+      if (evaluated > 0) {
+        logger.info(`[cron] evaluated ${evaluated} match(es) on server`);
+      }
+    } catch (e) {
+      logger.error("[cron] server auto-evaluation failed: " + ((e as Error).stack || e));
     } finally {
       running = false;
     }
   };
 
   setInterval(() => void tick(), INTERVAL_MS).unref();
-  logger.info(`[cron] mail sync every ${INTERVAL_MS / 60000} minutes`);
+  logger.info(`[cron] background tasks scheduled every ${INTERVAL_MS / 60000} minutes`);
 }

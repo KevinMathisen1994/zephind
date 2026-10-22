@@ -5,7 +5,7 @@
  * `node`, outside any framework. See that file for the layered model.
  */
 import { Router, type Request } from "express";
-import { db } from "../db";
+import { db, type Doc } from "../db";
 import { HttpError, requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
 // Pure JS module, deliberately untyped (see tsconfig checkJs).
@@ -199,13 +199,16 @@ async function callRaxChat(apiKey: string, payload: unknown): Promise<any> {
  * batch can gather several of these in parallel and share one Rax request.
  */
 async function prepareListing(req: Request, args: any) {
-  const c: any = args.orderCriteria || {};
-  const isRental = (args.dealType ?? c.dealType) === "rent";
-
   // The match is patched at the end. Check ownership NOW: the Convex version
   // got this from the mutations it called through, which no longer exist here,
   // and a late check would mean the LLM spend happens before the refusal.
   if (args.matchId) await requireOwned(req, "matching", args.matchId, "マッチング");
+  return prepareListingInternal(args);
+}
+
+export async function prepareListingInternal(args: any) {
+  const c: any = args.orderCriteria || {};
+  const isRental = (args.dealType ?? c.dealType) === "rent";
 
   // 1. Property summary. Rent and price/yield are mutually exclusive (a listing
   // is one or the other), so which line prints is decided by dealType, not by
@@ -660,3 +663,148 @@ evaluateRouter.post("/batch", route(async (req: Request) => {
   const prepared = await Promise.all(items.map((args: any) => prepareListing(req, args ?? {})));
   return { results: await evaluatePrepared(apiKey, prepared) };
 }));
+
+/**
+ * Server-side evaluation of matches by their IDs.
+ * Bypasses Clerk HTTP auth since it runs on the backend server with direct DB access.
+ */
+export async function evaluateMatchIdsServer(matchIds: string[]): Promise<number> {
+  const apiKey = process.env.RAX_API_KEY;
+  if (!apiKey || matchIds.length === 0) return 0;
+
+  // 1. Fetch matching rows
+  const rawMatches = await db.getMany("matching", matchIds);
+  const validMatches: Doc[] = [];
+  for (const m of rawMatches) {
+    if (m && (!m.evaluation || !m.score)) validMatches.push(m);
+  }
+  if (validMatches.length === 0) return 0;
+
+  // 2. Fetch listings and orders in bulk
+  const listingIds = [...new Set(validMatches.map((m) => m.listingId).filter(Boolean))];
+  const orderIds = [...new Set(validMatches.map((m) => m.orderId).filter(Boolean))];
+
+  const [rawListings, rawOrders] = await Promise.all([
+    listingIds.length > 0 ? db.getMany("listings", listingIds) : [],
+    orderIds.length > 0 ? db.getMany("orders", orderIds) : [],
+  ]);
+
+  const listingById = new Map<string, Doc>();
+  for (const l of rawListings) {
+    if (l) listingById.set(l._id, l);
+  }
+
+  const orderById = new Map<string, Doc>();
+  for (const o of rawOrders) {
+    if (o) orderById.set(o._id, o);
+  }
+
+  // 3. Prepare items
+  const items: any[] = [];
+  for (const m of validMatches) {
+    const listing = listingById.get(m.listingId);
+    const order = orderById.get(m.orderId);
+    if (!listing || !order) continue;
+
+    const orderCriteria = {
+      orderName: order.name,
+      dealType: order.dealType,
+      wards: order.wards,
+      priceMin: order.priceMin,
+      priceMax: order.priceMax,
+      minYield: order.minYield,
+      walkMinutesMax: order.walkMinutesMax,
+      minRoadWidth: order.minRoadWidth,
+      propertyTypes: order.propertyTypes,
+      ownerChange: order.ownerChange,
+      areaMin: order.areaMin,
+      areaMax: order.areaMax,
+      structureTypes: order.structureTypes,
+      maxBuildAge: order.maxBuildAge,
+      excludeFirstFloor: order.excludeFirstFloor,
+      minElevators: order.minElevators,
+      minTotalUnits: order.minTotalUnits,
+      specialRequirements: order.specialRequirements,
+      rentMin: order.rentMin,
+      rentMax: order.rentMax,
+      maxDeposit: order.maxDeposit,
+      maxKeyMoney: order.maxKeyMoney,
+      petsRequired: order.petsRequired,
+    };
+
+    items.push({
+      matchId: m._id,
+      address: listing.address,
+      ward: listing.ward,
+      price: listing.price,
+      landSize: listing.landSize,
+      area: listing.area,
+      buildingCoverageRatio: listing.buildingCoverageRatio,
+      floorAreaRatio: listing.floorAreaRatio,
+      walkMinutes: listing.walkMinutes,
+      station: listing.station,
+      buildYear: listing.buildYear,
+      roadWidth: listing.roadWidth,
+      frontage: listing.frontage,
+      rooms: listing.rooms,
+      layout: listing.layout,
+      propertyType: listing.propertyType,
+      description: listing.description,
+      yield: listing.yield || listing.grossYield || listing.netYield,
+      structure: listing.structure || listing.buildingStructure,
+      floor: listing.floor,
+      totalUnits: listing.totalUnits,
+      elevators: listing.elevators,
+      dealType: listing.dealType,
+      rent: listing.rent,
+      managementFee: listing.managementFee,
+      deposit: listing.deposit,
+      keyMoney: listing.keyMoney,
+      petsAllowed: listing.petsAllowed,
+      orderCriteria,
+    });
+  }
+
+  if (items.length === 0) return 0;
+
+  // 4. Process in chunks of MAX_BATCH (5)
+  let evaluatedCount = 0;
+  for (let i = 0; i < items.length; i += MAX_BATCH) {
+    const chunk = items.slice(i, i + MAX_BATCH);
+    try {
+      const prepared = await Promise.all(chunk.map((args) => prepareListingInternal(args)));
+      const results = await evaluatePrepared(apiKey, prepared);
+      evaluatedCount += results.filter((r) => r.score != null).length;
+    } catch (chunkErr) {
+      console.error(`[Server evaluate] batch error for chunk ${i}-${i + chunk.length}:`, chunkErr);
+    }
+  }
+
+  return evaluatedCount;
+}
+
+/** Evaluates up to `limit` unevaluated matches across orders in the database. */
+export async function evaluateUnevaluatedMatches(limit = 15): Promise<number> {
+  const { data: unevaluated, error } = await db.raw
+    .from("matching")
+    .select("_id")
+    .is("score", null)
+    .order("_creationTime", { ascending: false })
+    .limit(limit);
+
+  if (error || !unevaluated || unevaluated.length === 0) return 0;
+  return evaluateMatchIdsServer(unevaluated.map((r: any) => r._id));
+}
+
+/** Triggered server batch endpoint. */
+evaluateRouter.post("/server-batch", route(async (req: Request) => {
+  const matchIds: string[] = Array.isArray(req.body?.matchIds) ? req.body.matchIds : [];
+  const limit = typeof req.body?.limit === "number" ? req.body.limit : 15;
+  if (matchIds.length > 0) {
+    const count = await evaluateMatchIdsServer(matchIds);
+    return { evaluated: count };
+  }
+  const count = await evaluateUnevaluatedMatches(limit);
+  return { evaluated: count };
+}));
+

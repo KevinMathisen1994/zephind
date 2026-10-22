@@ -23,7 +23,9 @@
 import { Router, type Request } from "express";
 import { db } from "../db";
 import { HttpError } from "../auth/authz";
+import { logger } from "../logger";
 import { route } from "./handler";
+import { evaluateMatchIdsServer } from "./evaluate";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -331,8 +333,16 @@ ingestRouter.post("/scrape", route(async (req) => {
     });
   }
   if (toInsert.length > 0) {
-    await db.insertMany("matching", toInsert);
+    const insertedIds = await db.insertMany("matching", toInsert);
     matchesCreated += toInsert.length;
+
+    // Evaluate on the server, not in the browser.
+    // The scrape runs 3 times a day, so automatically score the new matches.
+    if (insertedIds && insertedIds.length > 0) {
+      void evaluateMatchIdsServer(insertedIds).catch((err) => {
+        logger.error(`[Server evaluate] auto-evaluation on ingest failed: ${err}`);
+      });
+    }
   }
 
   return {
