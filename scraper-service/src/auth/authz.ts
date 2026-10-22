@@ -46,5 +46,7 @@ export async function requireOwned(
 /** All rows in `table` owned by the caller. */
 export async function listOwned(req: Request, table: string): Promise<Doc[]> {
   const userId = requireUserId(req);
-  return db.list(table, { where: { userId } });
+  // Newest first, and stable: without an ORDER BY Postgres returns rows in heap
+  // order, which shifts after every UPDATE and made lists reshuffle on refetch.
+  return db.list(table, { where: { userId }, order: { by: "_creationTime", desc: true } });
 }

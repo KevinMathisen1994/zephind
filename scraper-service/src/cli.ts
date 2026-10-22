@@ -684,6 +684,24 @@ async function main(): Promise<number> {
     }
   }
 
+  // Auto-evaluate newly matched listings on the server if any were created
+  if (total.matchesCreated > 0) {
+    try {
+      logger.info("Running server auto-evaluation for new matches...");
+      const { evaluateUnevaluatedMatches } = await import("./api/evaluate");
+      const evaluated = await evaluateUnevaluatedMatches(30);
+      if (evaluated > 0) {
+        logger.info(
+          `Server auto-evaluated ${evaluated} new match(es) with AI score & market comparison`,
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        `Server auto-evaluation skipped or failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const mins = Math.round((Date.now() - startedAt) / 6000) / 10;
   logger.info(
     `Cron scrape finished in ${mins}min — jobs ok=${jobsOk} failed=${jobsFailed} | ` +

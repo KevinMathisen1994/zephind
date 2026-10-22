@@ -59,6 +59,9 @@ import {
   Paperclip,
   AlertTriangle,
   TrendingDown,
+  Search,
+  Sparkles,
+  ArrowUpDown,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -315,6 +318,13 @@ const NEW_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 const BASE_FILTERS: ListingFilter[] = [
   {
+    key: "recentMatch",
+    label: "⚡ 本日の新着",
+    test: (m) =>
+      m?._creationTime != null &&
+      Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+  },
+  {
     key: "highScore",
     label: "高評価 80点以上",
     test: (_m, _l, score) => score !== undefined && score >= 80,
@@ -326,7 +336,7 @@ const BASE_FILTERS: ListingFilter[] = [
   },
   {
     key: "new",
-    label: "新着",
+    label: "ポータル新着",
     // The portal's own badge, or a posted date inside the same window. Discovery
     // time is deliberately NOT used: everything is "new" on a first sweep.
     test: (_m, listing) =>
@@ -1079,6 +1089,15 @@ export default function OrdersPage() {
       next.has(orderId) ? next.delete(orderId) : next.add(orderId);
       return next;
     });
+
+  // Order search, status filter & sorting state
+  const [orderSearchQuery, setOrderSearchQuery] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<
+    "all" | "scraping" | "newMatches" | "hasMatches" | "pending" | "completed"
+  >("all");
+  const [orderSortKey, setOrderSortKey] = useState<
+    "newest" | "matchesDesc" | "newMatchesDesc" | "nameAsc"
+  >("newest");
   // Properties ticked in the results list, carried into the proposal modal so
   // the same list is not presented twice.
   const [selectedForProposal, setSelectedForProposal] = useState<Set<string>>(
@@ -2185,12 +2204,145 @@ export default function OrdersPage() {
   const matchedListing = (listingId: string) =>
     listings?.find((l) => l._id === listingId);
 
+  // Top KPI metrics
   const totalOrdersCount = orders?.length ?? 0;
   const activeOrdersCount =
     orders?.filter((o) => o.status === "pending" || o.status === "active")
       .length ?? 0;
+  const completedOrdersCount =
+    orders?.filter((o) => o.status === "completed").length ?? 0;
+  const scrapingOrdersCount =
+    orders?.filter(
+      (o) =>
+        o.isScraping ||
+        (o.scrapingStatus && o.scrapingStatus.includes("検索中")) ||
+        isMyRun(o) ||
+        localRunOrderId === o._id,
+    ).length ?? 0;
   const totalMatchesCount = matches?.length ?? 0;
   const totalEvaluatedCount = Object.keys(evaluations).length;
+  const newMatches24hCount = useMemo(
+    () =>
+      matches?.filter(
+        (m) =>
+          m._creationTime &&
+          Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+      ).length ?? 0,
+    [matches],
+  );
+  const highScoreMatchesCount = useMemo(
+    () =>
+      matches?.filter((m) => {
+        const s = matchScore(m, evaluations);
+        return s !== undefined && s >= 80;
+      }).length ?? 0,
+    [matches, evaluations],
+  );
+  const ordersWithNewMatchesCount = useMemo(
+    () =>
+      orders?.filter((o) => {
+        const oMatches = orderMatches(o._id);
+        return (oMatches ?? []).some(
+          (m) =>
+            m._creationTime &&
+            Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+        );
+      }).length ?? 0,
+    [orders, matches],
+  );
+  const ordersWithMatchesCount = useMemo(
+    () =>
+      orders?.filter((o) => (orderMatches(o._id)?.length ?? 0) > 0).length ?? 0,
+    [orders, matches],
+  );
+  const pendingOrdersCount = useMemo(
+    () =>
+      orders?.filter(
+        (o) =>
+          o.status !== "completed" && (orderMatches(o._id)?.length ?? 0) === 0,
+      ).length ?? 0,
+    [orders, matches],
+  );
+
+  // Filtered and sorted orders
+  const filteredOrders = useMemo(() => {
+    if (!orders) return undefined;
+    return orders
+      .filter((order) => {
+        // Text Search
+        if (orderSearchQuery.trim()) {
+          const q = orderSearchQuery.toLowerCase().trim();
+          const orderName = (order.name || "").toLowerCase();
+          const customer = customers?.find((c) => c._id === order.customerId);
+          const customerName = (customer?.name || "").toLowerCase();
+          const wardStr = [order.ward, ...(order.wards || [])]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const matchesSearch =
+            orderName.includes(q) ||
+            customerName.includes(q) ||
+            wardStr.includes(q);
+          if (!matchesSearch) return false;
+        }
+
+        // Status Filter
+        const oMatches = orderMatches(order._id) || [];
+        const matchCount = oMatches.length;
+        const isScraping =
+          order.isScraping ||
+          (order.scrapingStatus && order.scrapingStatus.includes("検索中")) ||
+          isMyRun(order) ||
+          localRunOrderId === order._id;
+        const hasRecent = oMatches.some(
+          (m) =>
+            m._creationTime &&
+            Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+        );
+
+        if (orderStatusFilter === "scraping") return isScraping;
+        if (orderStatusFilter === "newMatches") return hasRecent;
+        if (orderStatusFilter === "hasMatches") return matchCount > 0;
+        if (orderStatusFilter === "pending")
+          return order.status !== "completed" && matchCount === 0;
+        if (orderStatusFilter === "completed")
+          return order.status === "completed";
+        return true;
+      })
+      .sort((a, b) => {
+        const listA = orderMatches(a._id) || [];
+        const listB = orderMatches(b._id) || [];
+        if (orderSortKey === "matchesDesc") {
+          return listB.length - listA.length;
+        }
+        if (orderSortKey === "newMatchesDesc") {
+          const recentA = listA.filter(
+            (m) =>
+              m._creationTime &&
+              Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+          ).length;
+          const recentB = listB.filter(
+            (m) =>
+              m._creationTime &&
+              Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+          ).length;
+          return recentB - recentA;
+        }
+        if (orderSortKey === "nameAsc") {
+          return (a.name || "").localeCompare(b.name || "", "ja");
+        }
+        return (b._creationTime || 0) - (a._creationTime || 0);
+      });
+  }, [
+    orders,
+    orderSearchQuery,
+    orderStatusFilter,
+    orderSortKey,
+    matches,
+    customers,
+    activeRun,
+    localRunOrderId,
+  ]);
 
   return (
     <div className="page-shell space-y-5">
@@ -2939,38 +3091,274 @@ export default function OrdersPage() {
         </Card>
       )}
 
+      {/* ── KPI Dashboard Overview ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {/* Total Orders */}
+        <div
+          onClick={() => setOrderStatusFilter("all")}
+          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
+            orderStatusFilter === "all"
+              ? "border-emerald-600 ring-1 ring-emerald-600/30"
+              : "border-[var(--border-subtle)] hover:border-slate-300"
+          }`}
+        >
+          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              総オーダー
+            </span>
+            <Building2 className="w-4 h-4 text-slate-400" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 font-data">
+            {totalOrdersCount}
+            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+          </div>
+          <div className="text-[11px] font-semibold text-slate-500 mt-1 flex items-center gap-1">
+            <span>進行中: {activeOrdersCount}件</span>
+            <span className="text-slate-300">•</span>
+            <span>完了: {completedOrdersCount}件</span>
+          </div>
+        </div>
+
+        {/* Active Scraping Runs */}
+        <div
+          onClick={() => setOrderStatusFilter("scraping")}
+          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
+            orderStatusFilter === "scraping"
+              ? "border-emerald-600 ring-1 ring-emerald-600/30"
+              : "border-[var(--border-subtle)] hover:border-slate-300"
+          }`}
+        >
+          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              検索中オーダー
+            </span>
+            <RefreshCw
+              className={`w-4 h-4 ${
+                scrapingOrdersCount > 0
+                  ? "text-emerald-600 animate-spin"
+                  : "text-slate-400"
+              }`}
+            />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-slate-900 font-data">
+              {scrapingOrdersCount}
+            </span>
+            <span className="text-xs font-bold text-slate-400">件</span>
+            {scrapingOrdersCount > 0 && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] font-semibold text-slate-500 mt-1">
+            {scrapingOrdersCount > 0 ? "リアルタイム収集中" : "現在待機中"}
+          </div>
+        </div>
+
+        {/* New Matches (Today / 24h) */}
+        <div
+          onClick={() => setOrderStatusFilter("newMatches")}
+          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
+            orderStatusFilter === "newMatches"
+              ? "border-emerald-600 ring-1 ring-emerald-600/30"
+              : "border-[var(--border-subtle)] hover:border-slate-300"
+          }`}
+        >
+          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+              本日の新着
+            </span>
+            <Sparkles className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="text-2xl font-black text-emerald-700 font-data">
+            +{newMatches24hCount}
+            <span className="text-xs font-bold text-emerald-600 ml-1">件</span>
+          </div>
+          <div className="text-[11px] font-semibold text-emerald-600/90 mt-1">
+            {ordersWithNewMatchesCount}件のオーダーで新着あり
+          </div>
+        </div>
+
+        {/* High Score Matches (80+ S/A rank) */}
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-white shadow-2xs hover:border-slate-300 transition-all">
+          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              高評価物件
+            </span>
+            <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 font-data">
+            {highScoreMatchesCount}
+            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+          </div>
+          <div className="text-[11px] font-semibold text-amber-700 mt-1">
+            スコア80点以上（即提案候補）
+          </div>
+        </div>
+
+        {/* Total Matched Listings */}
+        <div
+          onClick={() => setOrderStatusFilter("hasMatches")}
+          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
+            orderStatusFilter === "hasMatches"
+              ? "border-emerald-600 ring-1 ring-emerald-600/30"
+              : "border-[var(--border-subtle)] hover:border-slate-300"
+          }`}
+        >
+          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              総マッチ物件数
+            </span>
+            <CheckCircle2 className="w-4 h-4 text-slate-400" />
+          </div>
+          <div className="text-2xl font-black text-slate-900 font-data">
+            {totalMatchesCount.toLocaleString()}
+            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+          </div>
+          <div className="text-[11px] font-semibold text-slate-500 mt-1">
+            {ordersWithMatchesCount}件のオーダーにマッチ
+          </div>
+        </div>
+      </div>
+
       {/* Orders List Section */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-extrabold text-[var(--text-primary)]">
-            一覧
-          </h2>
-          {orders && orders.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                const allExpanded = orders.every((o) => expandedOrders.has(o._id));
-                if (allExpanded) {
-                  setExpandedOrders(new Set());
-                } else {
-                  setExpandedOrders(new Set(orders.map((o) => o._id)));
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] text-xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer select-none shadow-2xs"
-            >
-              {orders.every((o) => expandedOrders.has(o._id)) ? (
-                <>
-                  <ChevronUp className="w-3.5 h-3.5" />
-                  すべて折りたたむ
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                  すべて展開
-                </>
+        {/* Search, Filter & Sort Controls */}
+        <div className="space-y-3 bg-white p-4 rounded-2xl border border-[var(--border-subtle)] shadow-2xs">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={orderSearchQuery}
+                onChange={(e) => setOrderSearchQuery(e.target.value)}
+                placeholder="オーダー名・顧客名・エリア（区/市/駅）で検索..."
+                className="w-full h-9 pl-9 pr-8 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
+              />
+              {orderSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setOrderSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
-            </button>
-          )}
+            </div>
+
+            {/* Sort & Bulk Toggle */}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={orderSortKey}
+                  onChange={(e) => setOrderSortKey(e.target.value as any)}
+                  className="h-9 px-2.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 cursor-pointer focus:outline-none hover:border-slate-300"
+                >
+                  <option value="newest">作成日が新しい順</option>
+                  <option value="newMatchesDesc">新着マッチが多い順</option>
+                  <option value="matchesDesc">マッチ件数が多い順</option>
+                  <option value="nameAsc">オーダー名順</option>
+                </select>
+              </div>
+
+              {/* Expand/Collapse All */}
+              {filteredOrders && filteredOrders.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allExpanded = filteredOrders.every((o) =>
+                      expandedOrders.has(o._id),
+                    );
+                    if (allExpanded) {
+                      setExpandedOrders(new Set());
+                    } else {
+                      setExpandedOrders(
+                        new Set(filteredOrders.map((o) => o._id)),
+                      );
+                    }
+                  }}
+                  className="h-9 flex items-center gap-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors cursor-pointer select-none"
+                >
+                  {filteredOrders.every((o) => expandedOrders.has(o._id)) ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      折りたたむ
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      すべて展開
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Status Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+            {[
+              { key: "all", label: "すべて", count: totalOrdersCount },
+              ...(ordersWithNewMatchesCount > 0
+                ? [
+                    {
+                      key: "newMatches",
+                      label: "⚡ 本日の新着あり",
+                      count: ordersWithNewMatchesCount,
+                      highlight: true,
+                    },
+                  ]
+                : []),
+              ...(scrapingOrdersCount > 0
+                ? [
+                    {
+                      key: "scraping",
+                      label: "🔄 検索中",
+                      count: scrapingOrdersCount,
+                      highlight: true,
+                    },
+                  ]
+                : []),
+              {
+                key: "hasMatches",
+                label: "マッチあり",
+                count: ordersWithMatchesCount,
+              },
+              { key: "pending", label: "未検索", count: pendingOrdersCount },
+              { key: "completed", label: "完了", count: completedOrdersCount },
+            ].map((tab) => {
+              const isActive = orderStatusFilter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setOrderStatusFilter(tab.key as any)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+                    isActive
+                      ? "bg-emerald-700 text-white shadow-xs"
+                      : tab.highlight
+                        ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200/80"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                      isActive
+                        ? "bg-white/20 text-white"
+                        : "bg-white text-slate-700 border border-slate-200"
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Live GitHub Actions run banner */}
@@ -2992,7 +3380,7 @@ export default function OrdersPage() {
           </div>
         )}
 
-        {orders === undefined ? (
+        {filteredOrders === undefined ? (
           <div className="space-y-3">
             {[1, 2].map((n) => (
               <Card key={n} className="p-6">
@@ -3004,20 +3392,41 @@ export default function OrdersPage() {
               </Card>
             ))}
           </div>
-        ) : orders.length === 0 ? (
-          <div className="empty-state">
-            <Building2 className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto mb-3" />
+        ) : filteredOrders.length === 0 ? (
+          <div className="empty-state p-12 text-center bg-white rounded-2xl border border-[var(--border-subtle)] space-y-3">
+            <Search className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto" />
             <p className="text-sm font-bold text-[var(--text-secondary)]">
-              登録済みオーダーがありません
+              {orders && orders.length > 0
+                ? "条件に一致するオーダーが見つかりませんでした"
+                : "登録済みオーダーがありません"}
             </p>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              「新規オーダー作成」から希望条件を登録してください。
+            <p className="text-xs text-[var(--text-muted)]">
+              {orders && orders.length > 0
+                ? "検索キーワードやステータスタブの絞り込みを変更してください。"
+                : "「新規オーダー作成」から希望条件を登録してください。"}
             </p>
+            {orders && orders.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setOrderSearchQuery("");
+                  setOrderStatusFilter("all");
+                }}
+              >
+                フィルターを解除
+              </Button>
+            )}
           </div>
         ) : (
-          orders.map((order) => {
+          filteredOrders.map((order) => {
             const orderMatchList = orderMatches(order._id);
             const matchCount = orderMatchList?.length ?? 0;
+            const recentMatchesInOrder = (orderMatchList ?? []).filter(
+              (m) =>
+                m._creationTime &&
+                Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+            ).length;
             const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
               selectedForProposal.has(m._id),
             ).length;
@@ -3082,6 +3491,12 @@ export default function OrdersPage() {
                           {matchCount > 0 && (
                             <Badge className="font-extrabold cursor-pointer">
                               {matchCount} 件
+                            </Badge>
+                          )}
+                          {recentMatchesInOrder > 0 && (
+                            <Badge className="font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white border-0 shadow-xs gap-1 py-1 px-2.5">
+                              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                              +{recentMatchesInOrder} 件の新着
                             </Badge>
                           )}
                           {order.dealType === "rent" && (
@@ -3900,6 +4315,16 @@ export default function OrdersPage() {
                                         新着
                                       </Badge>
                                     )}
+
+                                    {/* Recent match badge (found in last 24h) */}
+                                    {m._creationTime &&
+                                      Date.now() - m._creationTime <=
+                                        24 * 60 * 60 * 1000 && (
+                                        <Badge className="text-[10px] shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-extrabold shadow-2xs gap-1 py-0.5 px-2">
+                                          <Sparkles className="w-2.5 h-2.5 animate-pulse" />
+                                          本日の新着
+                                        </Badge>
+                                      )}
 
                                     {/* Prominent Score Badge on Item Header BEFORE Expanding */}
                                     {extractedScore !== undefined && (
