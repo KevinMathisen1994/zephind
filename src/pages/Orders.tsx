@@ -62,10 +62,16 @@ import {
   Search,
   Sparkles,
   ArrowUpDown,
+  Smartphone,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { ProposalModal } from "../components/ProposalModal";
+import {
+  PropertyComparisonModal,
+  type ComparisonListing,
+} from "../components/PropertyComparisonModal";
+import { LineProposalModal } from "../components/LineProposalModal";
 import type { Doc, Id } from "../lib/dataModel";
 
 const GMAPS_KEY = import.meta.env
@@ -1109,6 +1115,17 @@ export default function OrdersPage() {
       next.has(matchId) ? next.delete(matchId) : next.add(matchId);
       return next;
     });
+
+  // State for AI Property Comparison Modal & LINE Simulator Modal
+  const [comparisonListings, setComparisonListings] = useState<
+    ComparisonListing[] | null
+  >(null);
+  const [lineProposalListings, setLineProposalListings] = useState<
+    ComparisonListing[] | null
+  >(null);
+  const [lineProposalOrder, setLineProposalOrder] = useState<
+    Doc<"orders"> | null
+  >(null);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
   const [scoreDetails, setScoreDetails] = useState<
@@ -3801,15 +3818,7 @@ export default function OrdersPage() {
                                 </button>
                               ))}
                             </div>
-                          ) : (
-                            <span
-                              className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 text-[11px] font-medium text-[var(--text-muted)]"
-                              title="GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
-                            >
-                              <Cloud className="h-3.5 w-3.5" />
-                              GitHub Actions
-                            </span>
-                          )}
+                          ) : null}
 
                           {matchCount > 0 && (
                             <>
@@ -3861,12 +3870,97 @@ export default function OrdersPage() {
                                 )}
                               </Button>
 
-                              {/* Disabled until something is ticked: opening the
-                                  modal with an empty selection just showed an
-                                  empty proposal, so the button promised an action
-                                  it could not complete. Counts only THIS order's
-                                  selections — the set is keyed by matchId and
-                                  shared across cards. */}
+                              {/* AI Comparison button when 2+ properties selected */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={selectedCountForOrder < 2}
+                                title={
+                                  selectedCountForOrder < 2
+                                    ? "比較する物件をチェックボックスで2件以上選択してください"
+                                    : `選択中の ${selectedCountForOrder} 件をAIで横断比較します`
+                                }
+                                className={`border-emerald-300 text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 ${
+                                  selectedCountForOrder >= 2
+                                    ? "font-black shadow-xs ring-1 ring-emerald-400"
+                                    : "opacity-50"
+                                }`}
+                                onClick={() => {
+                                  const selectedMatches = (
+                                    orderMatchList || []
+                                  ).filter((m) =>
+                                    selectedForProposal.has(m._id),
+                                  );
+                                  const items: ComparisonListing[] =
+                                    selectedMatches
+                                      .map((m) => ({
+                                        matchId: m._id,
+                                        listing: matchedListing(
+                                          m.listingId ?? "",
+                                        )!,
+                                        score: matchScore(m, evaluations),
+                                        evaluation: m.evaluation,
+                                        orderName: order.name,
+                                        marketAvgPricePerSqm: (
+                                          m.scoreDetail as any
+                                        )?.marketAvgPricePerSqm,
+                                      }))
+                                      .filter((item) => Boolean(item.listing));
+                                  setComparisonListings(items);
+                                }}
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                                AI物件比較
+                                {selectedCountForOrder >= 2 &&
+                                  ` (${selectedCountForOrder})`}
+                              </Button>
+
+                              {/* LINE Proposal Simulator button */}
+                              <Button
+                                size="sm"
+                                disabled={selectedCountForOrder === 0}
+                                title={
+                                  selectedCountForOrder === 0
+                                    ? "LINE提案する物件を下の一覧から選択してください"
+                                    : `選択中の ${selectedCountForOrder} 件でLINE提案文を作成します`
+                                }
+                                className={`bg-[#06c755] hover:bg-[#05b34c] text-white font-bold shadow-xs ${
+                                  selectedCountForOrder === 0
+                                    ? "opacity-50"
+                                    : ""
+                                }`}
+                                onClick={() => {
+                                  const selectedMatches = (
+                                    orderMatchList || []
+                                  ).filter((m) =>
+                                    selectedForProposal.has(m._id),
+                                  );
+                                  const items: ComparisonListing[] =
+                                    selectedMatches
+                                      .map((m) => ({
+                                        matchId: m._id,
+                                        listing: matchedListing(
+                                          m.listingId ?? "",
+                                        )!,
+                                        score: matchScore(m, evaluations),
+                                        evaluation: m.evaluation,
+                                        orderName: order.name,
+                                        marketAvgPricePerSqm: (
+                                          m.scoreDetail as any
+                                        )?.marketAvgPricePerSqm,
+                                      }))
+                                      .filter((item) => Boolean(item.listing));
+                                  setLineProposalListings(items);
+                                  setLineProposalOrder(order);
+                                }}
+                              >
+                                <Smartphone className="w-3.5 h-3.5" />
+                                LINE提案作成
+                                {selectedCountForOrder > 0 &&
+                                  ` (${selectedCountForOrder})`}
+                              </Button>
+
+                              {/* Disabled until something is ticked */}
                               <Button
                                 size="sm"
                                 disabled={selectedCountForOrder === 0}
@@ -4376,6 +4470,24 @@ export default function OrdersPage() {
                                     {listing?.price && (
                                       <div className="flex flex-col items-end">
                                         <div className="flex items-center gap-1.5">
+                                          {(() => {
+                                            const area = listing.area || listing.landSize || 0;
+                                            const benchmark = (m.scoreDetail as any)?.marketAvgPricePerSqm || listing.mlitBenchmark;
+                                            if (area > 0 && listing.price && benchmark) {
+                                              const expected = Math.round(benchmark * area);
+                                              const diff = expected - listing.price;
+                                              const pct = Math.round((diff / expected) * 100);
+                                              if (pct >= 8) {
+                                                return (
+                                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                                    <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
+                                                    相場比 -{pct}% 割安
+                                                  </span>
+                                                );
+                                              }
+                                            }
+                                            return null;
+                                          })()}
                                           {(listing.priceDropped || (listing.previousPrice && listing.price < listing.previousPrice)) && (
                                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
                                               <TrendingDown className="w-3 h-3 text-rose-500" />
@@ -5015,6 +5127,42 @@ export default function OrdersPage() {
           orderId={proposalOrder._id}
           defaultCustomerId={proposalOrder.customerId}
           onClose={() => setProposalOrder(null)}
+        />
+      )}
+
+      {/* AI Property Comparison Matrix Modal */}
+      {comparisonListings && (
+        <PropertyComparisonModal
+          isOpen={true}
+          onClose={() => setComparisonListings(null)}
+          listings={comparisonListings}
+          orderName={comparisonListings[0]?.orderName}
+          onOpenLineProposal={(items) => {
+            setLineProposalListings(items);
+            const foundOrder = orders?.find(
+              (o) => o.name === items[0]?.orderName,
+            );
+            if (foundOrder) setLineProposalOrder(foundOrder);
+          }}
+        />
+      )}
+
+      {/* LINE Proposal Smartphone Simulator Modal */}
+      {lineProposalListings && (
+        <LineProposalModal
+          isOpen={true}
+          onClose={() => {
+            setLineProposalListings(null);
+            setLineProposalOrder(null);
+          }}
+          listings={lineProposalListings}
+          orderName={
+            lineProposalOrder?.name || lineProposalListings[0]?.orderName
+          }
+          customerName={
+            customers?.find((c) => c._id === lineProposalOrder?.customerId)
+              ?.name
+          }
         />
       )}
 
