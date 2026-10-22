@@ -9,6 +9,8 @@
  * the backend over HTTP even though the routes live in the same repo.
  */
 import dotenv from "dotenv";
+import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 
 dotenv.config();
 
@@ -74,12 +76,15 @@ export interface IngestClient {
  * loud: a cron job that silently no-ops because an env var is missing looks
  * exactly like a cron job that found nothing to scrape.
  */
-export function createIngestClient(): IngestClient {
-  const backendUrl = (process.env.BACKEND_URL || "").replace(/\/$/, "");
+export async function createIngestClient(): Promise<IngestClient> {
+  let backendUrl = (process.env.BACKEND_URL || "").replace(/\/$/, "");
+  // No deployed backend: serve the same /api/ingest routes in this process and
+  // write straight to Supabase. This is how the GitHub Actions run works.
+  if (!backendUrl && process.env.SUPABASE_URL) backendUrl = await startLocalIngest();
   const secret = process.env.SCRAPER_INGEST_SECRET || "";
 
   const missing: string[] = [];
-  if (!backendUrl) missing.push("BACKEND_URL (e.g. https://zephind-api.example.com)");
+  if (!backendUrl) missing.push("BACKEND_URL, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to write directly");
   if (!secret) missing.push("SCRAPER_INGEST_SECRET (must equal the value set on the backend)");
   if (missing.length > 0) {
     throw new Error(
@@ -167,4 +172,22 @@ export function createIngestClient(): IngestClient {
       }
     },
   };
+}
+
+/** Mounts the ingest router on an ephemeral localhost port; returns its base URL. */
+async function startLocalIngest(): Promise<string> {
+  // Only this process can reach the port, so a throwaway secret is enough.
+  process.env.SCRAPER_INGEST_SECRET ||= randomUUID();
+  const { default: express } = await import("express");
+  const { ingestRouter } = await import("./api/ingest");
+  const app = express();
+  app.use(express.json({ limit: "25mb" }));
+  app.use("/api/ingest", ingestRouter);
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, "127.0.0.1", () => {
+      server.unref();
+      resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    });
+    server.on("error", reject);
+  });
 }

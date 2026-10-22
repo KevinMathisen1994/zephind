@@ -269,7 +269,7 @@ async function enrichPostedDates(
  * never re-attempted — it is not a gap that can be filled.
  */
 async function backfillPostedDates(
-  client: ReturnType<typeof createIngestClient>,
+  client: Awaited<ReturnType<typeof createIngestClient>>,
   state: { browser: Browser | null; page: Page | null; budgetLeft: number },
 ): Promise<number> {
   if (!POSTED_DATES_ENABLED || state.budgetLeft <= 0) return 0;
@@ -354,7 +354,7 @@ async function backfillPostedDates(
 
 async function main(): Promise<number> {
   const startedAt = Date.now();
-  const client = createIngestClient();
+  const client = await createIngestClient();
   logger.info(`Cron scrape starting — backend=${client.backendUrl}`);
 
   // --backfill-dates: fill in 掲載日 for stored listings and exit, without

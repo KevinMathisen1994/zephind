@@ -1,14 +1,12 @@
 name: Scheduled scrape
 
-# Nightly portal sweep. The browser UI used to be the only thing that persisted
-# scrape results; this run has no browser, so scraper-service/src/cli.ts writes
-# to the backend itself through the secret-guarded /api/ingest routes.
+# Portal sweep, 3x daily. scraper-service/src/cli.ts writes results to Supabase
+# through the /api/ingest routes, mounted in-process on the runner.
 
 on:
   schedule:
-    # 03:30 JST daily — off-peak for the Japanese property portals we scrape.
-    # GitHub cron is UTC and JST is UTC+9, so 03:30 JST = 18:30 UTC the previous day.
-    - cron: "30 18 * * *"
+    # 03:30, 11:30, 19:30 JST. GitHub cron is UTC (JST = UTC+9) and often starts late.
+    - cron: "30 18,2,10 * * *"
   workflow_dispatch:
     inputs:
       areas:
@@ -80,8 +78,10 @@ jobs:
 
       - name: Run scrape
         env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
-          SCRAPER_INGEST_SECRET: ${{ secrets.SCRAPER_INGEST_SECRET }}
+          # No BACKEND_URL: the CLI serves the ingest routes in-process and writes
+          # straight to Supabase (see createIngestClient).
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # Passed as env rather than argv so a dispatch input cannot inject shell.
           # Empty string falls through to the CLI's defaults (all sources, and
           # the ward codes named by existing orders).
