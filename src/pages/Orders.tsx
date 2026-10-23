@@ -1077,16 +1077,35 @@ export default function OrdersPage() {
           (x) => x.status === "queued" || x.status === "in_progress",
         );
         setActiveRun(live ?? null);
-        // Run finished: clear any order still flagged as dispatched, otherwise
-        // the badge sticks permanently (nothing else ever tells the app it ended).
+        // No live run: every order still flagged as scraping is stale, because
+        // nothing else ever tells the app a run ended. A run that dies seconds
+        // after dispatch (a workflow that crashes on boot) never reports back,
+        // so only `dispatched` was cleared before and any other flag left the
+        // card spinning forever.
         if (!live) {
           for (const o of ordersRef.current ?? []) {
-            if (o.scrapingStatus === "dispatched") {
-              void updateOrder({
-                id: o._id,
-                scrapingStatus: "completed",
-              }).catch(() => {});
+            // This poll only sees GitHub runs; a local sweep is invisible here.
+            if ((o.lastScrapeBy ?? "").includes("ローカル実行")) continue;
+            const flagged =
+              o.isScraping === true ||
+              (o.scrapingStatus != null &&
+                !["completed", "failed", "cancelled"].includes(
+                  o.scrapingStatus,
+                ));
+            if (!flagged) continue;
+            // Give GitHub a moment to list a run that was just dispatched before
+            // concluding it does not exist.
+            if (
+              o.lastScrapeAt != null &&
+              Date.now() - o.lastScrapeAt < 120_000
+            ) {
+              continue;
             }
+            void updateOrder({
+              id: o._id,
+              isScraping: false,
+              scrapingStatus: "completed",
+            }).catch(() => {});
           }
         }
       } catch {
@@ -2014,15 +2033,40 @@ export default function OrdersPage() {
       }
 
       const r = (await cancelScrape({ orderId: order._id })) as
-        | { ok?: boolean; error?: string }
+        | { ok?: boolean; error?: string; alreadyFinished?: boolean }
         | undefined;
+
+      // "Nothing is running" is not a failure — it is the state this button
+      // exists to reach. The 検索中 badge is just a stored flag, so clear it
+      // here as well: a run the backend has already forgotten (it stores no run
+      // id when GitHub's post-dispatch poll misses one) would otherwise leave
+      // the card spinning with no way out. Also covers a backend that predates
+      // this fix.
+      if (r?.error?.includes("実行中のスクレイピングがありません")) {
+        await updateOrder({
+          id: order._id,
+          isScraping: false,
+          scrapingStatus: "cancelled",
+        }).catch(() => {});
+        setScrapeNotice((prev) => ({
+          ...prev,
+          [order._id]: {
+            kind: "ok",
+            text: "この検索は既に終了していました（表示が古くなっていました）。表示を更新しました。",
+          },
+        }));
+        return;
+      }
+
       setScrapeNotice((prev) => ({
         ...prev,
         [order._id]: {
           kind: r?.error ? "error" : "ok",
           text: r?.error
             ? r.error
-            : "物件検索を中止し、GitHub Actions の実行を停止しました。",
+            : r?.alreadyFinished
+              ? "この検索は既に終了していました。表示を更新しました。"
+              : "物件検索を中止し、GitHub Actions の実行を停止しました。",
         },
       }));
     } finally {

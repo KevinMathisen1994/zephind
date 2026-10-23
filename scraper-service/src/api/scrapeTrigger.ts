@@ -198,25 +198,45 @@ scrapeTriggerRouter.post("/cancel", route(async (req) => {
 
   const { doc: order } = await requireOwned(req, "orders", orderId, "オーダー");
   const runId = order.scrapeRunId;
-  if (!runId) return { error: "このオーダーには実行中のスクレイピングがありません。" };
+
+  // Cancelling always means the same end state: this order is not running.
+  // Explicit null, not undefined — the db helper strips undefined, so it would
+  // leave the stale run id in place.
+  const clearFlags = () =>
+    db.patch("orders", orderId, {
+      scrapingStatus: "cancelled",
+      isScraping: false,
+      scrapeRunId: null,
+    });
+
+  // No stored run id. Two ways to get here: the dispatch never captured one
+  // (workflow_dispatch answers 204 with no body, and the follow-up poll can
+  // miss a run that dies before GitHub lists it), or the run ended and a
+  // previous cancel already cleared it.
+  // This used to answer with an error, which stranded the card on 「検索中」
+  // with no way out — the button's whole job is to clear that state.
+  if (!runId) {
+    await clearFlags();
+    return { ok: true, alreadyFinished: true };
+  }
 
   const response = await fetch(
     `https://api.github.com/repos/${repo}/actions/runs/${runId}/cancel`,
     { method: "POST", headers: githubHeaders(token) },
   );
 
-  // 202 = cancellation requested. 409 means it already finished or was already
-  // cancelling, which is the desired end state either way.
-  if (response.status !== 202 && response.status !== 409) {
+  // 202 = cancellation requested. 409 = already finished or already cancelling.
+  // 404 = GitHub no longer has that run at all. All three mean "not running",
+  // which is the desired end state either way.
+  if (response.status !== 202 && response.status !== 409 && response.status !== 404) {
     const body = await response.text().catch(() => "(レスポンス本文を読み取れませんでした)");
     return { error: `スクレイピングの中止に失敗しました (GitHub ${response.status}): ${body.slice(0, 500) || "(本文なし)"}` };
   }
 
   // Clear the flags now rather than waiting for the poller: GitHub can take a
   // while to report the run as cancelled, and leaving the badge up would make
-  // the button look broken. Explicit null, not undefined — the db helper strips
-  // undefined so it would leave the stale run id in place.
-  await db.patch("orders", orderId, { scrapingStatus: "cancelled", scrapeRunId: null });
+  // the button look broken.
+  await clearFlags();
 
-  return { ok: true, alreadyFinished: response.status === 409 };
+  return { ok: true, alreadyFinished: response.status !== 202 };
 }));
