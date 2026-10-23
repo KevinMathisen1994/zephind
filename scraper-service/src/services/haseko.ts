@@ -262,7 +262,11 @@ export async function scrapeHaseko(areaCode: string, filterTypes?: string[], dea
         const url = `https://www.haseko-chukai.com/syutoken-buy/${typePath}/tokyoto/${slug}-city/${currentPage > 1 ? '?page=' + currentPage : ''}`;
         logger.info(`[Haseko Scraper] Fetching: ${url}`);
 
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        const title = await page.title();
+        if ((resp && resp.status() >= 500) || title.includes("メンテナンス")) {
+          throw new Error(`長谷工の仲介サイトは現在メンテナンス中です (HTTP ${resp?.status()}, ${title})`);
+        }
         await new Promise((r) => setTimeout(r, 1500));
 
         // NOTE: do NOT gate on bodyText.includes("該当する物件"). Haseko ships a

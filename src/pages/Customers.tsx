@@ -213,14 +213,14 @@ export default function CustomersPage() {
                       {c.name.slice(0, 1)}
                     </div>
                     <div className="min-w-0">
-                      <h3 className="truncate text-[15px] font-semibold tracking-[-0.015em] text-[var(--text-primary)]">{c.name}</h3>
+                      <h3 className="truncate text-[17.5px] font-semibold tracking-[-0.015em] text-[var(--text-primary)]">{c.name}</h3>
                       {c.company ? (
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)] truncate mt-0.5">
                           <Building className="w-3 h-3 text-[var(--text-muted)]" />
                           {c.company}
                         </div>
                       ) : (
-                        <span className="text-[11px] text-[var(--text-muted)] font-medium">個人</span>
+                        <span className="text-[14px] text-[var(--text-muted)] font-medium">個人</span>
                       )}
                     </div>
                   </div>

@@ -83,7 +83,7 @@ function Header({
           side in a grid, and a hint on one of them alone pushed its track a line
           lower than its neighbour's — reserving the row keeps the tracks aligned
           whatever text each one carries. */}
-      <p className="min-h-[17px] text-[11px] font-medium text-slate-500 leading-relaxed">
+      <p className="min-h-[17px] text-[14px] font-medium text-slate-500 leading-relaxed">
         {hint}
       </p>
     </div>
@@ -185,7 +185,7 @@ export function RangeSlider({
         </Slider.Control>
       </Slider.Root>
 
-      <div className="flex justify-between text-[10px] font-semibold text-slate-400 tabular-nums">
+      <div className="flex justify-between text-[13.5px] font-semibold text-slate-400 tabular-nums">
         <span>0</span>
         <span>
           {fmt(max)}

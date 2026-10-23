@@ -76,7 +76,7 @@ const SectionHeader = ({
 }) => (
   <div className="flex flex-wrap items-center justify-between gap-2">
     <div className="flex items-center gap-2.5">
-      <span className="w-5 h-5 rounded-full bg-[var(--brand)] text-white text-[10px] font-black flex items-center justify-center shrink-0 shadow-xs">
+      <span className="w-5 h-5 rounded-full bg-[var(--brand)] text-white text-[13.5px] font-black flex items-center justify-center shrink-0 shadow-xs">
         {step}
       </span>
       <Icon className="w-4 h-4 text-[var(--brand)]" />
@@ -596,7 +596,7 @@ export const ProposalModal = ({
                 <label className="block font-bold text-slate-700 mb-1">
                   メール署名（会社情報・宅建番号・取引態様）
                 </label>
-                <p className="text-[11px] text-slate-500 font-medium mb-1.5 leading-relaxed">
+                <p className="text-[14px] text-slate-500 font-medium mb-1.5 leading-relaxed">
                   ここに入力した内容が、提案メール本文の末尾に自動で挿入されます。
                   文言・改行・空白はそのまま送信されます。
                 </p>
@@ -604,24 +604,24 @@ export const ProposalModal = ({
                   rows={8}
                   value={signature}
                   onChange={(e) => setSignatureDraft(e.target.value)}
-                  className="w-full p-3 border rounded-xl font-mono text-[11px] leading-relaxed text-slate-900 focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
+                  className="w-full p-3 border rounded-xl font-mono text-[14px] leading-relaxed text-slate-900 focus:ring-2 focus:ring-emerald-700/20 focus:border-emerald-700"
                 />
                 <button
                   type="button"
                   onClick={() => setSignatureDraft(DEFAULT_EMAIL_SIGNATURE)}
-                  className="mt-1.5 text-[11px] font-bold text-emerald-700 hover:underline"
+                  className="mt-1.5 text-[14px] font-bold text-emerald-700 hover:underline"
                 >
                   既定の署名に戻す
                 </button>
               </div>
 
-              <div className="text-[11px] text-slate-500 font-medium leading-relaxed">
+              <div className="text-[14px] text-slate-500 font-medium leading-relaxed">
                 保存した設定はログイン中のアカウントに保存されるため、別のパソコンやスマートフォンでも同じ設定で送信できます。
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t">
                 {settingsSaved && (
-                  <span className="text-[11px] font-bold text-emerald-700 mr-auto">
+                  <span className="text-[14px] font-bold text-emerald-700 mr-auto">
                     保存しました
                   </span>
                 )}

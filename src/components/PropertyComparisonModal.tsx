@@ -70,7 +70,7 @@ export function PropertyComparisonModal({
                 <h2 className="text-base sm:text-lg font-bold tracking-tight text-[var(--text-primary)]">
                   物件の比較
                 </h2>
-                <Badge variant="neutral" className="text-[10px] font-bold">
+                <Badge variant="neutral" className="text-[13.5px] font-bold">
                   {listings.length}件を比較中
                 </Badge>
               </div>
@@ -104,7 +104,7 @@ export function PropertyComparisonModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Best Yield */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
-                <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
+                <div className="text-[14px] font-bold text-slate-500 flex items-center justify-between">
                   <span>利回りが最も高い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
@@ -124,7 +124,7 @@ export function PropertyComparisonModal({
                     "該当なし"
                   )}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5 truncate">
+                <div className="text-[13.5px] text-slate-500 mt-0.5 truncate">
                   {bestYield > 0
                     ? listings.find(
                         (l) =>
@@ -137,7 +137,7 @@ export function PropertyComparisonModal({
 
               {/* Best Value / Ppsm */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
-                <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
+                <div className="text-[14px] font-bold text-slate-500 flex items-center justify-between">
                   <span>平米単価が最も安い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
@@ -152,7 +152,7 @@ export function PropertyComparisonModal({
                     "該当なし"
                   )}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5 truncate">
+                <div className="text-[13.5px] text-slate-500 mt-0.5 truncate">
                   {bestPpsm !== null
                     ? listings[ppsmList.indexOf(bestPpsm)]?.listing.title ||
                       "割安に購入できる可能性がある物件"
@@ -162,7 +162,7 @@ export function PropertyComparisonModal({
 
               {/* Best Location */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
-                <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
+                <div className="text-[14px] font-bold text-slate-500 flex items-center justify-between">
                   <span>駅に最も近い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
@@ -180,7 +180,7 @@ export function PropertyComparisonModal({
                     "該当なし"
                   )}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5 truncate">
+                <div className="text-[13.5px] text-slate-500 mt-0.5 truncate">
                   {bestWalk < 999
                     ? `${listings.find((l) => l.listing.walkMinutes === bestWalk)?.listing.station || "最寄駅"} 徒歩至近で空室リスクが低い`
                     : "—"}
@@ -261,23 +261,23 @@ export function PropertyComparisonModal({
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
                           <Building2 className="w-10 h-10 opacity-30 mb-1" />
-                          <span className="text-[11px] font-bold">写真未登録</span>
+                          <span className="text-[14px] font-bold">写真未登録</span>
                         </div>
                       )}
                       <div className="absolute top-2 left-2 flex flex-wrap gap-1">
                         {l.source && (
-                          <Badge className="border border-[var(--border-subtle)] bg-white/90 text-slate-700 backdrop-blur-xs text-[9px] font-bold">
+                          <Badge className="border border-[var(--border-subtle)] bg-white/90 text-slate-700 backdrop-blur-xs text-[12.5px] font-bold">
                             {l.source === "email" ? "メール" : l.source}
                           </Badge>
                         )}
                         {l.propertyType && (
-                          <Badge className="bg-emerald-700/85 backdrop-blur-xs text-white text-[9px] font-bold">
+                          <Badge className="bg-emerald-700/85 backdrop-blur-xs text-white text-[12.5px] font-bold">
                             {l.propertyType}
                           </Badge>
                         )}
                       </div>
                       {discountPct !== null && discountPct > 5 && (
-                        <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[10px] shadow-sm flex items-center gap-1">
+                        <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[13.5px] shadow-sm flex items-center gap-1">
                           <Sparkles className="w-3 h-3 fill-slate-950" />
                           相場比 -{discountPct}% 割安
                         </div>
@@ -295,7 +295,7 @@ export function PropertyComparisonModal({
 
                       <div className="mt-2.5 flex items-baseline justify-between">
                         <div>
-                          <div className="text-[10px] font-bold text-slate-400">
+                          <div className="text-[13.5px] font-bold text-slate-400">
                             販売価格
                           </div>
                           <div className="text-xl font-black text-emerald-700 font-data">
@@ -309,7 +309,7 @@ export function PropertyComparisonModal({
 
                         {currentYield && (
                           <div className="text-right">
-                            <div className="text-[10px] font-bold text-slate-400">
+                            <div className="text-[13.5px] font-bold text-slate-400">
                               利回り
                             </div>
                             <div className="text-base font-extrabold text-amber-600 font-data">
@@ -334,7 +334,7 @@ export function PropertyComparisonModal({
                           </span>
                           {hasMarketComp && (
                             <div
-                              className={`text-[10px] font-bold ${discountPct! > 0 ? "text-emerald-700" : "text-rose-600"}`}
+                              className={`text-[13.5px] font-bold ${discountPct! > 0 ? "text-emerald-700" : "text-rose-600"}`}
                             >
                               区相場: {marketAvgPpsm}万 (
                               {discountPct! > 0 ? `-${discountPct}%` : `+${Math.abs(discountPct!)}%`}
@@ -355,7 +355,7 @@ export function PropertyComparisonModal({
                             {area ? `${area} ㎡` : "—"}
                           </span>
                           {l.layout && (
-                            <span className="text-[11px] font-semibold text-slate-500 ml-1.5">
+                            <span className="text-[14px] font-semibold text-slate-500 ml-1.5">
                               ({l.layout})
                             </span>
                           )}
@@ -420,7 +420,7 @@ export function PropertyComparisonModal({
 
                       {/* AI Evaluation snippet */}
                       {item.evaluation && (
-                        <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 text-[11px] text-slate-600 line-clamp-3 leading-relaxed">
+                        <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 text-[14px] text-slate-600 line-clamp-3 leading-relaxed">
                           <span className="font-bold text-slate-800">
                             AI分析:
                           </span>{" "}
@@ -442,7 +442,7 @@ export function PropertyComparisonModal({
                           元サイトで物件詳細を見る
                         </a>
                       ) : (
-                        <div className="text-center text-[11px] text-slate-400 py-1">
+                        <div className="text-center text-[14px] text-slate-400 py-1">
                           リンクなし
                         </div>
                       )}

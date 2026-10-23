@@ -296,7 +296,7 @@ export default function AdminPage() {
                 )}
               </Button>
             ) : (
-              <span className="text-[11px] font-bold text-[var(--text-muted)] bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl px-3 py-1.5 leading-relaxed max-w-sm">
+              <span className="text-[14px] font-bold text-[var(--text-muted)] bg-[var(--bg-page-subtle)] border border-[var(--border-subtle)] rounded-xl px-3 py-1.5 leading-relaxed max-w-sm">
                 ローカル環境で直接検査実行可能（以下は最新記録です）
               </span>
             )}
@@ -375,7 +375,7 @@ export default function AdminPage() {
                           <span
                             key={c.field}
                             title={`${c.field}: ${c.present}/${h.listingCount}`}
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                            className={`text-[13.5px] px-1.5 py-0.5 rounded-full font-bold ${
                               c.pct >= 80 ? "bg-emerald-100 text-emerald-800"
                               : c.pct >= 50 ? "bg-amber-100 text-amber-800"
                               : "bg-red-100 text-red-800"
@@ -551,7 +551,7 @@ export default function AdminPage() {
                         {run.conclusion &&
                           ` ・ ${RUN_CONCLUSION_LABELS[run.conclusion] || run.conclusion}`}
                       </div>
-                      <div className="text-[11px] text-[var(--text-muted)] font-medium truncate mt-0.5">
+                      <div className="text-[14px] text-[var(--text-muted)] font-medium truncate mt-0.5">
                         {run.created_at
                           ? formatJaDateTime(new Date(run.created_at).getTime())
                           : "—"}

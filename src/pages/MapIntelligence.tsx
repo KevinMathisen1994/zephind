@@ -140,7 +140,7 @@ export default function MapIntelligencePage() {
                 <h1 className="font-serif text-xl font-bold tracking-tight text-[var(--text-primary)]">
                   東京広域 地図インテリジェンス
                 </h1>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-black tracking-wider uppercase border border-emerald-200">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[13.5px] font-black tracking-wider uppercase border border-emerald-200">
                   GIS ANALYTICS
                 </span>
               </div>

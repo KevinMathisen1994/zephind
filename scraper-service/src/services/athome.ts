@@ -36,6 +36,64 @@ const CODE_TO_CITY: Record<string, string> = {
   "13228": "akiruno", "13229": "nishitokyo",
 };
 
+/**
+ * Akamai's interstitial — 「【アットホーム】認証中」, sometimes "Human
+ * Verification", with status 405 or even 200. It is NOT a permanent block: the
+ * page runs a JS round-trip, gets its cookies set, and usually redirects itself
+ * back to the URL that was requested. Reading the title the instant
+ * DOMContentLoaded fires catches it mid-flight, so this waits it out instead of
+ * throwing the page away.
+ */
+const BOT_CHECK_TITLE = /認証|Human Verification|ご協力ください/i;
+
+function isBotCheck(status: number | undefined, title: string): boolean {
+  return status === 405 || BOT_CHECK_TITLE.test(title);
+}
+
+/** True when the interstitial cleared itself (or never appeared). */
+async function waitPastBotCheck(page: any, timeoutMs = 45_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => "");
+    if (!BOT_CHECK_TITLE.test(title)) return true;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return false;
+}
+
+/**
+ * Politeness knob. Akamai's rate heuristics fire on request *rate*, not volume
+ * — and a fixed 2s gap between documents reads as a burst. Jitter also avoids
+ * the perfectly periodic cadence that is itself a bot tell.
+ * Tune per run with ATHOME_PAGE_DELAY_MIN_MS / ATHOME_PAGE_DELAY_MAX_MS.
+ */
+const PAGE_DELAY_MIN_MS = Number(process.env.ATHOME_PAGE_DELAY_MIN_MS ?? 2500);
+const PAGE_DELAY_MAX_MS = Number(process.env.ATHOME_PAGE_DELAY_MAX_MS ?? 6000);
+
+function pause(min = PAGE_DELAY_MIN_MS, max = PAGE_DELAY_MAX_MS): Promise<void> {
+  const ms = min + Math.random() * Math.max(0, max - min);
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Open the homepage once per run before touching a deep listing URL. Landing
+ * straight on `…/list/page3/?pref=13&cities=adachi&basic=…` is the single most
+ * bot-like request a client can make; a normal page view first lets Akamai hand
+ * out its cookies from something that looks like a person arriving.
+ */
+async function warmUpSession(page: any): Promise<void> {
+  try {
+    await page.goto("https://www.athome.co.jp/", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    await waitPastBotCheck(page, 20_000);
+    await pause(1500, 3500);
+  } catch {
+    logger.warn(`[At Home Scraper] Warm-up visit failed; continuing`);
+  }
+}
+
 async function extractListingsFromPage(page: any, wardName: string, pType?: string): Promise<{ listings: any[], detailUrls: string[] }> {
   const raw = await page.evaluate(new Function("ward", "pt", `
     var results = [];
@@ -306,11 +364,14 @@ async function scrapeAtHomeChintai(areaCode: string, wardName: string, cityName:
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
+    await warmUpSession(page);
+
     for (let p = 1; p <= MAX_PAGES; p++) {
       const url = p === 1
         ? `https://www.athome.co.jp/chintai/tokyo/${cityName}-city/list/`
         : `https://www.athome.co.jp/chintai/tokyo/${cityName}-city/list/page${p}/`;
       logger.info(`[At Home Scraper] Loading chintai page ${p} for ${wardName}...`);
+      if (p > 1) await pause();
 
       let response;
       try {
@@ -322,9 +383,18 @@ async function scrapeAtHomeChintai(areaCode: string, wardName: string, cityName:
       }
 
       // Same Akamai "Human Verification" block already fought on the buy side.
-      const status = response?.status();
-      const title = await page.title().catch(() => "");
-      if (status === 405 || title.includes("Human Verification") || title.includes("認証")) {
+      let status = response?.status();
+      let title = await page.title().catch(() => "");
+      if (isBotCheck(status, title)) {
+        logger.warn(`[At Home Scraper] Bot-check on chintai/page${p} (status=${status}) — waiting for it to clear`);
+        const cleared = await waitPastBotCheck(page);
+        title = await page.title().catch(() => "");
+        if (cleared && !isBotCheck(undefined, title)) {
+          status = 200;
+          logger.info(`[At Home Scraper] Bot-check cleared on chintai/page${p}; continuing`);
+        }
+      }
+      if (isBotCheck(status, title)) {
         const msg = `Blocked by bot-check (status=${status}, title="${title}") on chintai/page${p}`;
         logger.error(`[At Home Scraper] ${msg}`);
         scrapeErrors.push(msg);
@@ -407,6 +477,8 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
     }
     const MAX_PAGES = 20;
 
+    await warmUpSession(page);
+
     categoryLoop:
     for (const cat of categories) {
       logger.info(`[At Home Scraper] Category ${cat} for ${wardName}...`);
@@ -418,6 +490,9 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
           : `https://www.athome.co.jp/${cat}/tokyo/list/page${p}/?pref=13&cities=${cityName}&basic=kp299,kp120,kp001,kf001,ke001,kj001&kod=&q=1`;
 
         logger.info(`[At Home Scraper] Loading page ${p} (${cat}) for ${wardName}...`);
+      // Page 1 of a category follows the warm-up / previous category, so only
+      // pagination inside a category needs the per-page gap.
+      if (p > 1) await pause();
       let response;
       try {
         response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -431,9 +506,18 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
       // "Human Verification" challenge (HTTP 405, no cards in the DOM) — same
       // block homes.co.jp hits. Without this check it reads identically to
       // "this ward has no listings", so record it as a real error instead.
-      const status = response?.status();
-      const title = await page.title().catch(() => "");
-      if (status === 405 || title.includes("Human Verification") || title.includes("認証")) {
+      let status = response?.status();
+      let title = await page.title().catch(() => "");
+      if (isBotCheck(status, title)) {
+        logger.warn(`[At Home Scraper] Bot-check on ${cat}/page${p} (status=${status}, title="${title}") — waiting for it to clear`);
+        const cleared = await waitPastBotCheck(page);
+        title = await page.title().catch(() => "");
+        if (cleared && !isBotCheck(undefined, title)) {
+          status = 200;
+          logger.info(`[At Home Scraper] Bot-check cleared on ${cat}/page${p}; continuing`);
+        }
+      }
+      if (isBotCheck(status, title)) {
         const msg = `Blocked by bot-check (status=${status}, title="${title}") on ${cat}/page${p}`;
         logger.error(`[At Home Scraper] ${msg}`);
         scrapeErrors.push(msg);
@@ -455,6 +539,10 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
 
       allListings.push(...listings);
       }
+
+      // A different category is a different listing section: give Akamai more
+      // room than between paginated pages of the same one.
+      await pause(8000, 15000);
     }
 
     let stationCount = 0, walkCount = 0, roadCount = 0, frontageCount = 0;

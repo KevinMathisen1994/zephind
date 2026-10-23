@@ -206,7 +206,7 @@ export default function DealsPage() {
                         ) : (
                           <Badge variant="brand" className="font-bold py-1 px-3">提案中</Badge>
                         )}
-                        <span className="text-[11px] font-semibold text-[var(--text-muted)] font-data">
+                        <span className="text-[14px] font-semibold text-[var(--text-muted)] font-data">
                           {deal.createdAt ? formatJaDate(deal.createdAt) : "日付不明"} 提案
                         </span>
                       </div>

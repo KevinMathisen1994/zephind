@@ -181,6 +181,7 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[], d
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const allListings: PropertyListing[] = [];
+  const scrapeErrors: string[] = [];
 
   try {
     const page = await browser.newPage();
@@ -218,7 +219,12 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[], d
         logger.info(`[Hatomark Scraper] Loading page ${p} (${cat}) for ${wardName}...`);
 
         try {
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+          const resp = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+          // Site 403s outdated Chrome UAs (<=131); report it instead of "no listings".
+          if (resp && resp.status() >= 400) {
+            scrapeErrors.push(`HTTP ${resp.status()} on ${cat}/page${p}`);
+            break;
+          }
         } catch {
           // Some categories (e.g. office/ビル) keep a network connection open
           // past networkidle2's quiet window — the navigation call reports a
@@ -283,6 +289,7 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[], d
     });
 
     return {
+      errors: scrapeErrors,
       listings: allListings,
       source: "hatomark",
       areaCode,

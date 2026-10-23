@@ -112,7 +112,7 @@ export function LineProposalModal({
             <div>
               <h2 className="text-base font-black tracking-tight flex items-center gap-2">
                 LINE提案文シミュレーター
-                <span className="text-[10px] font-bold bg-white/25 px-2 py-0.5 rounded-full">
+                <span className="text-[13.5px] font-bold bg-white/25 px-2 py-0.5 rounded-full">
                   1-Tap Copy
                 </span>
               </h2>
@@ -141,7 +141,7 @@ export function LineProposalModal({
               </h3>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                <label className="text-[14px] font-bold text-slate-500 block mb-1">
                   宛先（お客様の呼び名）
                 </label>
                 <input
@@ -154,7 +154,7 @@ export function LineProposalModal({
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                <label className="text-[14px] font-bold text-slate-500 block mb-1">
                   挨拶・導入メッセージ
                 </label>
                 <textarea
@@ -170,7 +170,7 @@ export function LineProposalModal({
             <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2">
               <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
                 <span>選択中の物件</span>
-                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] font-black">
+                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[13.5px] font-black">
                   {listings.length} 件
                 </Badge>
               </div>
@@ -185,14 +185,14 @@ export function LineProposalModal({
                       <div className="font-bold text-slate-800 truncate">
                         {i + 1}. {item.listing.title || item.listing.address}
                       </div>
-                      <div className="text-[11px] text-emerald-700 font-extrabold">
+                      <div className="text-[14px] text-emerald-700 font-extrabold">
                         {item.listing.price
                           ? `${item.listing.price.toLocaleString()}万円`
                           : "価格要相談"}
                       </div>
                     </div>
                     {item.score !== undefined && (
-                      <Badge className="bg-white text-emerald-800 border-slate-200 text-[10px] shrink-0 font-black">
+                      <Badge className="bg-white text-emerald-800 border-slate-200 text-[13.5px] shrink-0 font-black">
                         {item.score}点
                       </Badge>
                     )}
@@ -234,7 +234,7 @@ export function LineProposalModal({
                 <div className="bg-[#202428] text-white px-3.5 py-2 flex items-center justify-between shadow-xs">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-white/70">◀</span>
-                    <div className="w-6 h-6 rounded-full bg-emerald-500 text-white font-bold flex items-center justify-center text-[10px]">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500 text-white font-bold flex items-center justify-center text-[13.5px]">
                       {greeting.slice(0, 1)}
                     </div>
                     <span className="text-xs font-bold truncate max-w-[120px]">
@@ -248,14 +248,14 @@ export function LineProposalModal({
                 <div className="flex-1 overflow-y-auto p-3 space-y-3 font-sans">
                   {/* Date Stamp */}
                   <div className="text-center">
-                    <span className="inline-block bg-black/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    <span className="inline-block bg-black/20 text-white text-[13.5px] font-bold px-2 py-0.5 rounded-full">
                       本日 12:30
                     </span>
                   </div>
 
                   {/* Speech Bubble (Agent Message) */}
                   <div className="flex justify-end">
-                    <div className="max-w-[85%] bg-white rounded-2xl rounded-tr-xs p-3 text-[11px] text-slate-900 shadow-md whitespace-pre-wrap leading-relaxed font-normal">
+                    <div className="max-w-[85%] bg-white rounded-2xl rounded-tr-xs p-3 text-[14px] text-slate-900 shadow-md whitespace-pre-wrap leading-relaxed font-normal">
                       {lineText}
                     </div>
                   </div>
@@ -264,7 +264,7 @@ export function LineProposalModal({
                 {/* Simulated LINE Bottom Input Bar */}
                 <div className="h-10 bg-white/95 border-t border-slate-200 px-3 flex items-center gap-2">
                   <span className="text-slate-400 text-xs font-bold">＋</span>
-                  <div className="flex-1 h-6 bg-slate-100 rounded-full px-2.5 text-[10px] text-slate-400 flex items-center">
+                  <div className="flex-1 h-6 bg-slate-100 rounded-full px-2.5 text-[13.5px] text-slate-400 flex items-center">
                     メッセージを入力
                   </div>
                   <span className="text-emerald-500 text-xs font-bold">▲</span>

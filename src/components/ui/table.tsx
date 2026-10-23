@@ -45,7 +45,7 @@ export function TableHead({ children, className = "" }: { children?: ReactNode; 
   return (
     <th
       className={cn(
-        "h-9 whitespace-nowrap px-4 text-left align-middle text-[9.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]",
+        "h-9 whitespace-nowrap px-4 text-left align-middle text-[12.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]",
         className,
       )}
     >

@@ -430,7 +430,7 @@ export function PropertyHazardModal({
                   ハザードマップ・地盤災害リスク診断
                 </h2>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider ${
+                  className={`px-2 py-0.5 rounded-full text-[13.5px] font-black border uppercase tracking-wider ${
                     assessment?.overallRisk === "high"
                       ? "bg-rose-50 text-rose-800 border-rose-200"
                       : assessment?.overallRisk === "medium"
@@ -510,12 +510,12 @@ export function PropertyHazardModal({
                   <div className="flex items-center gap-1.5 text-xs font-black text-slate-800">
                     <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
                     <span>選択中の情報</span>
-                    <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.2 rounded-full bg-slate-200">
+                    <span className="text-[13.5px] font-bold text-slate-600 px-1.5 py-0.2 rounded-full bg-slate-200">
                       {activeLayers.size}件
                     </span>
                   </div>
                   <div className="flex items-center gap-1 text-slate-400 hover:text-slate-700">
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-[13.5px] text-slate-400">
                       {isPanelExpanded ? "閉じる" : "表示"}
                     </span>
                     {isPanelExpanded ? (
@@ -530,7 +530,7 @@ export function PropertyHazardModal({
                 {isPanelExpanded && (
                   <div className="p-2.5 space-y-2 max-h-[calc(90vh-180px)] overflow-y-auto">
                     {/* Subtitle */}
-                    <div className="text-[10px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wider">
+                    <div className="text-[13.5px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wider">
                       <span>⟳ 災害種別で選択</span>
                     </div>
 
@@ -633,11 +633,11 @@ export function PropertyHazardModal({
                               )}
                             </div>
 
-                            <div className="font-extrabold text-[9px] leading-tight">
+                            <div className="font-extrabold text-[12.5px] leading-tight">
                               {layer.name}
                             </div>
                             <div
-                              className={`text-[8px] mt-0.5 leading-tight truncate max-w-full ${
+                              className={`text-[12px] mt-0.5 leading-tight truncate max-w-full ${
                                 isActive ? "text-blue-100" : "text-slate-400"
                               }`}
                             >
@@ -654,7 +654,7 @@ export function PropertyHazardModal({
                         <button
                           type="button"
                           onClick={resetLayers}
-                          className="flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
+                          className="flex items-center gap-1 text-[13.5px] font-bold text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
                         >
                           <RotateCcw className="w-3 h-3" />
                           <span>選択情報のリセット</span>
@@ -677,7 +677,7 @@ export function PropertyHazardModal({
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1 min-w-0">
                                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
-                                  <span className="font-bold text-slate-800 text-[10px] truncate">
+                                  <span className="font-bold text-slate-800 text-[13.5px] truncate">
                                     {layer.name}
                                   </span>
                                 </div>
@@ -685,7 +685,7 @@ export function PropertyHazardModal({
                                   <button
                                     type="button"
                                     onClick={() => toggleLegend(key)}
-                                    className={`px-1 py-0.2 rounded text-[8px] font-bold border transition-colors ${
+                                    className={`px-1 py-0.2 rounded text-[12px] font-bold border transition-colors ${
                                       isLegendOpen
                                         ? "bg-blue-600 text-white border-blue-600"
                                         : "bg-white text-blue-700 border-blue-300 hover:bg-blue-50"
@@ -710,7 +710,7 @@ export function PropertyHazardModal({
                                   {layer.legend.map((item, idx) => (
                                     <div
                                       key={idx}
-                                      className="flex items-center gap-1.5 text-[9px] text-slate-700"
+                                      className="flex items-center gap-1.5 text-[12.5px] text-slate-700"
                                     >
                                       <span
                                         className="w-2.5 h-2.5 rounded-xs shrink-0 border border-black/20"
@@ -747,7 +747,7 @@ export function PropertyHazardModal({
 
             {/* Bottom Legend Pill */}
             <div className="absolute bottom-3 left-3 z-[1050] pointer-events-auto">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm text-[11px] font-bold text-slate-700">
+              <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-200 shadow-sm text-[14px] font-bold text-slate-700">
                 <div className="flex items-center gap-1">
                   <span className="w-2.5 h-2.5 rounded-full border border-indigo-500 border-dashed"></span>
                   <span>徒歩6分圏 (500m)</span>
@@ -828,7 +828,7 @@ export function PropertyHazardModal({
                 <div className="font-extrabold text-xs text-slate-900">
                   {assessment?.groundType}
                 </div>
-                <p className="text-[11px] leading-relaxed text-slate-600">
+                <p className="text-[14px] leading-relaxed text-slate-600">
                   {assessment?.groundDescription}
                 </p>
               </div>

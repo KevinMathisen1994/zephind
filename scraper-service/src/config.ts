@@ -7,5 +7,5 @@ export const config = {
   requestDelay: parseInt(process.env.REQUEST_DELAY || "2000"),
   userAgent:
     process.env.USER_AGENT ||
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
 };

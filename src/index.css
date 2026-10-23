@@ -123,6 +123,23 @@
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
+
+  /* ── Type scale, raised for readability ─────────────────────────────
+     Every `text-xs` / `text-sm` / `text-base` in the app resolves through
+     these. 12px body and 14px copy read as fine print on a laptop; the
+     13 / 15 / 17px below is the same layout with the text a size up. */
+  --text-xs: 0.8125rem; /* 13px (was 12) */
+  --text-xs--line-height: 1.55;
+  --text-sm: 0.9375rem; /* 15px (was 14) */
+  --text-sm--line-height: 1.6;
+  --text-base: 1.0625rem; /* 17px (was 16) */
+  --text-base--line-height: 1.65;
+  --text-lg: 1.1875rem; /* 19px (was 18) */
+  --text-xl: 1.3125rem; /* 21px (was 20) */
+
+  /* `font-normal` (11 spots) would otherwise drop back to 400 and read lighter
+     than everything around it. 400/500/700 are the only loaded weights. */
+  --font-weight-normal: 500;
 }
 
 /* ─────────────────────────────
@@ -130,7 +147,10 @@
    ───────────────────────────── */
 @layer base {
   html {
-    font-size: 15px;
+    /* 15px was the old root: it silently shrank every rem-based size in the
+       app by ~6%, on top of already-small type. 17px scales text AND the rem
+       spacing scale by ~13%. */
+    font-size: 17px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-tap-highlight-color: transparent;
@@ -146,8 +166,12 @@
     color: var(--text-primary);
     font-family: var(--font-ui);
     font-feature-settings: "palt" 1;
+    /* 500, not 400: Zen Kaku Gothic New's regular is thin on a bright screen.
+       400/500/700 are the weights the page actually loads, so 500 is real and
+       not synthesised. */
+    font-weight: 500;
     font-size: 1rem;
-    line-height: 1.65;
+    line-height: 1.7;
     letter-spacing: 0;
   }
 
@@ -361,7 +385,7 @@
 
   /* Eyebrow — a measured rule plus letterspaced kicker */
   .eyebrow-pill {
-    @apply mb-3 flex w-fit items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--brand)];
+    @apply mb-3 flex w-fit items-center gap-2 text-[13.5px] font-bold uppercase tracking-[0.2em] text-[var(--brand)];
     font-family: var(--font-ibm-plex-mono);
   }
   .eyebrow-pill::before {
@@ -389,7 +413,7 @@
   }
 
   .stat-label {
-    @apply text-[9.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)];
+    @apply text-[12.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)];
     font-family: var(--font-ibm-plex-mono);
   }
 
@@ -423,7 +447,7 @@
 
   /* Subtle brand divider label */
   .brand-divider {
-    @apply mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)];
+    @apply mb-2 flex items-center gap-2 text-[13.5px] font-bold uppercase tracking-[0.16em] text-[var(--brand)];
     font-family: var(--font-ibm-plex-mono);
   }
 

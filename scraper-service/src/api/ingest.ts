@@ -106,6 +106,96 @@ function normalizeListing(raw: any, source: string): Record<string, any> {
   return doc;
 }
 
+/**
+ * `floor`/`elevators` (migration 0003) and the price-tracking columns (0004)
+ * are not present in every deployment. Naming a missing column makes PostgREST
+ * reject the WHOLE request, so one unapplied migration took ingestion down for
+ * every listing in the batch — first 0003, now 0004:
+ *   selectIn listings.url: column listings.previousPrice does not exist
+ * Probe once, remember what this database lacks, and strip those fields from
+ * reads and writes instead of failing the run.
+ */
+const missingListingColumns = new Set<string>();
+let listingColumnsProbed = false;
+
+async function findMissingListingColumns(): Promise<Set<string>> {
+  if (listingColumnsProbed) return missingListingColumns;
+  listingColumnsProbed = true;
+
+  const probe = async (cols: string[]): Promise<void> => {
+    if (cols.length === 0) return;
+    const { error } = await db.raw
+      .from("listings")
+      .select(cols.join(","))
+      .limit(1);
+    if (!error) return;
+    const msg = String((error as { message?: string }).message ?? "");
+    // PostgREST names the offender: "column listings.previousPrice does not exist"
+    const m = msg.match(/column listings\.([A-Za-z_]+) does not exist/);
+    if (m) {
+      missingListingColumns.add(m[1]);
+      await probe(cols.filter((c) => c !== m[1]));
+    }
+  };
+
+  await probe([
+    "floor",
+    "elevators",
+    "previousPrice",
+    "initialPrice",
+    "priceDropPct",
+    "priceChangedAt",
+  ]);
+
+  if (missingListingColumns.size > 0) {
+    logger.warn(
+      `[ingest] listings is missing ${[...missingListingColumns].join(", ")} — ` +
+        `apply supabase/migrations (0003/0004). Those fields are skipped.`,
+    );
+  }
+  return missingListingColumns;
+}
+
+/** Drop columns this database does not have, so an insert cannot 400 on them. */
+function stripMissingColumns<T extends Record<string, any>>(
+  doc: T,
+  missing: Set<string>,
+): T {
+  if (missing.size === 0) return doc;
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(doc)) {
+    if (!missing.has(key)) out[key] = value;
+  }
+  return out as T;
+}
+
+/**
+ * Insert listing rows, dropping any column this database turns out to lack.
+ * The probe covers the known migrations; the retry covers a column a newer
+ * scraper sends that the probe never asked about.
+ */
+async function insertListings(
+  rows: Record<string, any>[],
+): Promise<{ _id: string; url?: string }[]> {
+  const missing = await findMissingListingColumns();
+  const res = await db.raw
+    .from("listings")
+    .insert(rows.map((r) => stripMissingColumns(r, missing)))
+    .select("_id,url");
+  if (!res.error) return (res.data ?? []) as { _id: string; url?: string }[];
+
+  // An insert names the column differently from a select:
+  // "Could not find the 'floor' column of 'listings' in the schema cache"
+  const offender = String(res.error.message).match(
+    /Could not find the '([A-Za-z_]+)' column/,
+  );
+  if (offender && !missing.has(offender[1])) {
+    missingListingColumns.add(offender[1]);
+    return insertListings(rows);
+  }
+  throw new HttpError(500, `ingestScrape insert: ${res.error.message}`);
+}
+
 export const ingestRouter = Router();
 
 /**
@@ -243,7 +333,21 @@ ingestRouter.post("/scrape", route(async (req) => {
 
   // One lookup for every url in the batch instead of one per listing.
   if (docs.length > 0) {
-    const rows = await db.selectIn("listings", "_id,url,price,previousPrice,initialPrice", "url", docs.map((d) => d.url));
+    const missing = await findMissingListingColumns();
+    // Read the price-tracking columns only if this database actually has them.
+    const priceColumns = ["previousPrice", "initialPrice"].filter(
+      (c) => !missing.has(c),
+    );
+    const rows = await db.selectIn(
+      "listings",
+      ["_id", "url", "price", ...priceColumns].join(","),
+      "url",
+      docs.map((d) => d.url),
+    );
+    const canTrackPriceChanges =
+      !missing.has("previousPrice") &&
+      !missing.has("priceDropped") &&
+      !missing.has("priceChangedAt");
     const existingByUrl = new Map<string, any>();
     for (const row of rows) {
       listingIdByUrl.set(row.url, row._id);
@@ -257,6 +361,8 @@ ingestRouter.post("/scrape", route(async (req) => {
     for (const d of docs) {
       const existing = existingByUrl.get(d.url);
       if (!existing) continue;
+      // Nowhere to record the history — see findMissingListingColumns().
+      if (!canTrackPriceChanges) continue;
 
       if (d.price != null && existing.price != null && d.price !== existing.price) {
         const isDrop = d.price < existing.price;
@@ -304,20 +410,11 @@ ingestRouter.post("/scrape", route(async (req) => {
     const fresh = docs.filter((d) => !existingByUrl.has(d.url));
     listingsSkipped += docs.length - fresh.length;
     if (fresh.length > 0) {
-      let insRes = await db.raw
-        .from("listings")
-        .insert(fresh)
-        .select("_id,url");
-      if (insRes.error && (insRes.error.message.includes("floor") || insRes.error.message.includes("elevators"))) {
-        const sanitizedFresh = fresh.map(({ floor, elevators, ...rest }: any) => rest);
-        insRes = await db.raw
-          .from("listings")
-          .insert(sanitizedFresh)
-          .select("_id,url");
+      const inserted = await insertListings(fresh);
+      for (const row of inserted) {
+        if (row.url) listingIdByUrl.set(row.url, row._id);
       }
-      if (insRes.error) throw new HttpError(500, `ingestScrape insert: ${insRes.error.message}`);
-      for (const row of insRes.data ?? []) listingIdByUrl.set((row as any).url, (row as any)._id);
-      listingsInserted += (insRes.data ?? []).length;
+      listingsInserted += inserted.length;
     }
   }
 
@@ -329,16 +426,7 @@ ingestRouter.post("/scrape", route(async (req) => {
       listingsSkipped++;
       continue;
     }
-    try {
-      await db.insert("listings", doc);
-    } catch (e: any) {
-      if (e?.message && (e.message.includes("floor") || e.message.includes("elevators"))) {
-        const { floor, elevators, ...rest } = doc as any;
-        await db.insert("listings", rest);
-      } else {
-        throw e;
-      }
-    }
+    await insertListings([doc]);
     listingsInserted++;
   }
 

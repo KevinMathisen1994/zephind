@@ -625,14 +625,14 @@ function EmailListingDetails({
             メール連携物件
           </span>
           {loading && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800">
+            <span className="inline-flex items-center gap-1 text-[14px] font-medium text-amber-800">
               <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
               詳細読込中...
             </span>
           )}
         </div>
         {receivedAt && (
-          <span className="text-[11px] font-medium text-amber-900/80">
+          <span className="text-[14px] font-medium text-amber-900/80">
             受信日時: {formatJaDateTime(receivedAt)}
           </span>
         )}
@@ -657,10 +657,10 @@ function EmailListingDetails({
       {/* Attachments Section */}
       {attachments.length > 0 ? (
         <div className="space-y-1.5">
-          <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+          <div className="text-[14px] font-bold text-amber-900 flex items-center gap-1">
             <Paperclip className="w-3.5 h-3.5 text-amber-700" />
             添付ファイル ({attachments.length}件)
-            <span className="text-[10px] font-normal text-amber-800/70 ml-1">
+            <span className="text-[13.5px] font-normal text-amber-800/70 ml-1">
               — クリックすると別タブでプレビューが開きます
             </span>
           </div>
@@ -684,17 +684,17 @@ function EmailListingDetails({
                   {isOpening ? (
                     <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
                   ) : isPdf ? (
-                    <div className="flex items-center justify-center px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-black text-[10px] shrink-0 border border-rose-200">
+                    <div className="flex items-center justify-center px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-black text-[13.5px] shrink-0 border border-rose-200">
                       PDF
                     </div>
                   ) : (
                     <FileText className="w-4 h-4 text-slate-400 shrink-0" />
                   )}
                   <div className="min-w-0 max-w-[220px]">
-                    <span className="block font-bold text-[11px] text-slate-800 group-hover:text-amber-900 truncate">
+                    <span className="block font-bold text-[14px] text-slate-800 group-hover:text-amber-900 truncate">
                       {a.filename || "(添付ファイル)"}
                     </span>
-                    <span className="block text-[10px] text-slate-500">
+                    <span className="block text-[13.5px] text-slate-500">
                       {a.size ? `${Math.round(a.size / 1024)}KB` : isPdf ? "PDF文書" : a.mimeType}
                     </span>
                   </div>
@@ -705,7 +705,7 @@ function EmailListingDetails({
           </div>
         </div>
       ) : !loading ? (
-        <div className="text-[11px] text-amber-800/70">
+        <div className="text-[14px] text-amber-800/70">
           ※ 添付ファイルはありません
         </div>
       ) : null}
@@ -716,7 +716,7 @@ function EmailListingDetails({
           <button
             type="button"
             onClick={() => setShowBody((v) => !v)}
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-900 hover:text-amber-950 hover:underline cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-[14px] font-bold text-amber-900 hover:text-amber-950 hover:underline cursor-pointer"
           >
             {showBody ? (
               <>
@@ -731,7 +731,7 @@ function EmailListingDetails({
             )}
           </button>
           {showBody && (
-            <pre className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
+            <pre className="mt-2 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
               {bodyText}
             </pre>
           )}
@@ -2543,7 +2543,7 @@ export default function OrdersPage() {
           <button
             type="button"
             onClick={() => navigate("/orders")}
-            className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+            className="inline-flex cursor-pointer items-center gap-1.5 text-[15.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
           >
             <ArrowLeft className="h-4 w-4" />
             物件検索に戻る
@@ -2595,16 +2595,16 @@ export default function OrdersPage() {
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-[13px] font-semibold tracking-[0.01em] text-[var(--text-primary)]">
+                <h2 className="text-[15.5px] font-semibold tracking-[0.01em] text-[var(--text-primary)]">
                   メール連携
                 </h2>
                 {(mailAccounts?.length ?? 0) > 0 && (
-                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                  <span className="font-mono text-[12.5px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
                     {mailAccounts?.length} 件接続中
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+              <p className="mt-1 text-[14.5px] leading-relaxed text-[var(--text-muted)]">
                 仲介会社からの物件紹介メールを自動で抽出・照合します
               </p>
             </div>
@@ -2662,10 +2662,10 @@ export default function OrdersPage() {
                 key={account._id}
                 className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 transition-colors hover:bg-[var(--bg-surface-hover)]"
               >
-                <span className="w-16 shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                <span className="w-16 shrink-0 font-mono text-[12.5px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
                   {account.provider === "gmail" ? "Gmail" : "Outlook"}
                 </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-[var(--text-primary)]">
+                <span className="min-w-0 flex-1 truncate font-mono text-[14.5px] text-[var(--text-primary)]">
                   {account.email}
                 </span>
                 {account.needsReconnect ? (
@@ -2676,7 +2676,7 @@ export default function OrdersPage() {
                 <button
                   type="button"
                   onClick={() => void disconnectMailAccount({ id: account._id })}
-                  className="cursor-pointer text-[10.5px] text-[var(--text-muted)] underline underline-offset-2 transition-colors hover:text-[var(--danger)]"
+                  className="cursor-pointer text-[13.5px] text-[var(--text-muted)] underline underline-offset-2 transition-colors hover:text-[var(--danger)]"
                 >
                   解除
                 </button>
@@ -2687,7 +2687,7 @@ export default function OrdersPage() {
 
         {/* Last sync / auth problem */}
         {mailNotice && (
-          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-2.5 text-[11.5px] leading-relaxed text-[#7d2a24]">
+          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-2.5 text-[14.5px] leading-relaxed text-[#7d2a24]">
             <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
             <p className="whitespace-pre-line">{mailNotice}</p>
           </div>
@@ -2697,7 +2697,7 @@ export default function OrdersPage() {
         {((mailProviders ?? []).filter((p) => p.available).length > 0 ||
           (mailProviders ?? []).filter((p) => !p.available).length > 0) && (
           <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] px-4 py-2.5">
-            <span className="mr-1 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            <span className="mr-1 font-mono text-[12.5px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
               受信箱を追加
             </span>
             {(mailProviders ?? [])
@@ -2727,7 +2727,7 @@ export default function OrdersPage() {
               .map((p) => (
                 <span
                   key={p.provider}
-                  className="text-[11px] text-[var(--text-muted)]"
+                  className="text-[14px] text-[var(--text-muted)]"
                   title={p.unavailableReason}
                 >
                   {p.label}: 未設定
@@ -3005,7 +3005,7 @@ export default function OrdersPage() {
                         key={group.label}
                         className="flex flex-wrap items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200"
                       >
-                        <span className="text-[11px] font-bold text-slate-500 w-full sm:w-28 shrink-0">
+                        <span className="text-[14px] font-bold text-slate-500 w-full sm:w-28 shrink-0">
                           {group.label}
                         </span>
                         {group.types.map((t) => {
@@ -3138,7 +3138,7 @@ export default function OrdersPage() {
                           onChange={(e) => setMinFloorAreaRatio(e.target.value)}
                           className="h-11 text-base rounded-xl"
                         />
-                        <p className="text-[11px] text-slate-500 font-medium">
+                        <p className="text-[14px] text-slate-500 font-medium">
                           都心の商業地では 600〜1300% になることもあります。
                         </p>
                       </div>
@@ -3262,7 +3262,7 @@ export default function OrdersPage() {
           <div className="flex h-full flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="text-[13.5px] font-bold uppercase tracking-wider text-slate-500">
                   総オーダー
                 </span>
                 <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
@@ -3274,7 +3274,7 @@ export default function OrdersPage() {
                 <span className="text-xs font-bold text-slate-400 ml-1">件</span>
               </div>
             </div>
-            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 flex items-center gap-1 border-t border-slate-100 pt-1.5">
+            <div className="text-[13.5px] font-semibold text-slate-500 mt-2 flex items-center gap-1 border-t border-slate-100 pt-1.5">
               <span>進行中: {activeOrdersCount}件</span>
               <span className="text-slate-300">•</span>
               <span>完了: {completedOrdersCount}件</span>
@@ -3287,7 +3287,7 @@ export default function OrdersPage() {
           <div className="flex h-full flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="text-[13.5px] font-bold uppercase tracking-wider text-slate-500">
                   検索中オーダー
                 </span>
                 <div className="w-6 h-6 rounded-full bg-emerald-50 flex items-center justify-center">
@@ -3313,7 +3313,7 @@ export default function OrdersPage() {
                 )}
               </div>
             </div>
-            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
+            <div className="text-[13.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
               {scrapingOrdersCount > 0 ? "リアルタイム収集中" : "現在待機中"}
             </div>
           </div>
@@ -3324,7 +3324,7 @@ export default function OrdersPage() {
           <div className="flex h-full flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-800">
+                <span className="text-[13.5px] font-bold uppercase tracking-wider text-emerald-800">
                   本日の新着
                 </span>
                 <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -3336,7 +3336,7 @@ export default function OrdersPage() {
                 <span className="text-xs font-bold text-emerald-600 ml-1">件</span>
               </div>
             </div>
-            <div className="text-[10.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
+            <div className="text-[13.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
               {ordersWithNewMatchesCount}件のオーダーで新着あり
             </div>
           </div>
@@ -3347,7 +3347,7 @@ export default function OrdersPage() {
           <div className="flex h-full flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-amber-800">
+                <span className="text-[13.5px] font-bold uppercase tracking-wider text-amber-800">
                   高評価物件
                 </span>
                 <div className="w-6 h-6 rounded-full bg-amber-50 flex items-center justify-center">
@@ -3359,7 +3359,7 @@ export default function OrdersPage() {
                 <span className="text-xs font-bold text-slate-400 ml-1">件</span>
               </div>
             </div>
-            <div className="text-[10.5px] font-semibold text-amber-700 mt-2 border-t border-amber-50 pt-1.5">
+            <div className="text-[13.5px] font-semibold text-amber-700 mt-2 border-t border-amber-50 pt-1.5">
               スコア80点以上（即提案候補）
             </div>
           </div>
@@ -3370,7 +3370,7 @@ export default function OrdersPage() {
           <div className="flex h-full flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="text-[13.5px] font-bold uppercase tracking-wider text-slate-500">
                   総マッチ物件数
                 </span>
                 <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
@@ -3382,7 +3382,7 @@ export default function OrdersPage() {
                 <span className="text-xs font-bold text-slate-400 ml-1">件</span>
               </div>
             </div>
-            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
+            <div className="text-[13.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
               {ordersWithMatchesCount}件のオーダーにマッチ
             </div>
           </div>
@@ -3404,7 +3404,7 @@ export default function OrdersPage() {
                 value={orderSearchQuery}
                 onChange={(e) => setOrderSearchQuery(e.target.value)}
                 placeholder="オーダー名・顧客名・エリア（区/市/駅）で検索..."
-                className="w-full h-10 pl-9 pr-8 text-[13px] font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
+                className="w-full h-10 pl-9 pr-8 text-[15.5px] font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
               />
               {orderSearchQuery && (
                 <button
@@ -3516,7 +3516,7 @@ export default function OrdersPage() {
                   key={tab.key}
                   type="button"
                   onClick={() => setOrderStatusFilter(tab.key as any)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all cursor-pointer select-none ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-bold transition-all cursor-pointer select-none ${
                     isActive
                       ? "bg-emerald-700 text-white shadow-xs"
                       : tab.highlight
@@ -3526,7 +3526,7 @@ export default function OrdersPage() {
                 >
                   <span>{tab.label}</span>
                   <span
-                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    className={`text-[13.5px] px-1.5 py-0.2 rounded-full font-black ${
                       isActive
                         ? "bg-white/20 text-white"
                         : "bg-white text-slate-700 border border-slate-200"
@@ -3703,25 +3703,25 @@ export default function OrdersPage() {
 
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-[15px] font-semibold leading-snug text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand)]">
+                      <span className="truncate text-[17.5px] font-semibold leading-snug text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand)]">
                         {order.name || `オーダー #${order._id.slice(0, 6)}`}
                       </span>
                       {isScrapingNow ? (
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10.5px] font-bold text-emerald-800">
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
                           検索中
                         </span>
                       ) : order.status === "completed" ? (
-                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-page-subtle)] px-2 py-0.5 text-[10.5px] font-bold text-[var(--text-secondary)]">
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-page-subtle)] px-2 py-0.5 text-[13.5px] font-bold text-[var(--text-secondary)]">
                           完了
                         </span>
                       ) : null}
                       {recentMatchesInOrder > 0 && (
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10.5px] font-bold text-emerald-800">
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
                           新着 {recentMatchesInOrder}件
                         </span>
                       )}
                     </span>
-                    <span className="mt-1 block truncate text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                    <span className="mt-1 block truncate text-[15px] leading-relaxed text-[var(--text-muted)]">
                       {cardCustomer ? `${cardCustomer.name} ・ ` : ""}
                       {wardSummary}
                       {wardSummary ? " ・ " : ""}
@@ -3732,11 +3732,11 @@ export default function OrdersPage() {
                   <span className="hidden shrink-0 text-right sm:block">
                     <span className="block font-mono text-[17px] leading-none text-[var(--text-primary)]">
                       {matchCount}
-                      <span className="ml-1 text-[11px] font-normal text-[var(--text-muted)]">
+                      <span className="ml-1 text-[14px] font-normal text-[var(--text-muted)]">
                         件
                       </span>
                     </span>
-                    <span className="mt-1 block text-[10.5px] text-[var(--text-muted)]">
+                    <span className="mt-1 block text-[13.5px] text-[var(--text-muted)]">
                       マッチ物件
                     </span>
                   </span>
@@ -3771,7 +3771,7 @@ export default function OrdersPage() {
                                   status: nextStatus,
                                 });
                               }}
-                              className={`text-[11px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
+                              className={`text-[14px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
                                 order.status === "completed"
                                   ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
                                   : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
@@ -3811,7 +3811,7 @@ export default function OrdersPage() {
                       </div>
 
                       {/* Criteria Details */}
-                      <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)]">
+                      <div className="flex flex-wrap items-center gap-2 text-[15.5px] font-medium text-[var(--text-secondary)]">
                         {(order.wards?.length
                           ? order.wards
                           : order.ward
@@ -3820,7 +3820,7 @@ export default function OrdersPage() {
                         ).map((w) => (
                           <span
                             key={w}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[12px] font-bold whitespace-nowrap"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[14.5px] font-bold whitespace-nowrap"
                           >
                             <MapPin className="w-3 h-3" />
                             {w}
@@ -3911,7 +3911,7 @@ export default function OrdersPage() {
                           this the listings on the card carry no date at all, so
                           there was no way to tell today's results from a sweep
                           run weeks ago. */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[12px] font-semibold text-[var(--text-muted)]">
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[14.5px] font-semibold text-[var(--text-muted)]">
                         <Clock className="w-3.5 h-3.5" />
                         {order.lastScrapeAt ? (
                           <span>
@@ -3935,7 +3935,7 @@ export default function OrdersPage() {
                             実行者: 記録なし
                           </span>
                         ) : isAutomaticTrigger(order.lastScrapeBy) ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef2f7] text-[#475569] text-[11px] font-bold">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef2f7] text-[#475569] text-[14px] font-bold">
                             <Bot className="w-3 h-3" />
                             {order.lastScrapeBy}
                           </span>
@@ -4071,7 +4071,7 @@ export default function OrdersPage() {
                                       ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
                                       : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
                                   }
-                                  className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-[4px] px-2.5 text-[11px] font-medium transition-colors ${
+                                  className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-[4px] px-2.5 text-[14px] font-medium transition-colors ${
                                     runner === opt.key
                                       ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(23,21,15,0.06)]"
                                       : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
@@ -4089,7 +4089,7 @@ export default function OrdersPage() {
                               not look like siblings of 手動検索. */}
                           {matchCount > 0 && (
                             <div className="order-last flex basis-full flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
-                              <span className="mr-1 font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                              <span className="mr-1 font-mono text-[12.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                                 物件への操作
                               </span>
                               <Button
@@ -4296,13 +4296,13 @@ export default function OrdersPage() {
                                 {getOrderSiteLabel(order)}
                               </span>
                             </div>
-                            <div className="text-[11px] font-normal text-emerald-700 mt-0.5">
+                            <div className="text-[14px] font-normal text-emerald-700 mt-0.5">
                               {localRunOrderId === order._id ? "ローカル（このPC）でスクレイパーを実行しています。" : "GitHub Actions クラウドで実行中。"} 取得された物件はリアルタイムで自動反映されます。
                             </div>
                           </div>
                         </div>
                         {order.activeSource && SOURCE_LABELS[order.activeSource] && (
-                          <span className="px-2.5 py-1 bg-white text-emerald-800 border border-emerald-300 rounded-md text-[11px] font-bold shrink-0">
+                          <span className="px-2.5 py-1 bg-white text-emerald-800 border border-emerald-300 rounded-md text-[14px] font-bold shrink-0">
                             {SOURCE_LABELS[order.activeSource]}
                           </span>
                         )}
@@ -4328,9 +4328,9 @@ export default function OrdersPage() {
                       <>
                         <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
                       <div className="min-w-0 space-y-2">
-                        <div className="text-[14px] font-bold text-[var(--text-primary)]">
+                        <div className="text-[16.5px] font-bold text-[var(--text-primary)]">
                           物件一覧
-                          <span className="ml-2 font-mono text-[12px] font-normal text-[var(--text-muted)]">
+                          <span className="ml-2 font-mono text-[14.5px] font-normal text-[var(--text-muted)]">
                             {matchCount}件
                           </span>
                         </div>
@@ -4367,7 +4367,7 @@ export default function OrdersPage() {
                                         [order._id]: 1,
                                       }));
                                     }}
-                                    className={`px-3 py-1.5 rounded-lg text-[12px] font-bold border transition-all ${
+                                    className={`px-3 py-1.5 rounded-lg text-[14.5px] font-bold border transition-all ${
                                       isActive
                                         ? "bg-emerald-700 text-white border-emerald-700 shadow-xs"
                                         : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
@@ -4387,7 +4387,7 @@ export default function OrdersPage() {
                         })()}
                       </div>
 
-                      <label className="flex items-center gap-2 text-[12px] font-bold text-[var(--text-muted)]">
+                      <label className="flex items-center gap-2 text-[14.5px] font-bold text-[var(--text-muted)]">
                         並び順
                         <select
                           value={sortKey[order._id] || "newest"}
@@ -4403,7 +4403,7 @@ export default function OrdersPage() {
                               [order._id]: 1,
                             }));
                           }}
-                          className="h-9 px-2 bg-white text-slate-800 text-[12.5px] font-bold rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
+                          className="h-9 px-2 bg-white text-slate-800 text-[15px] font-bold rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
                         >
                           {SORT_OPTIONS.map((o) => (
                             <option key={o.key} value={o.key}>
@@ -4625,7 +4625,7 @@ export default function OrdersPage() {
                                             : null,
                                         );
                                       }}
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer shadow-2xs shrink-0 select-none ${
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[13.5px] font-bold border transition-all cursor-pointer shadow-2xs shrink-0 select-none ${
                                         listingHazard?.overallRisk === "high"
                                           ? "bg-rose-50 text-rose-700 border-rose-200/90 hover:bg-rose-100 hover:border-rose-300"
                                           : listingHazard?.overallRisk === "medium"
@@ -4659,7 +4659,7 @@ export default function OrdersPage() {
                                       <span title={listing.emailFrom || "メールで届いた物件紹介"}>
                                         <Badge
                                           variant="amber"
-                                          className="text-[10px] shrink-0"
+                                          className="text-[13.5px] shrink-0"
                                         >
                                           メール
                                         </Badge>
@@ -4668,7 +4668,7 @@ export default function OrdersPage() {
                                       listing?.source && (
                                       <Badge
                                         variant="brand"
-                                        className="text-[10px] shrink-0"
+                                        className="text-[13.5px] shrink-0"
                                       >
                                         {listing.source === "stepon"
                                           ? "住友不動産"
@@ -4724,7 +4724,7 @@ export default function OrdersPage() {
                                       (m._creationTime &&
                                         Date.now() - m._creationTime <=
                                           24 * 60 * 60 * 1000)) && (
-                                      <Badge className="text-[10px] shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-extrabold shadow-2xs gap-1 py-0.5 px-2">
+                                      <Badge className="text-[13.5px] shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-extrabold shadow-2xs gap-1 py-0.5 px-2">
                                         <Sparkles className="w-2.5 h-2.5 animate-pulse" />
                                         新着
                                       </Badge>
@@ -4777,7 +4777,7 @@ export default function OrdersPage() {
                                               const pct = Math.round((diff / expected) * 100);
                                               if (pct >= 8) {
                                                 return (
-                                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[13.5px] font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
                                                     <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
                                                     相場比 -{pct}% 割安
                                                   </span>
@@ -4787,7 +4787,7 @@ export default function OrdersPage() {
                                             return null;
                                           })()}
                                           {(listing.priceDropped || (listing.previousPrice && listing.price < listing.previousPrice)) && (
-                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[13.5px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
                                               <TrendingDown className="w-3 h-3 text-rose-500" />
                                               値下げ{listing.priceDropPct ? ` -${listing.priceDropPct}%` : ""}
                                             </span>
@@ -4800,7 +4800,7 @@ export default function OrdersPage() {
                                           </span>
                                         </div>
                                         {listing.previousPrice && listing.price < listing.previousPrice && (
-                                          <span className="text-[11px] text-slate-400 line-through font-data">
+                                          <span className="text-[14px] text-slate-400 line-through font-data">
                                             {listing.previousPrice.toLocaleString()} 万円
                                           </span>
                                         )}
@@ -5077,7 +5077,12 @@ export default function OrdersPage() {
                                         </a>
                                       )}
 
-                                      {/* Detailed Hazard Map Inspection Button with dynamic risk hint */}
+                                      {/* Hazard map action. Was a pastel
+                                          status pill — it read as a label, not
+                                          something to click. Solid fill, white
+                                          text and a trailing arrow make it the
+                                          primary action in this row; the risk
+                                          colour stays, as the button colour. */}
                                       <button
                                         type="button"
                                         onClick={() =>
@@ -5087,36 +5092,28 @@ export default function OrdersPage() {
                                               : null,
                                           )
                                         }
-                                        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-2xs border ${
+                                        className={`group inline-flex cursor-pointer items-center gap-2.5 rounded-lg px-4 py-2.5 text-[14px] font-bold text-white shadow-sm transition-colors ${
                                           listingHazard?.overallRisk === "high"
-                                            ? "bg-rose-50 text-rose-950 border-rose-300 hover:bg-rose-100"
+                                            ? "bg-rose-600 hover:bg-rose-700"
                                             : listingHazard?.overallRisk === "medium"
-                                              ? "bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100"
-                                              : "bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100"
+                                              ? "bg-amber-600 hover:bg-amber-700"
+                                              : "bg-[var(--brand)] hover:bg-[var(--brand-hover)]"
                                         }`}
                                         title={`${listingHazard?.riskLabel || "ハザードマップ"}（${listingHazard?.groundType || "地盤"}）: ${listingHazard?.riskDescription || "国土地理院・東京都ハザードマップで浸水深・地盤構造を確認"}`}
                                       >
-                                        {listingHazard?.overallRisk === "high" ? (
-                                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                                        ) : listingHazard?.overallRisk === "medium" ? (
-                                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                                        ) : (
-                                          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                                        )}
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span>ハザードマップ確認</span>
-                                          <span
-                                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-tight ${
-                                              listingHazard?.overallRisk === "high"
-                                                ? "bg-rose-200/90 text-rose-900"
-                                                : listingHazard?.overallRisk === "medium"
-                                                  ? "bg-amber-200/90 text-amber-900"
-                                                  : "bg-emerald-200/90 text-emerald-900"
-                                            }`}
-                                          >
-                                            {listingHazard?.riskLabel || "浸水・地盤確認"}
-                                          </span>
-                                        </div>
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20">
+                                          {listingHazard?.overallRisk === "high" ||
+                                          listingHazard?.overallRisk === "medium" ? (
+                                            <AlertTriangle className="h-3.5 w-3.5 text-white" />
+                                          ) : (
+                                            <ShieldCheck className="h-3.5 w-3.5 text-white" />
+                                          )}
+                                        </span>
+                                        <span>ハザードマップを確認</span>
+                                        <span className="rounded bg-white/20 px-2 py-0.5 text-[13px] font-semibold tracking-tight">
+                                          {listingHazard?.riskLabel || "浸水・地盤確認"}
+                                        </span>
+                                        <ArrowUpRight className="h-4 w-4 shrink-0 opacity-80 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                                       </button>
                                     </div>
 
@@ -5161,7 +5158,7 @@ export default function OrdersPage() {
                                           {/* The AI report is the densest text
                                               in the product; give it a
                                               comfortable measure and leading. */}
-                                          <div className="max-w-[80ch] text-[13.5px] leading-[1.9] text-slate-700 whitespace-pre-wrap font-sans">
+                                          <div className="max-w-[80ch] text-[16px] leading-[1.9] text-[var(--text-primary)] whitespace-pre-wrap font-sans">
                                             {hasEvaluation}
                                           </div>
 
@@ -5184,7 +5181,7 @@ export default function OrdersPage() {
                                                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                                               )}
                                               <div className="space-y-0.5 min-w-0">
-                                                <div className="font-bold flex items-center gap-1.5 flex-wrap text-[11px]">
+                                                <div className="font-bold flex items-center gap-1.5 flex-wrap text-[14px]">
                                                   <span>
                                                     ハザード診断:{" "}
                                                     {(scoreDetail.hazardLabel as string) ||
@@ -5195,13 +5192,13 @@ export default function OrdersPage() {
                                                           : "良好地盤")}
                                                   </span>
                                                   {Boolean(scoreDetail.groundType) && (
-                                                    <span className="text-[10px] font-normal opacity-85">
+                                                    <span className="text-[13.5px] font-normal opacity-85">
                                                       （{scoreDetail.groundType as string}）
                                                     </span>
                                                   )}
                                                 </div>
                                                 {Boolean(scoreDetail.hazardDescription) && (
-                                                  <p className="text-[10px] leading-relaxed opacity-90">
+                                                  <p className="text-[13.5px] leading-relaxed opacity-90">
                                                     {scoreDetail.hazardDescription as string}
                                                   </p>
                                                 )}
@@ -5213,7 +5210,7 @@ export default function OrdersPage() {
                                             scoreDetail.comparables.length >
                                               0 && (
                                               <div className="mt-2 rounded-lg border border-emerald-100 bg-white/70 p-3">
-                                                <div className="text-[11px] font-bold text-emerald-900 mb-1.5 flex flex-wrap items-baseline gap-x-2">
+                                                <div className="text-[14px] font-bold text-emerald-900 mb-1.5 flex flex-wrap items-baseline gap-x-2">
                                                   <span>類似取引事例（国交省データ・面積が近い順）</span>
                                                   {scoreDetail.marketAvgPrice != null && (
                                                     <span className="font-normal text-slate-500">
@@ -5236,7 +5233,7 @@ export default function OrdersPage() {
                                                     (comp, i) => (
                                                       <div
                                                         key={i}
-                                                        className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600"
+                                                        className="flex flex-wrap items-baseline gap-x-2 text-[14px] text-slate-600"
                                                       >
                                                         <span className="font-semibold text-slate-800">
                                                           {comp.price.toLocaleString()}
@@ -5247,7 +5244,7 @@ export default function OrdersPage() {
                                                             ? `${comp.area}㎡`
                                                             : "面積不明"}
                                                           {comp.pricePerSqm != null && (
-                                                            <span className="ml-1 text-emerald-700 text-[10px]">
+                                                            <span className="ml-1 text-emerald-700 text-[13.5px]">
                                                               ({comp.pricePerSqm}万円/㎡)
                                                             </span>
                                                           )}
@@ -5278,7 +5275,7 @@ export default function OrdersPage() {
                                           {scoreDetail?.dataWarnings &&
                                             scoreDetail.dataWarnings.length >
                                               0 && (
-                                              <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-0.5">
+                                              <div className="mt-2 text-[14px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-0.5">
                                                 {scoreDetail.dataWarnings.map(
                                                   (w, i) => (
                                                     <div key={i}>⚠ {w}</div>
@@ -5618,7 +5615,7 @@ export default function OrdersPage() {
                   <Label className="text-xs font-bold text-[var(--text-primary)]">
                     {f.label}
                   </Label>
-                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5 mb-1.5">{f.hint}</p>
+                  <p className="text-[14px] text-[var(--text-muted)] mt-0.5 mb-1.5">{f.hint}</p>
                   <textarea
                     rows={4}
                     value={mailRules[f.key]}
@@ -5644,7 +5641,7 @@ export default function OrdersPage() {
                   <span className="block text-xs font-bold text-[var(--text-primary)]">
                     添付ファイルのあるメールだけを読み取る
                   </span>
-                  <span className="block text-[11px] text-[var(--text-muted)]">
+                  <span className="block text-[14px] text-[var(--text-muted)]">
                     マイソクを必ず添付する会社だけを対象にしたい場合に使います。本文だけで物件を紹介するメールは除外されます。
                   </span>
                 </span>
@@ -5652,7 +5649,7 @@ export default function OrdersPage() {
             </div>
 
             <div className="p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-3">
-              <p className="text-[11px] text-[var(--text-muted)]">
+              <p className="text-[14px] text-[var(--text-muted)]">
                 設定の効果は「同期メールを確認」で確認できます。
               </p>
               <div className="flex items-center gap-2">
@@ -5759,7 +5756,7 @@ export default function OrdersPage() {
                           className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
                         >
                           <span
-                            className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[13.5px] font-bold ${
                               m.error
                                 ? "bg-red-100 text-red-800"
                                 : m.filtered
@@ -5785,7 +5782,7 @@ export default function OrdersPage() {
                             <span className="block text-xs font-bold text-[var(--text-primary)] truncate">
                               {m.subject || "(件名なし)"}
                             </span>
-                            <span className="block text-[11px] text-[var(--text-muted)] truncate">
+                            <span className="block text-[14px] text-[var(--text-muted)] truncate">
                               {m.from}
                               {m.receivedAt ? ` ・ ${formatJaDateTimeShort(m.receivedAt)}` : ""}
                               {(m.attachments?.length ?? 0) > 0
@@ -5806,7 +5803,7 @@ export default function OrdersPage() {
                               <p className="text-xs font-semibold text-red-700">{m.error}</p>
                             )}
 
-                            <p className="text-[11px] text-[var(--text-muted)]">
+                            <p className="text-[14px] text-[var(--text-muted)]">
                               判定: {m.reason}
                               {/* Once the AI pass has run, "AIでの抽出が必要" is
                                   stale advice — say what actually read it. */}
@@ -5832,7 +5829,7 @@ export default function OrdersPage() {
                                 {m.listings?.map((l, i) => (
                                   <div
                                     key={i}
-                                    className="text-[11px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
+                                    className="text-[14px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
                                   >
                                     {Object.entries(l)
                                       .filter(([, v]) => v !== null && v !== "")
@@ -5844,7 +5841,7 @@ export default function OrdersPage() {
                             )}
 
                             {(m.attachments?.length ?? 0) > 0 && (
-                              <div className="text-[11px] text-[var(--text-secondary)]">
+                              <div className="text-[14px] text-[var(--text-secondary)]">
                                 <span className="font-bold flex items-center gap-1 mb-1.5 text-[var(--text-primary)]">
                                   <FileText className="w-3.5 h-3.5 text-[var(--brand)]" />
                                   添付ファイル（クリックしてPDFを開く）
@@ -5872,10 +5869,10 @@ export default function OrdersPage() {
                                           <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
                                         )}
                                         <div className="min-w-0 max-w-[260px]">
-                                          <span className="block font-bold text-[11px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
+                                          <span className="block font-bold text-[14px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
                                             {a.filename || "(名前なし)"}
                                           </span>
-                                          <span className="block text-[10px] text-[var(--text-muted)]">
+                                          <span className="block text-[13.5px] text-[var(--text-muted)]">
                                             {a.size ? `${Math.round(a.size / 1024)}KB` : a.mimeType}
                                           </span>
                                         </div>
@@ -5888,20 +5885,20 @@ export default function OrdersPage() {
                             )}
 
                             <div>
-                              <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                              <span className="text-[14px] font-bold text-[var(--text-secondary)]">
                                 本文
                               </span>
-                              <pre className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
+                              <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
                                 {m.bodyText || "(本文なし)"}
                               </pre>
                             </div>
 
                             {m.pdfTexts?.map((t, i) => (
                               <div key={i}>
-                                <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                                <span className="text-[14px] font-bold text-[var(--text-secondary)]">
                                   PDF {i + 1} の抽出テキスト
                                 </span>
-                                <pre className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
+                                <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
                                   {t || "(テキストを抽出できませんでした)"}
                                 </pre>
                               </div>

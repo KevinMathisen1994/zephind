@@ -44,7 +44,11 @@ async function extractPageListings(page: any, wardName: string, label: string): 
       var titleText = titleEl ? titleEl.textContent?.trim() || "" : "";
       var link = titleEl ? titleEl.getAttribute("href") || "" : "";
 
-      var address = titleText.replace(/\\s+[\\d,]+\\s*万円.*$/, "").trim();
+      // マンション titles are the building name, so prefer the 所在地 row.
+      var addrDd = Array.from(item.querySelectorAll(".gaiyo_item dl")).find(function(dl) {
+        return dl.querySelector("dt")?.textContent?.trim() === "所在地";
+      })?.querySelector("dd");
+      var address = (addrDd?.textContent?.trim()) || titleText.replace(/\\s+[\\d,]+\\s*万円.*$/, "").trim();
 
       var parsePrice = function(text) {
         if (!text) return 0;
@@ -63,6 +67,10 @@ async function extractPageListings(page: any, wardName: string, label: string): 
 
       var priceMatch = titleText.match(/([\\d,億万円〜~]+万円)/) || titleText.match(/([\\d,]+)\\s*万円/);
       var price = priceMatch ? parsePrice(priceMatch[1]) : null;
+      if (!price) {
+        var priceEm = item.querySelector(".line_content .price em");
+        if (priceEm) price = parsePrice(priceEm.textContent || "") || null;
+      }
 
       var allText = item.textContent?.trim().replace(/\\s+/g, " ") || "";
 

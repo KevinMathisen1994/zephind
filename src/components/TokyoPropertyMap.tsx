@@ -209,8 +209,8 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
         circle.bindTooltip(
           `<div class="p-1 font-sans text-xs">
             <div class="font-bold text-slate-900">${zone.name}</div>
-            <div class="text-[10px] text-slate-600 mt-0.5">${zone.label}</div>
-            <div class="text-[9px] text-slate-500 mt-0.5">${zone.description}</div>
+            <div class="text-[13.5px] text-slate-600 mt-0.5">${zone.label}</div>
+            <div class="text-[12.5px] text-slate-500 mt-0.5">${zone.description}</div>
           </div>`,
           { sticky: true, opacity: 0.95 },
         );
@@ -241,7 +241,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
       TOKYO_MAJOR_STATIONS.forEach((station) => {
         const icon = L.divIcon({
           className: "custom-station-icon",
-          html: `<div class="station-marker flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 text-white shadow-md border border-white/20 backdrop-blur-xs text-[10px] font-bold">
+          html: `<div class="station-marker flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 text-white shadow-md border border-white/20 backdrop-blur-xs text-[13.5px] font-bold">
             <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
             <span>${station.name}</span>
           </div>`,
@@ -253,7 +253,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
         marker.bindTooltip(
           `<div class="font-sans text-xs">
             <div class="font-bold">${station.name}</div>
-            <div class="text-[10px] text-slate-500">${station.lines.join(" · ")}</div>
+            <div class="text-[13.5px] text-slate-500">${station.lines.join(" · ")}</div>
           </div>`,
           { direction: "top", offset: [0, -10] },
         );
@@ -315,7 +315,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
 
       const markerHtml = `
         <div class="group relative flex items-center justify-center cursor-pointer transition-transform duration-150">
-          <div class="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight whitespace-nowrap flex items-center gap-1 ${badgeColorClass}">
+          <div class="px-2 py-0.5 rounded-full text-[13.5px] font-bold tracking-tight whitespace-nowrap flex items-center gap-1 ${badgeColorClass}">
             ${isHighScore ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse"></span>' : ""}
             <span>${displayText}</span>
           </div>
@@ -399,7 +399,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
               key={w}
               type="button"
               onClick={() => handleWardChange(w)}
-              className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-full text-[14px] font-bold whitespace-nowrap transition-all cursor-pointer ${
                 selectedWard === w
                   ? "bg-slate-900 text-white shadow-xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -416,7 +416,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
             <button
               type="button"
               onClick={() => setDisplayMode("price")}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${
+              className={`px-2 py-0.5 rounded-full text-[13.5px] font-bold transition-all ${
                 displayMode === "price" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500"
               }`}
             >
@@ -425,7 +425,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
             <button
               type="button"
               onClick={() => setDisplayMode("yield")}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${
+              className={`px-2 py-0.5 rounded-full text-[13.5px] font-bold transition-all ${
                 displayMode === "yield" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500"
               }`}
             >
@@ -434,7 +434,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
             <button
               type="button"
               onClick={() => setDisplayMode("score")}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${
+              className={`px-2 py-0.5 rounded-full text-[13.5px] font-bold transition-all ${
                 displayMode === "score" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500"
               }`}
             >
@@ -528,16 +528,16 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
               {/* Title & Badge */}
               <div className="pr-6">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-black text-slate-700">
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[13.5px] font-black text-slate-700">
                     {activeListing.ward || "東京都"}
                   </span>
                   {activeListing.structureType && (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-[10px] font-black text-emerald-800">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-[13.5px] font-black text-emerald-800">
                       {activeListing.structureType}
                     </span>
                   )}
                   {activeListing.score && (
-                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-[10px] font-black text-amber-800 flex items-center gap-0.5">
+                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-[13.5px] font-black text-amber-800 flex items-center gap-0.5">
                       <Sparkles className="w-3 h-3 text-amber-500" />
                       {Math.round(activeListing.score)}点
                     </span>
@@ -555,13 +555,13 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
               {/* Price & Yield Highlights */}
               <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
                 <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">物件価格</div>
+                  <div className="text-[13.5px] font-bold text-slate-400 uppercase tracking-wider">物件価格</div>
                   <div className="text-lg font-black text-slate-900 font-data">
                     {activeListing.price ? `¥${activeListing.price.toLocaleString()}万` : "価格応談"}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">想定利回り</div>
+                  <div className="text-[13.5px] font-bold text-slate-400 uppercase tracking-wider">想定利回り</div>
                   <div className="text-lg font-black text-emerald-700 font-data">
                     {activeListing.yield || activeListing.grossYield
                       ? `${(activeListing.yield || activeListing.grossYield)?.toFixed(2)}%`

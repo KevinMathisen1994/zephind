@@ -113,7 +113,7 @@ export default function SavedListingsPage() {
               <Send className="h-4 w-4" />
               顧客へ提案・送信
               {selected.size > 0 && (
-                <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+                <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[14px] font-semibold tabular-nums">
                   {selected.size}
                 </span>
               )}
@@ -261,7 +261,7 @@ export default function SavedListingsPage() {
                       )}
                     </div>
 
-                    <div className="text-[11px] font-medium text-[var(--text-muted)]">
+                    <div className="text-[14px] font-medium text-[var(--text-muted)]">
                       {row.orderName ? `検索条件: ${row.orderName} ・ ` : ""}
                       保存日時: {formatJaDateTime(row.savedAt)}
                     </div>

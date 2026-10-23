@@ -43,16 +43,16 @@ function NavAccount() {
             className="h-7 w-7 shrink-0 rounded-[4px] object-cover"
           />
         ) : (
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] bg-white/10 font-mono text-[10px] font-semibold text-[#d8d1c4]">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] bg-white/10 font-mono text-[13.5px] font-semibold text-[#d8d1c4]">
             {avatarLetter}
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[11.5px] font-medium leading-tight text-[#efe9dd]">
+          <div className="truncate text-[14.5px] font-medium leading-tight text-[#efe9dd]">
             {!isLoaded ? "読み込み中..." : user?.fullName || user?.username || "ログイン中"}
           </div>
           <div
-            className="mt-1 truncate font-mono text-[9px] leading-tight text-[#7d7568]"
+            className="mt-1 truncate font-mono text-[12.5px] leading-tight text-[#7d7568]"
             title={user?.primaryEmailAddress?.emailAddress || ""}
           >
             {user?.primaryEmailAddress?.emailAddress || "—"}
@@ -83,7 +83,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
             <h1 className="font-serif text-[23px] leading-none tracking-[0.01em] text-[#f4efe6]">
               Zephind
             </h1>
-            <p className="mt-1.5 font-mono text-[8.5px] uppercase leading-none tracking-[0.22em] text-[#8c8478]">
+            <p className="mt-1.5 font-mono text-[12px] uppercase leading-none tracking-[0.22em] text-[#8c8478]">
               Property Intel
             </p>
           </div>
@@ -93,7 +93,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
       <div className="mx-5 h-px bg-white/[0.09]" />
 
       <nav className="flex-1 px-2 py-5">
-        <p className="mb-2.5 px-3 font-mono text-[8.5px] uppercase tracking-[0.24em] text-[#6b6458]">
+        <p className="mb-2.5 px-3 font-mono text-[12px] uppercase tracking-[0.24em] text-[#6b6458]">
           Workspace
         </p>
         <div className="space-y-0.5">
@@ -127,10 +127,10 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
                     }`}
                     strokeWidth={2}
                   />
-                  <span className="flex-1 text-[12.5px] font-medium leading-tight tracking-[0.01em]">
+                  <span className="flex-1 text-[15px] font-medium leading-tight tracking-[0.01em]">
                     {item.label}
                   </span>
-                  <span className="font-mono text-[8.5px] tracking-[0.1em] text-[#5d564b]">
+                  <span className="font-mono text-[12px] tracking-[0.1em] text-[#5d564b]">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                 </>
@@ -145,14 +145,14 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
       ) : (
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-2.5 rounded-[4px] px-2 py-2">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] bg-white/10 font-mono text-[10px] font-semibold text-[#d8d1c4]">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] bg-white/10 font-mono text-[13.5px] font-semibold text-[#d8d1c4]">
               Z
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[11.5px] font-medium leading-tight text-[#efe9dd]">
+              <div className="truncate text-[14.5px] font-medium leading-tight text-[#efe9dd]">
                 ローカルモード
               </div>
-              <div className="mt-1 truncate font-mono text-[9px] leading-tight text-[#7d7568]">
+              <div className="mt-1 truncate font-mono text-[12.5px] leading-tight text-[#7d7568]">
                 認証なしで実行中
               </div>
             </div>

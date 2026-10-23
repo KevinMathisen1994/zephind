@@ -21,7 +21,7 @@ export default function DashboardLayout() {
       <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between bg-[#17150f] px-4 lg:hidden">
         <div className="flex items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-[3px] bg-[var(--brand)] text-white">
-            <span className="font-serif text-[15px] leading-none">Z</span>
+            <span className="font-serif text-[17.5px] leading-none">Z</span>
           </div>
           <span className="font-serif text-[18px] leading-none tracking-[0.01em] text-[#f4efe6]">
             Zephind
