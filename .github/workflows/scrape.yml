@@ -52,10 +52,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Must be >= 20.19: scraper-service/fix-yargs.js is ESM in a package
-          # without "type": "module", and only 20.19+ auto-detects module syntax.
-          # setup-node resolves "20" to the latest 20.x, which satisfies that.
-          node-version: "20"
+          # 22 or newer. Two hard requirements:
+          # 1. >= 20.19: scraper-service/fix-yargs.js is ESM in a package without
+          #    "type": "module", and only 20.19+ auto-detects module syntax.
+          # 2. >= 22: @supabase/realtime-js constructs a RealtimeClient inside
+          #    createClient() and needs a global WebSocket. Node 20 has none and
+          #    the run died with "Node.js detected but native WebSocket not found"
+          #    before a single page was scraped.
+          node-version: "22"
           cache: npm
           cache-dependency-path: scraper-service/package-lock.json
 
