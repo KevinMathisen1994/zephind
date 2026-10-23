@@ -42,7 +42,6 @@ import {
   Play,
   Edit,
   Building2,
-  FileCheck2,
   SlidersHorizontal,
   CheckCircle2,
   ArrowUpRight,
@@ -63,8 +62,11 @@ import {
   Sparkles,
   ArrowUpDown,
   Smartphone,
+  Compass,
+  ShieldCheck,
+  ArrowLeft,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { ProposalModal } from "../components/ProposalModal";
 import {
@@ -72,6 +74,12 @@ import {
   type ComparisonListing,
 } from "../components/PropertyComparisonModal";
 import { LineProposalModal } from "../components/LineProposalModal";
+import TokyoPropertyMap, { type MapListingItem } from "../components/TokyoPropertyMap";
+import { PropertyHazardModal } from "../components/PropertyHazardModal";
+import {
+  resolveListingCoordinates,
+  assessPropertyHazard,
+} from "../lib/geoIntelligence";
 import type { Doc, Id } from "../lib/dataModel";
 
 const GMAPS_KEY = import.meta.env
@@ -148,6 +156,10 @@ type EvaluationScoreDetail = {
   amenityCount?: number | null;
   comparables?: ComparableTrade[];
   dataWarnings?: string[];
+  hazardRisk?: "safe" | "medium" | "high" | string;
+  hazardLabel?: string;
+  hazardDescription?: string;
+  groundType?: string;
   [key: string]: unknown;
 };
 
@@ -731,6 +743,12 @@ function EmailListingDetails({
 
 export default function OrdersPage() {
   const navigate = useNavigate();
+  // Same component, two screens: /orders is the dashboard, /orders/:orderId is
+  // one order's full listing page. Keeping it in one component means the
+  // queries, scrape handlers and modals stay in one place.
+  const { orderId: routeOrderId } = useParams<{ orderId: string }>();
+  const isDetailView = Boolean(routeOrderId);
+  const [searchParams, setSearchParams] = useSearchParams();
   // Clerk's Convex JWT template does not map the `name` claim by default, so the
   // SERVER sees only a subject and can only label a search "ログインユーザー". The
   // browser knows the real name, so it is sent along for display only — see
@@ -746,7 +764,6 @@ export default function OrdersPage() {
   const customers = useQuery(api.customers.list);
   const createOrder = useMutation(api.orders.create);
   const deleteOrder = useMutation(api.orders.remove);
-  const saveScore = useMutation(api.matching.saveScore);
   const updateOrder = useMutation(api.orders.update);
   const matches = useQuery(api.matching.list);
   // Only the ids: the star state for a 500-row list needs nothing else, and the
@@ -1085,16 +1102,9 @@ export default function OrdersPage() {
   }, [getRecentRuns]);
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
-  // Whole-card accordion: hides the matched-listings section behind a bottom
-  // toggle bar, keeping just the header (title/criteria/actions) visible.
-  // Closed by default — a card with a name in the set is the expanded one.
-  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
-  const toggleOrderExpanded = (orderId: string) =>
-    setExpandedOrders((prev) => {
-      const next = new Set(prev);
-      next.has(orderId) ? next.delete(orderId) : next.add(orderId);
-      return next;
-    });
+  // Listings are no longer unfolded inside the dashboard card. Each order has
+  // its own page (/orders/:orderId), which is where the whole listing list
+  // lives — one obvious click instead of an accordion nobody could follow.
 
   // Order search, status filter & sorting state
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
@@ -1104,6 +1114,91 @@ export default function OrdersPage() {
   const [orderSortKey, setOrderSortKey] = useState<
     "newest" | "matchesDesc" | "newMatchesDesc" | "nameAsc"
   >("newest");
+  const [viewMode, setViewMode] = useState<"list" | "map" | "split">("list");
+  // A left-over map/split selection from the dashboard must not leak into the
+  // order page, where there is no map to show.
+  const effectiveView: "list" | "map" | "split" = isDetailView ? "list" : viewMode;
+
+  // Map listings formatted for TokyoPropertyMap
+  const mapListings: MapListingItem[] = useMemo(() => {
+    if (!listings) return [];
+    return listings.map((l: any) => ({
+      _id: l._id,
+      id: l._id,
+      title: l.title,
+      address: l.address,
+      ward: l.ward,
+      price: l.price,
+      rent: l.rent,
+      yield: l.yield || l.grossYield || l.netYield,
+      grossYield: l.grossYield,
+      netYield: l.netYield,
+      station: l.station,
+      stationName: l.stationName,
+      walkMinutes: l.walkMinutes || l.walkingMinutes,
+      walkingMinutes: l.walkingMinutes || l.walkMinutes,
+      structure: l.structure,
+      structureType: l.structureType,
+      area: l.area,
+      buildYear: l.buildYear,
+      score: l.score,
+      images: l.images,
+      url: l.url,
+      source: l.source,
+      latitude: l.latitude,
+      longitude: l.longitude,
+      dealType: l.dealType,
+    }));
+  }, [listings]);
+
+  // Scroll to and highlight a specific listing in the list
+  const handleScrollToListing = (listing: MapListingItem) => {
+    const listingId = listing._id || listing.id;
+    if (!listingId) return;
+
+    // 1. Find which order has this match. Listings live on their own order
+    //    page now, so "show in list" opens that page on the right page of
+    //    results instead of unfolding an accordion from the dashboard.
+    const match = matches?.find((m) => m.listingId === listingId);
+    if (match && match.orderId) {
+      setExpandedMatch(match._id);
+
+      // Make sure the order pagination shows this item's page
+      const oMatches = (matches || []).filter((m) => m.orderId === match.orderId);
+      const matchIndex = oMatches.findIndex((m) => m.listingId === listingId);
+      if (matchIndex !== -1) {
+        const targetPage = Math.floor(matchIndex / 10) + 1;
+        setCurrentPage((prev) => ({
+          ...prev,
+          [match.orderId as string]: targetPage,
+        }));
+      }
+      navigate(`/orders/${match.orderId}`);
+    }
+
+    // 2. Smooth scroll and glow highlight
+    setTimeout(() => {
+      const el = document.getElementById(`listing-row-${listingId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-4", "ring-emerald-500", "scale-[1.01]", "shadow-lg");
+        setTimeout(() => {
+          el.classList.remove("ring-4", "ring-emerald-500", "scale-[1.01]", "shadow-lg");
+        }, 2500);
+      }
+    }, 250);
+  };
+
+  // Auto-focus listing if passed via URL (e.g. from Map Intelligence page)
+  useEffect(() => {
+    const focusListingId = searchParams.get("focusListing");
+    if (!focusListingId || !matches || matches.length === 0) return;
+
+    handleScrollToListing({ _id: focusListingId, id: focusListingId });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("focusListing");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, matches]);
   // Properties ticked in the results list, carried into the proposal modal so
   // the same list is not presented twice.
   const [selectedForProposal, setSelectedForProposal] = useState<Set<string>>(
@@ -1126,6 +1221,7 @@ export default function OrdersPage() {
   const [lineProposalOrder, setLineProposalOrder] = useState<
     Doc<"orders"> | null
   >(null);
+  const [hazardModalListing, setHazardModalListing] = useState<any | null>(null);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
   const [scoreDetails, setScoreDetails] = useState<
@@ -1234,6 +1330,10 @@ export default function OrdersPage() {
 
     try {
       const orderCriteria = buildOrderCriteria(order);
+      const coords = resolveListingCoordinates(listing);
+      const hazardDiag = coords
+        ? assessPropertyHazard(coords, listing.ward, listing.address)
+        : null;
 
       const result = await evaluateListing({
         matchId: matchId,
@@ -1268,6 +1368,11 @@ export default function OrdersPage() {
         deposit: listing.deposit,
         keyMoney: listing.keyMoney,
         petsAllowed: listing.petsAllowed,
+        hazardRisk: hazardDiag?.overallRisk,
+        hazardLabel: hazardDiag?.riskLabel,
+        hazardDescription: hazardDiag?.riskDescription,
+        groundType: hazardDiag?.groundType,
+        groundDescription: hazardDiag?.groundDescription,
         orderCriteria,
       });
       setEvaluations((prev) => ({
@@ -1293,6 +1398,8 @@ export default function OrdersPage() {
   const handleDelete = async (id: Id<"orders">) => {
     try {
       await deleteOrder({ id });
+      // On the order's own page, deleting it leaves nothing to look at.
+      if (isDetailView) navigate("/orders");
     } catch (err) {
       // Without this, a failed delete (e.g. ownership check) looked
       // identical to a successful one — the card just silently stayed put.
@@ -2237,7 +2344,6 @@ export default function OrdersPage() {
         localRunOrderId === o._id,
     ).length ?? 0;
   const totalMatchesCount = matches?.length ?? 0;
-  const totalEvaluatedCount = Object.keys(evaluations).length;
   const newMatches24hCount = useMemo(
     () =>
       matches?.filter(
@@ -2284,6 +2390,9 @@ export default function OrdersPage() {
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
     if (!orders) return undefined;
+    // The detail page shows exactly the order in the URL and ignores the
+    // dashboard's search/tab state, so a stale filter cannot hide it.
+    if (routeOrderId) return orders.filter((o) => o._id === routeOrderId);
     return orders
       .filter((order) => {
         // Text Search
@@ -2359,34 +2468,80 @@ export default function OrdersPage() {
     customers,
     activeRun,
     localRunOrderId,
+    routeOrderId,
   ]);
+
+  // Everything the detail page header needs, in one line the reader can scan.
+  const detailOrder = routeOrderId
+    ? orders?.find((o) => o._id === routeOrderId)
+    : undefined;
+  const detailCustomer = customers?.find(
+    (c) => c._id === detailOrder?.customerId,
+  );
+  // The buyer only. Area, price and type are spelled out once, in the order's
+  // criteria block — repeating them in the header made the page look busier
+  // without adding anything.
+  const detailSubtitle = detailCustomer
+    ? `顧客: ${detailCustomer.name}${detailCustomer.company ? `（${detailCustomer.company}）` : ""}`
+    : "顧客: 未設定";
+
+  // Opening an order page starts at the top; otherwise you land halfway down
+  // the previous screen's list.
+  useEffect(() => {
+    if (routeOrderId) window.scrollTo({ top: 0 });
+  }, [routeOrderId]);
 
   return (
     <div className="page-shell space-y-5">
       {/* ── Page Header ── */}
-      <div className="page-header">
-        <div>
-          <div className="eyebrow-pill">Property Search</div>
-          <h1 className="page-title">物件検索</h1>
-          <p className="page-subtitle">
-            買主希望条件の登録、全14不動産ポータル横断検索、物件評価を一括管理
-          </p>
+      {isDetailView ? (
+        <div className="space-y-5">
+          <button
+            type="button"
+            onClick={() => navigate("/orders")}
+            className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            物件検索に戻る
+          </button>
+          <div className="page-header">
+            <div className="min-w-0">
+              <div className="eyebrow-pill">Order Detail</div>
+              <h1 className="page-title truncate">
+                {detailOrder?.name ||
+                  (orders === undefined ? "読み込み中..." : "オーダー")}
+              </h1>
+              <p className="page-subtitle">{detailSubtitle}</p>
+            </div>
+          </div>
         </div>
-        <Button
-          onClick={() => {
-            if (showForm) resetForm();
-            setShowForm(!showForm);
-          }}
-          variant={showForm ? "outline" : "default"}
-        >
-          {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {showForm ? "キャンセル" : "新規オーダー作成"}
-        </Button>
-      </div>
+      ) : (
+        <div className="page-header">
+          <div>
+            <div className="eyebrow-pill">Property Search</div>
+            <h1 className="page-title">物件検索</h1>
+            <p className="page-subtitle">
+              買主の希望条件ごとに、全14ポータルの検索と物件評価をまとめて管理します
+            </p>
+          </div>
+          <Button
+            onClick={() => {
+              if (showForm) resetForm();
+              setShowForm(!showForm);
+            }}
+            variant={showForm ? "outline" : "default"}
+          >
+            {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {showForm ? "キャンセル" : "新規オーダー作成"}
+          </Button>
+        </div>
+      )}
 
       {/* ── Mail connection: read broker emails (物件紹介) and auto-match them
           against every order, same as a scraped listing. Read-only — this
-          never sends anything (see ProposalModal for that, unrelated). ── */}
+          never sends anything (see ProposalModal for that, unrelated).
+          Dashboard-only: on an order page it is background plumbing. ── */}
+      {!isDetailView && (
       <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
         {/* Header: identity + actions */}
         <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3.5">
@@ -2537,61 +2692,7 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
-
-      {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {[
-          {
-            icon: FileCheck2,
-            color: "var(--brand)",
-            bg: "var(--brand-soft)",
-            label: "登録された依頼数",
-            value: totalOrdersCount,
-            loading: orders === undefined,
-          },
-          {
-            icon: CheckCircle2,
-            color: "var(--info)",
-            bg: "var(--info-soft)",
-            label: "検索完了",
-            value: activeOrdersCount,
-            loading: orders === undefined,
-          },
-          {
-            icon: Building2,
-            color: "var(--warning)",
-            bg: "var(--warning-soft)",
-            label: "全検索結果",
-            value: totalMatchesCount,
-            loading: matches === undefined,
-          },
-          {
-            icon: FileText,
-            color: "var(--success)",
-            bg: "var(--success-soft)",
-            label: "評価完了数",
-            value: totalEvaluatedCount,
-            loading: false,
-          },
-        ].map((kpi, i) => (
-          <div key={i} className="kpi-card">
-            <div className="flex items-start justify-between gap-2">
-              <span className="stat-label">{kpi.label}</span>
-              <span
-                className="kpi-icon"
-                style={{ background: kpi.bg, color: kpi.color }}
-              >
-                <kpi.icon className="h-[15px] w-[15px]" />
-              </span>
-            </div>
-            {kpi.loading ? (
-              <Skeleton className="h-7 w-16" />
-            ) : (
-              <div className="stat-value">{kpi.value}</div>
-            )}
-          </div>
-        ))}
-      </div>
+      )}
 
       {/* Order Creation / Editing Form */}
       {showForm && (
@@ -3108,141 +3209,147 @@ export default function OrdersPage() {
         </Card>
       )}
 
-      {/* ── KPI Dashboard Overview ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* ── Summary strip. Read-only: the tab row below is the ONE place filters
+          are set, so these numbers cannot quietly disagree with the list. ── */}
+      {!isDetailView && (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {/* Total Orders */}
-        <div
-          onClick={() => setOrderStatusFilter("all")}
-          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
-            orderStatusFilter === "all"
-              ? "border-emerald-600 ring-1 ring-emerald-600/30"
-              : "border-[var(--border-subtle)] hover:border-slate-300"
-          }`}
-        >
-          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">
-              総オーダー
-            </span>
-            <Building2 className="w-4 h-4 text-slate-400" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 font-data">
-            {totalOrdersCount}
-            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
-          </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1 flex items-center gap-1">
-            <span>進行中: {activeOrdersCount}件</span>
-            <span className="text-slate-300">•</span>
-            <span>完了: {completedOrdersCount}件</span>
+        <div className="kpi-card">
+          <div className="flex h-full flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                  総オーダー
+                </span>
+                <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
+                  <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900 font-data">
+                {totalOrdersCount}
+                <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+              </div>
+            </div>
+            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 flex items-center gap-1 border-t border-slate-100 pt-1.5">
+              <span>進行中: {activeOrdersCount}件</span>
+              <span className="text-slate-300">•</span>
+              <span>完了: {completedOrdersCount}件</span>
+            </div>
           </div>
         </div>
 
         {/* Active Scraping Runs */}
-        <div
-          onClick={() => setOrderStatusFilter("scraping")}
-          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
-            orderStatusFilter === "scraping"
-              ? "border-emerald-600 ring-1 ring-emerald-600/30"
-              : "border-[var(--border-subtle)] hover:border-slate-300"
-          }`}
-        >
-          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">
-              検索中オーダー
-            </span>
-            <RefreshCw
-              className={`w-4 h-4 ${
-                scrapingOrdersCount > 0
-                  ? "text-emerald-600 animate-spin"
-                  : "text-slate-400"
-              }`}
-            />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-slate-900 font-data">
-              {scrapingOrdersCount}
-            </span>
-            <span className="text-xs font-bold text-slate-400">件</span>
-            {scrapingOrdersCount > 0 && (
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-            )}
-          </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {scrapingOrdersCount > 0 ? "リアルタイム収集中" : "現在待機中"}
+        <div className="kpi-card">
+          <div className="flex h-full flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                  検索中オーダー
+                </span>
+                <div className="w-6 h-6 rounded-full bg-emerald-50 flex items-center justify-center">
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${
+                      scrapingOrdersCount > 0
+                        ? "text-emerald-600 animate-spin"
+                        : "text-slate-400"
+                    }`}
+                  />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-black text-slate-900 font-data">
+                  {scrapingOrdersCount}
+                </span>
+                <span className="text-xs font-bold text-slate-400">件</span>
+                {scrapingOrdersCount > 0 && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
+              {scrapingOrdersCount > 0 ? "リアルタイム収集中" : "現在待機中"}
+            </div>
           </div>
         </div>
 
         {/* New Matches (Today / 24h) */}
-        <div
-          onClick={() => setOrderStatusFilter("newMatches")}
-          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
-            orderStatusFilter === "newMatches"
-              ? "border-emerald-600 ring-1 ring-emerald-600/30"
-              : "border-[var(--border-subtle)] hover:border-slate-300"
-          }`}
-        >
-          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-              本日の新着
-            </span>
-            <Sparkles className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="text-2xl font-black text-emerald-700 font-data">
-            +{newMatches24hCount}
-            <span className="text-xs font-bold text-emerald-600 ml-1">件</span>
-          </div>
-          <div className="text-[11px] font-semibold text-emerald-600/90 mt-1">
-            {ordersWithNewMatchesCount}件のオーダーで新着あり
+        <div className="kpi-card">
+          <div className="flex h-full flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-800">
+                  本日の新着
+                </span>
+                <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-emerald-700 font-data">
+                +{newMatches24hCount}
+                <span className="text-xs font-bold text-emerald-600 ml-1">件</span>
+              </div>
+            </div>
+            <div className="text-[10.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
+              {ordersWithNewMatchesCount}件のオーダーで新着あり
+            </div>
           </div>
         </div>
 
         {/* High Score Matches (80+ S/A rank) */}
-        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-white shadow-2xs hover:border-slate-300 transition-all">
-          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">
-              高評価物件
-            </span>
-            <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 font-data">
-            {highScoreMatchesCount}
-            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
-          </div>
-          <div className="text-[11px] font-semibold text-amber-700 mt-1">
-            スコア80点以上（即提案候補）
+        <div className="kpi-card">
+          <div className="flex h-full flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-amber-800">
+                  高評価物件
+                </span>
+                <div className="w-6 h-6 rounded-full bg-amber-50 flex items-center justify-center">
+                  <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900 font-data">
+                {highScoreMatchesCount}
+                <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+              </div>
+            </div>
+            <div className="text-[10.5px] font-semibold text-amber-700 mt-2 border-t border-amber-50 pt-1.5">
+              スコア80点以上（即提案候補）
+            </div>
           </div>
         </div>
 
         {/* Total Matched Listings */}
-        <div
-          onClick={() => setOrderStatusFilter("hasMatches")}
-          className={`p-4 rounded-xl border bg-white transition-all cursor-pointer shadow-2xs hover:shadow-xs ${
-            orderStatusFilter === "hasMatches"
-              ? "border-emerald-600 ring-1 ring-emerald-600/30"
-              : "border-[var(--border-subtle)] hover:border-slate-300"
-          }`}
-        >
-          <div className="flex items-center justify-between text-[var(--text-muted)] mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider">
-              総マッチ物件数
-            </span>
-            <CheckCircle2 className="w-4 h-4 text-slate-400" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 font-data">
-            {totalMatchesCount.toLocaleString()}
-            <span className="text-xs font-bold text-slate-400 ml-1">件</span>
-          </div>
-          <div className="text-[11px] font-semibold text-slate-500 mt-1">
-            {ordersWithMatchesCount}件のオーダーにマッチ
+        <div className="kpi-card">
+          <div className="flex h-full flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                  総マッチ物件数
+                </span>
+                <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900 font-data">
+                {totalMatchesCount.toLocaleString()}
+                <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+              </div>
+            </div>
+            <div className="text-[10.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
+              {ordersWithMatchesCount}件のオーダーにマッチ
+            </div>
           </div>
         </div>
       </div>
+      )}
 
       {/* Orders List Section */}
       <div className="space-y-4">
         {/* Search, Filter & Sort Controls */}
+        {!isDetailView && (
         <div className="space-y-3 bg-white p-4 rounded-2xl border border-[var(--border-subtle)] shadow-2xs">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             {/* Search Input */}
@@ -3253,7 +3360,7 @@ export default function OrdersPage() {
                 value={orderSearchQuery}
                 onChange={(e) => setOrderSearchQuery(e.target.value)}
                 placeholder="オーダー名・顧客名・エリア（区/市/駅）で検索..."
-                className="w-full h-9 pl-9 pr-8 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
+                className="w-full h-10 pl-9 pr-8 text-[13px] font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
               />
               {orderSearchQuery && (
                 <button
@@ -3264,6 +3371,49 @@ export default function OrdersPage() {
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
+            </div>
+
+            {/* View Mode Switcher (List | Map | Split) */}
+            <div className="flex items-center rounded-xl bg-slate-100 p-0.5 border border-slate-200 shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  viewMode === "list"
+                    ? "bg-white text-slate-900 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+                title="リスト表示"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>リスト</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("map")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  viewMode === "map"
+                    ? "bg-white text-emerald-800 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+                title="地図インテリジェンス全画面表示"
+              >
+                <Compass className="w-3.5 h-3.5 text-emerald-600" />
+                <span>地図分析</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("split")}
+                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  viewMode === "split"
+                    ? "bg-white text-slate-900 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+                title="リストと地図を並べて表示"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>分割</span>
+              </button>
             </div>
 
             {/* Sort & Bulk Toggle */}
@@ -3281,38 +3431,6 @@ export default function OrdersPage() {
                   <option value="nameAsc">オーダー名順</option>
                 </select>
               </div>
-
-              {/* Expand/Collapse All */}
-              {filteredOrders && filteredOrders.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const allExpanded = filteredOrders.every((o) =>
-                      expandedOrders.has(o._id),
-                    );
-                    if (allExpanded) {
-                      setExpandedOrders(new Set());
-                    } else {
-                      setExpandedOrders(
-                        new Set(filteredOrders.map((o) => o._id)),
-                      );
-                    }
-                  }}
-                  className="h-9 flex items-center gap-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors cursor-pointer select-none"
-                >
-                  {filteredOrders.every((o) => expandedOrders.has(o._id)) ? (
-                    <>
-                      <ChevronUp className="w-3.5 h-3.5" />
-                      折りたたむ
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="w-3.5 h-3.5" />
-                      すべて展開
-                    </>
-                  )}
-                </button>
-              )}
             </div>
           </div>
 
@@ -3354,7 +3472,7 @@ export default function OrdersPage() {
                   key={tab.key}
                   type="button"
                   onClick={() => setOrderStatusFilter(tab.key as any)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all cursor-pointer select-none ${
                     isActive
                       ? "bg-emerald-700 text-white shadow-xs"
                       : tab.highlight
@@ -3377,6 +3495,7 @@ export default function OrdersPage() {
             })}
           </div>
         </div>
+        )}
 
         {/* Live GitHub Actions run banner */}
         {activeRun && (orders ?? []).some(isMyRun) && (
@@ -3397,7 +3516,30 @@ export default function OrdersPage() {
           </div>
         )}
 
-        {filteredOrders === undefined ? (
+        {effectiveView === "map" ? (
+          <div className="rounded-2xl border border-[var(--border-subtle)] overflow-hidden shadow-sm">
+            <TokyoPropertyMap
+              listings={mapListings}
+              onViewInList={handleScrollToListing}
+              height="750px"
+            />
+          </div>
+        ) : (
+          <div
+            className={
+              effectiveView === "split"
+                ? "grid grid-cols-1 lg:grid-cols-12 gap-5 items-start"
+                : "space-y-4"
+            }
+          >
+            <div
+              className={
+                effectiveView === "split"
+                  ? "lg:col-span-6 space-y-4 max-h-[840px] overflow-y-auto pr-1"
+                  : "space-y-4"
+              }
+            >
+              {filteredOrders === undefined ? (
           <div className="space-y-3">
             {[1, 2].map((n) => (
               <Card key={n} className="p-6">
@@ -3413,16 +3555,29 @@ export default function OrdersPage() {
           <div className="empty-state p-12 text-center bg-white rounded-2xl border border-[var(--border-subtle)] space-y-3">
             <Search className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto" />
             <p className="text-sm font-bold text-[var(--text-secondary)]">
-              {orders && orders.length > 0
-                ? "条件に一致するオーダーが見つかりませんでした"
-                : "登録済みオーダーがありません"}
+              {isDetailView
+                ? "オーダーが見つかりませんでした"
+                : orders && orders.length > 0
+                  ? "条件に一致するオーダーが見つかりませんでした"
+                  : "登録済みオーダーがありません"}
             </p>
             <p className="text-xs text-[var(--text-muted)]">
-              {orders && orders.length > 0
-                ? "検索キーワードやステータスタブの絞り込みを変更してください。"
-                : "「新規オーダー作成」から希望条件を登録してください。"}
+              {isDetailView
+                ? "このオーダーは削除されたか、リンクが正しくありません。"
+                : orders && orders.length > 0
+                  ? "検索キーワードやステータスタブの絞り込みを変更してください。"
+                  : "「新規オーダー作成」から希望条件を登録してください。"}
             </p>
-            {orders && orders.length > 0 && (
+            {isDetailView ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate("/orders")}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                物件検索に戻る
+              </Button>
+            ) : orders && orders.length > 0 ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -3433,7 +3588,7 @@ export default function OrdersPage() {
               >
                 フィルターを解除
               </Button>
-            )}
+            ) : null}
           </div>
         ) : (
           filteredOrders.map((order) => {
@@ -3447,28 +3602,118 @@ export default function OrdersPage() {
             const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
               selectedForProposal.has(m._id),
             ).length;
-            const isCardExpanded = expandedOrders.has(order._id);
+            // In detail view the listings are the page, so they are always open.
+            const isCardExpanded = isDetailView;
+            const cardCustomer = customers?.find(
+              (c) => c._id === order.customerId,
+            );
+            const isScrapingNow =
+              order.isScraping ||
+              Boolean(order.scrapingStatus?.includes("検索中")) ||
+              isMyRun(order) ||
+              localRunOrderId === order._id;
+            const wardSummary = (
+              order.wards?.length
+                ? order.wards
+                : order.ward
+                  ? [order.ward]
+                  : []
+            ).join("・");
+            const fmtRange = (min?: number, max?: number, unit = "万円") =>
+              min && max
+                ? `${min.toLocaleString()}〜${max.toLocaleString()}${unit}`
+                : min
+                  ? `${min.toLocaleString()}${unit}〜`
+                  : max
+                    ? `〜${max.toLocaleString()}${unit}`
+                    : "指定なし";
+            const priceSummary =
+              order.dealType === "rent"
+                ? `賃料 ${fmtRange(order.rentMin, order.rentMax, "万円/月")}`
+                : `価格 ${fmtRange(order.priceMin, order.priceMax)}`;
+
+            // One row per order on the dashboard: reading order is
+            // name → who/where/how much → how many properties. Everything
+            // else lives on the order's own page.
+            if (!isDetailView) {
+              return (
+                <button
+                  key={order._id}
+                  type="button"
+                  onClick={() => navigate(`/orders/${order._id}`)}
+                  className="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)]"
+                >
+                  <span
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${
+                      isScrapingNow
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] text-[var(--text-muted)]"
+                    }`}
+                  >
+                    {isScrapingNow ? (
+                      <Loader2 className="h-[18px] w-[18px] animate-spin" />
+                    ) : (
+                      <Building2 className="h-[18px] w-[18px]" />
+                    )}
+                  </span>
+
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[15px] font-semibold leading-snug text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand)]">
+                        {order.name || `オーダー #${order._id.slice(0, 6)}`}
+                      </span>
+                      {isScrapingNow ? (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10.5px] font-bold text-emerald-800">
+                          検索中
+                        </span>
+                      ) : order.status === "completed" ? (
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-page-subtle)] px-2 py-0.5 text-[10.5px] font-bold text-[var(--text-secondary)]">
+                          完了
+                        </span>
+                      ) : null}
+                      {recentMatchesInOrder > 0 && (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10.5px] font-bold text-emerald-800">
+                          新着 {recentMatchesInOrder}件
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-1 block truncate text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                      {cardCustomer ? `${cardCustomer.name} ・ ` : ""}
+                      {wardSummary}
+                      {wardSummary ? " ・ " : ""}
+                      {priceSummary}
+                    </span>
+                  </span>
+
+                  <span className="hidden shrink-0 text-right sm:block">
+                    <span className="block font-mono text-[17px] leading-none text-[var(--text-primary)]">
+                      {matchCount}
+                      <span className="ml-1 text-[11px] font-normal text-[var(--text-muted)]">
+                        件
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-[10.5px] text-[var(--text-muted)]">
+                      マッチ物件
+                    </span>
+                  </span>
+
+                  <ChevronRight className="h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--brand)]" />
+                </button>
+              );
+            }
 
             return (
               <Card
                 key={order._id}
-                className="overflow-hidden hover:border-[var(--border-strong)] transition-all duration-150"
+                className="overflow-hidden"
               >
                 <CardHeader className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] p-5">
                   <div className="flex flex-col gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className="flex items-center justify-between gap-3 cursor-pointer group select-none py-0.5"
-                        onClick={() => toggleOrderExpanded(order._id)}
-                        title={isCardExpanded ? "クリックして物件一覧を折りたたむ" : "クリックして物件一覧を展開"}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <CardTitle className="group-hover:text-[var(--brand)] transition-colors flex items-center gap-2">
-                            <span className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform duration-200 text-[var(--text-muted)] group-hover:text-[var(--brand)] ${isCardExpanded ? "rotate-90 text-[var(--brand)]" : ""}`}>
-                              <ChevronRight className="w-4 h-4" />
-                            </span>
-                            <span>{order.name || `オーダー #${order._id.slice(0, 6)}`}</span>
-                          </CardTitle>
+                    <div className="min-w-0 flex-1 space-y-3">
+                      {/* Status first, then how many properties. The order's
+                          name and criteria are in the page header above, so
+                          they are not repeated here. */}
+                      <div className="flex flex-wrap items-center gap-2">
                           {(order.status === "completed" || matchCount === 0) && (
                             <button
                               onClick={async (e) => {
@@ -3506,8 +3751,8 @@ export default function OrdersPage() {
                             </Badge>
                           )}
                           {matchCount > 0 && (
-                            <Badge className="font-extrabold cursor-pointer">
-                              {matchCount} 件
+                            <Badge className="font-extrabold">
+                              マッチ {matchCount} 件
                             </Badge>
                           )}
                           {recentMatchesInOrder > 0 && (
@@ -3519,35 +3764,10 @@ export default function OrdersPage() {
                           {order.dealType === "rent" && (
                             <Badge variant="neutral">借りる</Badge>
                           )}
-
-                          {(() => {
-                            const customer = customers?.find(
-                              (c) => c._id === order.customerId,
-                            );
-                            if (!customer) return null;
-                            return (
-                              <Badge variant="neutral" className="gap-1">
-                                <Users className="w-3 h-3" />
-                                {customer.name}
-                                {customer.phone ? ` (${customer.phone})` : ""}
-                              </Badge>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Top-right collapse/expand indicator */}
-                        <div className="shrink-0 flex items-center gap-1.5 text-xs text-[var(--text-muted)] group-hover:text-[var(--brand)] font-semibold transition-colors">
-                          <span className="text-[11px] hidden sm:inline">
-                            {isCardExpanded ? "折りたたむ" : "展開する"}
-                          </span>
-                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] group-hover:border-[var(--brand-border)] transition-all ${isCardExpanded ? "rotate-180 text-[var(--brand)]" : ""}`}>
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </span>
-                        </div>
                       </div>
 
                       {/* Criteria Details */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-xs font-medium text-[var(--text-secondary)]">
+                      <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)]">
                         {(order.wards?.length
                           ? order.wards
                           : order.ward
@@ -3556,7 +3776,7 @@ export default function OrdersPage() {
                         ).map((w) => (
                           <span
                             key={w}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[11px] font-bold whitespace-nowrap"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--brand-soft)] text-[#14532d] text-[12px] font-bold whitespace-nowrap"
                           >
                             <MapPin className="w-3 h-3" />
                             {w}
@@ -3647,8 +3867,8 @@ export default function OrdersPage() {
                           this the listings on the card carry no date at all, so
                           there was no way to tell today's results from a sweep
                           run weeks ago. */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px] font-semibold text-[var(--text-muted)]">
-                        <Clock className="w-3 h-3" />
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[12px] font-semibold text-[var(--text-muted)]">
+                        <Clock className="w-3.5 h-3.5" />
                         {order.lastScrapeAt ? (
                           <span>
                             最終検索:{" "}
@@ -3820,8 +4040,14 @@ export default function OrdersPage() {
                             </div>
                           ) : null}
 
+                          {/* Property actions get their own line. They apply to
+                              whatever is ticked in the list below, so they must
+                              not look like siblings of 手動検索. */}
                           {matchCount > 0 && (
-                            <>
+                            <div className="order-last flex basis-full flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
+                              <span className="mr-1 font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                物件への操作
+                              </span>
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -3981,7 +4207,7 @@ export default function OrdersPage() {
                                 {selectedCountForOrder > 0 &&
                                   ` (${selectedCountForOrder})`}
                               </Button>
-                            </>
+                            </div>
                           )}
                         </>
                       )}
@@ -4058,8 +4284,11 @@ export default function OrdersPage() {
                       <>
                         <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
                       <div className="min-w-0 space-y-2">
-                        <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                          抽出物件一覧 ({matchCount}件)
+                        <div className="text-[14px] font-bold text-[var(--text-primary)]">
+                          物件一覧
+                          <span className="ml-2 font-mono text-[12px] font-normal text-[var(--text-muted)]">
+                            {matchCount}件
+                          </span>
                         </div>
 
                         {/* Quick filters, with live counts. Built from these
@@ -4094,7 +4323,7 @@ export default function OrdersPage() {
                                         [order._id]: 1,
                                       }));
                                     }}
-                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    className={`px-3 py-1.5 rounded-lg text-[12px] font-bold border transition-all ${
                                       isActive
                                         ? "bg-emerald-700 text-white border-emerald-700 shadow-xs"
                                         : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
@@ -4114,7 +4343,7 @@ export default function OrdersPage() {
                         })()}
                       </div>
 
-                      <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--text-muted)]">
+                      <label className="flex items-center gap-2 text-[12px] font-bold text-[var(--text-muted)]">
                         並び順
                         <select
                           value={sortKey[order._id] || "newest"}
@@ -4130,7 +4359,7 @@ export default function OrdersPage() {
                               [order._id]: 1,
                             }));
                           }}
-                          className="h-8 px-2 bg-white text-slate-800 text-xs font-bold rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
+                          className="h-9 px-2 bg-white text-slate-800 text-[12.5px] font-bold rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
                         >
                           {SORT_OPTIONS.map((o) => (
                             <option key={o.key} value={o.key}>
@@ -4248,10 +4477,17 @@ export default function OrdersPage() {
                                   : undefined
                                 : undefined);
 
+                            const listingCoords = listing ? resolveListingCoordinates(listing) : null;
+                            const listingHazard = listingCoords && listing
+                              ? assessPropertyHazard(listingCoords, listing.ward, listing.address)
+                              : null;
+
                             return (
                               <div
                                 key={m._id}
-                                className={`border rounded-2xl overflow-hidden transition-all duration-200 shadow-xs ${
+                                id={`listing-row-${m.listingId}`}
+                                data-listing-id={m.listingId}
+                                className={`scroll-mt-24 border rounded-2xl overflow-hidden transition-all duration-300 shadow-xs ${
                                   selectedForProposal.has(m._id)
                                     ? "border-emerald-300 bg-emerald-50/60 ring-2 ring-emerald-500/20"
                                     : "border-[var(--border-subtle)] bg-white hover:border-[var(--border-strong)] hover:shadow-sm"
@@ -4334,6 +4570,46 @@ export default function OrdersPage() {
                                         "—"}
                                     </span>
 
+                                    {/* Quick Hazard Map Inspection Badge & Hint */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setHazardModalListing(
+                                          listing
+                                            ? { ...listing, _id: m.listingId }
+                                            : null,
+                                        );
+                                      }}
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer shadow-2xs shrink-0 select-none ${
+                                        listingHazard?.overallRisk === "high"
+                                          ? "bg-rose-50 text-rose-700 border-rose-200/90 hover:bg-rose-100 hover:border-rose-300"
+                                          : listingHazard?.overallRisk === "medium"
+                                            ? "bg-amber-50 text-amber-800 border-amber-200/90 hover:bg-amber-100 hover:border-amber-300"
+                                            : "bg-emerald-50 text-emerald-800 border-emerald-200/90 hover:bg-emerald-100 hover:border-emerald-300"
+                                      }`}
+                                      title={
+                                        listingHazard
+                                          ? `【${listingHazard.overallRisk === "high" ? "高浸水警戒" : listingHazard.overallRisk === "medium" ? "浸水要確認" : "良好地盤"}】${listingHazard.riskLabel}: ${listingHazard.riskDescription}（クリックでハザードマップを開く）`
+                                          : "この物件のハザードマップ（浸水・地盤リスク）を確認"
+                                      }
+                                    >
+                                      {listingHazard?.overallRisk === "high" ? (
+                                        <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                      ) : listingHazard?.overallRisk === "medium" ? (
+                                        <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                      ) : (
+                                        <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                      )}
+                                      <span>
+                                        {listingHazard?.overallRisk === "high"
+                                          ? "高浸水警戒"
+                                          : listingHazard?.overallRisk === "medium"
+                                            ? "浸水要確認"
+                                            : "良好地盤"}
+                                      </span>
+                                    </button>
+
                                     {/* Source Portal Tag */}
                                     {listing?.source === "email" ? (
                                       <span title={listing.emailFrom || "メールで届いた物件紹介"}>
@@ -4391,51 +4667,29 @@ export default function OrdersPage() {
                                       )
                                     )}
 
-                                    {/* Property Type Tag */}
-                                    {listing?.propertyType && (
-                                      <Badge
-                                        variant="neutral"
-                                        className="text-[10px] shrink-0"
-                                      >
-                                        {listing.propertyType}
-                                      </Badge>
-                                    )}
-
                                     {/* The portal's own 新着 badge. Kept separate from
                                     掲載日: 東急リバブル・みずほ・東京建物 show this
                                     badge but never publish a date. */}
-                                    {listing?.isNew && (
-                                      <Badge className="text-[10px] shrink-0 bg-rose-100 text-rose-900 border border-rose-200 font-black">
+                                    {/* Property type and the portal's own 新着 flag
+                                        are in the row's subtitle line now — a row
+                                        with six coloured badges was unreadable. */}
+
+                                    {/* One 新着 badge: today's match OR the portal's
+                                        own flag. Two badges said the same thing. */}
+                                    {(listing?.isNew ||
+                                      (m._creationTime &&
+                                        Date.now() - m._creationTime <=
+                                          24 * 60 * 60 * 1000)) && (
+                                      <Badge className="text-[10px] shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-extrabold shadow-2xs gap-1 py-0.5 px-2">
+                                        <Sparkles className="w-2.5 h-2.5 animate-pulse" />
                                         新着
                                       </Badge>
                                     )}
 
-                                    {/* Recent match badge (found in last 24h) */}
-                                    {m._creationTime &&
-                                      Date.now() - m._creationTime <=
-                                        24 * 60 * 60 * 1000 && (
-                                        <Badge className="text-[10px] shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-extrabold shadow-2xs gap-1 py-0.5 px-2">
-                                          <Sparkles className="w-2.5 h-2.5 animate-pulse" />
-                                          本日の新着
-                                        </Badge>
-                                      )}
-
                                     {/* Prominent Score Badge on Item Header BEFORE Expanding */}
                                     {extractedScore !== undefined && (
                                       <span
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          const current = extractedScore;
-                                          const next =
-                                            current >= 100
-                                              ? 0
-                                              : (current || 0) + 10;
-                                          saveScore({
-                                            matchId: m._id,
-                                            score: next,
-                                          });
-                                        }}
-                                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black border shrink-0 transition-all ${
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black border shrink-0 ${
                                           extractedScore >= 80
                                             ? "bg-emerald-100 text-emerald-900 border-emerald-300 shadow-xs"
                                             : extractedScore >= 60
@@ -4444,7 +4698,7 @@ export default function OrdersPage() {
                                                 ? "bg-amber-100 text-amber-900 border-amber-300 shadow-xs"
                                                 : "bg-red-100 text-red-900 border-red-300 shadow-xs"
                                         }`}
-                                        title="クリックでスコア変更"
+                                        title="AI評価スコア"
                                       >
                                         評価 {extractedScore}点
                                       </span>
@@ -4778,6 +5032,48 @@ export default function OrdersPage() {
                                           <ArrowUpRight className="w-3.5 h-3.5" />
                                         </a>
                                       )}
+
+                                      {/* Detailed Hazard Map Inspection Button with dynamic risk hint */}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setHazardModalListing(
+                                            listing
+                                              ? { ...listing, _id: m.listingId }
+                                              : null,
+                                          )
+                                        }
+                                        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-2xs border ${
+                                          listingHazard?.overallRisk === "high"
+                                            ? "bg-rose-50 text-rose-950 border-rose-300 hover:bg-rose-100"
+                                            : listingHazard?.overallRisk === "medium"
+                                              ? "bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100"
+                                              : "bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100"
+                                        }`}
+                                        title={`${listingHazard?.riskLabel || "ハザードマップ"}（${listingHazard?.groundType || "地盤"}）: ${listingHazard?.riskDescription || "国土地理院・東京都ハザードマップで浸水深・地盤構造を確認"}`}
+                                      >
+                                        {listingHazard?.overallRisk === "high" ? (
+                                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                                        ) : listingHazard?.overallRisk === "medium" ? (
+                                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                        ) : (
+                                          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                                        )}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span>ハザードマップ確認</span>
+                                          <span
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-tight ${
+                                              listingHazard?.overallRisk === "high"
+                                                ? "bg-rose-200/90 text-rose-900"
+                                                : listingHazard?.overallRisk === "medium"
+                                                  ? "bg-amber-200/90 text-amber-900"
+                                                  : "bg-emerald-200/90 text-emerald-900"
+                                            }`}
+                                          >
+                                            {listingHazard?.riskLabel || "浸水・地盤確認"}
+                                          </span>
+                                        </div>
+                                      </button>
                                     </div>
 
                                     {/* Email Source Details & PDF Attachments */}
@@ -4818,9 +5114,56 @@ export default function OrdersPage() {
                                                 : "再評価"}
                                             </Button>
                                           </div>
-                                          <div className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed font-sans">
+                                          {/* The AI report is the densest text
+                                              in the product; give it a
+                                              comfortable measure and leading. */}
+                                          <div className="max-w-[80ch] text-[13.5px] leading-[1.9] text-slate-700 whitespace-pre-wrap font-sans">
                                             {hasEvaluation}
                                           </div>
+
+                                          {/* Hazard Assessment Summary Card if evaluated */}
+                                          {(scoreDetail?.hazardRisk || scoreDetail?.hazardLabel) && (
+                                            <div
+                                              className={`mt-2 rounded-lg border p-2.5 flex items-start gap-2.5 text-xs ${
+                                                scoreDetail.hazardRisk === "high"
+                                                  ? "bg-rose-50/70 border-rose-200 text-rose-900"
+                                                  : scoreDetail.hazardRisk === "medium"
+                                                    ? "bg-amber-50/70 border-amber-200 text-amber-900"
+                                                    : "bg-emerald-50/70 border-emerald-200 text-emerald-900"
+                                              }`}
+                                            >
+                                              {scoreDetail.hazardRisk === "high" ? (
+                                                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                                              ) : scoreDetail.hazardRisk === "medium" ? (
+                                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                                              ) : (
+                                                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                                              )}
+                                              <div className="space-y-0.5 min-w-0">
+                                                <div className="font-bold flex items-center gap-1.5 flex-wrap text-[11px]">
+                                                  <span>
+                                                    ハザード診断:{" "}
+                                                    {(scoreDetail.hazardLabel as string) ||
+                                                      (scoreDetail.hazardRisk === "high"
+                                                        ? "高浸水警戒"
+                                                        : scoreDetail.hazardRisk === "medium"
+                                                          ? "浸水要確認"
+                                                          : "良好地盤")}
+                                                  </span>
+                                                  {Boolean(scoreDetail.groundType) && (
+                                                    <span className="text-[10px] font-normal opacity-85">
+                                                      （{scoreDetail.groundType as string}）
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                {Boolean(scoreDetail.hazardDescription) && (
+                                                  <p className="text-[10px] leading-relaxed opacity-90">
+                                                    {scoreDetail.hazardDescription as string}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
 
                                           {scoreDetail?.comparables &&
                                             scoreDetail.comparables.length >
@@ -4906,7 +5249,7 @@ export default function OrdersPage() {
                                           size="sm"
                                           className="w-full h-10 text-xs font-bold gap-2 border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
                                           onClick={() =>
-                                            handleEvaluate(m._id, listing)
+                                            handleEvaluate(m._id, listing, order)
                                           }
                                           disabled={evaluatingId === m._id}
                                         >
@@ -5076,28 +5419,22 @@ export default function OrdersPage() {
                   )}
                   </CardContent>
                 )}
-
-                {/* Bottom accordion toggle */}
-                <button
-                  type="button"
-                  onClick={() => toggleOrderExpanded(order._id)}
-                  className="w-full flex items-center justify-center gap-1.5 py-3 text-xs font-bold text-[var(--brand)] hover:bg-[var(--brand-soft)] border-t border-[var(--border-subtle)] transition-colors cursor-pointer select-none"
-                >
-                  {isCardExpanded ? (
-                    <>
-                      <ChevronUp className="w-4 h-4" />
-                      物件一覧を閉じる
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="w-4 h-4" />
-                      物件一覧を表示 ({matchCount}件) — クリックして展開
-                    </>
-                  )}
-                </button>
               </Card>
             );
           })
+        )}
+            </div>
+
+            {effectiveView === "split" && (
+              <div className="lg:col-span-6 sticky top-4">
+                <TokyoPropertyMap
+                  listings={mapListings}
+                  onViewInList={handleScrollToListing}
+                  height="840px"
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
       {proposalOrder && (
@@ -5137,13 +5474,6 @@ export default function OrdersPage() {
           onClose={() => setComparisonListings(null)}
           listings={comparisonListings}
           orderName={comparisonListings[0]?.orderName}
-          onOpenLineProposal={(items) => {
-            setLineProposalListings(items);
-            const foundOrder = orders?.find(
-              (o) => o.name === items[0]?.orderName,
-            );
-            if (foundOrder) setLineProposalOrder(foundOrder);
-          }}
         />
       )}
 
@@ -5163,6 +5493,31 @@ export default function OrdersPage() {
             customers?.find((c) => c._id === lineProposalOrder?.customerId)
               ?.name
           }
+        />
+      )}
+
+      {/* Property Hazard Intelligence & Flood Risk Modal */}
+      {hazardModalListing && (
+        <PropertyHazardModal
+          isOpen={Boolean(hazardModalListing)}
+          onClose={() => setHazardModalListing(null)}
+          listing={hazardModalListing}
+          onOpenMapPage={(l) => {
+            setHazardModalListing(null);
+            // The old handler scrolled the list and flashed a green border but
+            // never showed a map. This opens the real map-analysis page with
+            // the property already selected. The listing travels in router
+            // state as well as the id: the map page loads only a slice of all
+            // listings, and an id it cannot find used to mean "nothing happens".
+            const id = l?._id || l?.id;
+            if (!id) {
+              navigate("/map");
+              return;
+            }
+            navigate(`/map?focus=${encodeURIComponent(id)}`, {
+              state: { focusListing: l },
+            });
+          }}
         />
       )}
 

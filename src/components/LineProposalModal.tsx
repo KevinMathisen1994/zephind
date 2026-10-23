@@ -32,7 +32,6 @@ export function LineProposalModal({
   const [intro, setIntro] = useState(
     "いつも大変お世話になっております。ご希望条件にマッチする最新の注目物件が入荷いたしましたので、早速ご案内いたします！",
   );
-  const [includeUrl, setIncludeUrl] = useState(true);
 
   // Generate LINE formatted copy
   const lineText = useMemo(() => {
@@ -78,9 +77,8 @@ export function LineProposalModal({
       if (item.score !== undefined) {
         lines.push(`⭐ AI適合スコア: ${item.score}点 / 100点`);
       }
-      if (includeUrl && l.url) {
-        lines.push(`🔗 物件詳細・写真: ${l.url}`);
-      }
+      // No source URLs in client messages — ever. Brokers keep the introduction
+      // in their own hands, so the link is never included here.
       lines.push("");
     });
 
@@ -92,7 +90,7 @@ export function LineProposalModal({
     );
 
     return lines.join("\n");
-  }, [greeting, intro, listings, includeUrl]);
+  }, [greeting, intro, listings]);
 
   if (!isOpen || listings.length === 0) return null;
 
@@ -166,16 +164,6 @@ export function LineProposalModal({
                   className="w-full p-2.5 text-xs font-medium rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-600 leading-relaxed resize-none"
                 />
               </div>
-
-              <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-slate-700 pt-1">
-                <input
-                  type="checkbox"
-                  checked={includeUrl}
-                  onChange={(e) => setIncludeUrl(e.target.checked)}
-                  className="w-4 h-4 accent-emerald-600 cursor-pointer"
-                />
-                物件詳細のURLリンクを含める
-              </label>
             </div>
 
             {/* Included Properties Pill List */}

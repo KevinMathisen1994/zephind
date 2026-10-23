@@ -492,11 +492,25 @@ ${
     amenityCount: nearbyTotalCount,
     comparables,
     dataWarnings,
+    hazardRisk: args.hazardRisk,
+    hazardLabel: args.hazardLabel,
+    hazardDescription: args.hazardDescription,
+    groundType: args.groundType,
     priceDropped: args.priceDropped,
     previousPrice: args.previousPrice,
     initialPrice: args.initialPrice,
     priceDropPct: args.priceDropPct,
   };
+
+  const hazardSummary = args.hazardRisk
+    ? `\n\n【ハザード・地盤診断（国土地理院・東京都ハザードマップ連動）】\n・判定リスク: ${
+        args.hazardRisk === "high"
+          ? "🚨 高浸水・土砂災害警戒区域（大雨・河川氾濫時の床上浸水・孤立リスク大）"
+          : args.hazardRisk === "medium"
+            ? "⚠️ 浸水・液状化要確認区域（谷底低地・湾岸部・内水浸水リスクに留意）"
+            : "🛡 良好地盤・水害低リスク（武蔵野台地等、水害耐性・地盤支持力良好）"
+      }\n・警戒区分: ${args.hazardLabel || "標準地盤"}\n・推定地盤構造: ${args.groundType || "強固地盤"}\n・地盤・災害留意事項: ${args.hazardDescription || ""} ${args.groundDescription ? `（${args.groundDescription}）` : ""}`
+    : "";
 
   return {
     matchId: args.matchId as string | undefined,
@@ -504,7 +518,7 @@ ${
     scoreDetail,
     assessment,
     orderSummary,
-    listingSection: `${propertySummary}${nearbyInfo}${historicalInfo}\n\n${verdictBrief}`,
+    listingSection: `${propertySummary}${hazardSummary}${nearbyInfo}${historicalInfo}\n\n${verdictBrief}`,
   };
 }
 
@@ -597,7 +611,7 @@ ${sections.join("\n\n")}
         { role: "user", content: fullPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 2500 * items.length,
+      max_tokens: Math.min(4096, 2000 * items.length),
       stream: false,
     });
 

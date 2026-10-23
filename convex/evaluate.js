@@ -73,6 +73,13 @@ export const evaluateListing = action({
     keyMoney: v.optional(v.number()),
     petsAllowed: v.optional(v.boolean()),
 
+    // Hazard & Ground Intelligence (国土地理院・東京都ハザードマップ診断)
+    hazardRisk: v.optional(v.string()), // "safe" | "medium" | "high"
+    hazardLabel: v.optional(v.string()),
+    hazardDescription: v.optional(v.string()),
+    groundType: v.optional(v.string()),
+    groundDescription: v.optional(v.string()),
+
     // Order Criteria (Buyer/Tenant Requirements)
     orderCriteria: v.optional(
       v.object({
@@ -459,14 +466,31 @@ ${
         : "【要確認事項】特になし",
     ].join("\n\n");
 
-    // 6. Construct Professional AI Broker Prompt
+    // 6. Construct Hazard & Disaster Intelligence Summary
+    const hazardSummary = args.hazardRisk
+      ? `
+【ハザード・地盤診断（国土地理院・東京都ハザードマップ連動）】
+・判定リスク: ${
+          args.hazardRisk === "high"
+            ? "🚨 高浸水・土砂災害警戒区域（大雨・河川氾濫時の床上浸水・孤立リスク大）"
+            : args.hazardRisk === "medium"
+              ? "⚠️ 浸水・液状化要確認区域（谷底低地・湾岸部・内水浸水リスクに留意）"
+              : "🛡 良好地盤・水害低リスク（武蔵野台地等、水害耐性・地盤支持力良好）"
+        }
+・警戒区分: ${args.hazardLabel || "標準地盤"}
+・推定地盤構造: ${args.groundType || "強固地盤"}
+・地盤・災害留意事項: ${args.hazardDescription || ""} ${args.groundDescription ? `（${args.groundDescription}）` : ""}`.trim()
+      : "";
+
+    // 7. Construct Professional AI Broker Prompt
     const fullPrompt = `
 あなたは東京の不動産投資ファンドおよび大手売買仲介のトップブローカー（査定責任者）です。
-以下の【顧客の購入ニーズ】、【物件概要】、【周辺インフラ環境】、【国土交通省の成約相場データ】を精密に比較対照し、プロの投資判断および顧客提案用の評価レポートを作成してください。
+以下の【顧客の購入ニーズ】、【物件概要】、【周辺インフラ環境】、【国土交通省の成約相場データ】、および【ハザード・地盤診断】を精密に比較対照し、プロの投資判断および顧客提案用の評価レポートを作成してください。
 
 ${orderSummary}
 
 ${propertySummary}
+${hazardSummary ? `\n\n${hazardSummary}` : ""}
 ${nearbyInfo}
 ${historicalInfo}
 
@@ -479,13 +503,13 @@ ${verdictBrief}
 （顧客の希望条件「価格、利回り、エリア、駅徒歩、道路幅員、構造、階数、こだわり等」に対する当物件の合致状況を明記）
 
 ② 物件の強み・投資メリット
-（立地、資産性、周辺環境、収益性、将来の出口戦略など）
+（立地、資産性、地盤・防災安定性（強固台地・水害低リスク等の場合は強みとして言及）、周辺環境、収益性、将来の出口戦略など）
 
 ③ 留意点・主要リスク
-（道路条件、耐震・築年数、法令制限、設備・管理面などの検討事項）
+（道路条件、耐震・築年数、法令制限、設備・管理面、および【ハザードマップ・地盤リスク（浸水深・液状化・1階居住部や受変電設備への影響）】を必ず検証して具体的に記述）
 
 ④ プロの総合アドバイス・提案方針
-（買主顧客へ提示する際のポイントや交渉戦略のまとめ）
+（買主顧客へ提示する際のポイントや交渉戦略、防災面・ハザード対策を踏まえた提案方針のまとめ）
 
 ※ 採点は既に確定しています。点数を自分で計算・変更・出力しないでください。
 ※ 上記【確定スコア】${score}点と矛盾しない論調で記述してください（低評価なら明確に低評価として、率直に書くこと）。
@@ -507,6 +531,10 @@ ${verdictBrief}
       disqualifiers: assessment.disqualifiers,
       unverified: assessment.unverified,
       breakdown: assessment.breakdown,
+      hazardRisk: args.hazardRisk,
+      hazardLabel: args.hazardLabel,
+      hazardDescription: args.hazardDescription,
+      groundType: args.groundType,
       marketAvgPrice,
       marketAvgPricePerSqm,
       listingPricePerSqm,

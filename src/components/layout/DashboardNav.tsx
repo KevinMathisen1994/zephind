@@ -9,10 +9,12 @@ import {
   Handshake,
   LogOut,
   Star,
+  Compass,
 } from "lucide-react";
 
 const navItems = [
   { to: "/orders",    label: "物件検索",       desc: "条件登録と自動マッチング", icon: FileCheck2 },
+  { to: "/map",       label: "地図分析",       desc: "東京広域・水害ハザード",   icon: Compass },
   { to: "/saved",     label: "保存物件",       desc: "検討中のお気に入り",       icon: Star },
   { to: "/customers", label: "顧客管理",       desc: "買主プロファイル",           icon: Users },
   { to: "/deals",     label: "案件・提案管理", desc: "提案履歴と成約進捗",         icon: Handshake },

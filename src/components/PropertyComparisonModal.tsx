@@ -1,9 +1,6 @@
-import { useState } from "react";
 import {
   X,
   Sparkles,
-  Check,
-  Copy,
   Award,
   Building2,
   Train,
@@ -12,7 +9,6 @@ import {
   Layers,
   MapPin,
   ExternalLink,
-  Zap,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -32,7 +28,6 @@ interface PropertyComparisonModalProps {
   onClose: () => void;
   listings: ComparisonListing[];
   orderName?: string;
-  onOpenLineProposal?: (selectedMatches: ComparisonListing[]) => void;
 }
 
 export function PropertyComparisonModal({
@@ -40,10 +35,7 @@ export function PropertyComparisonModal({
   onClose,
   listings,
   orderName,
-  onOpenLineProposal,
 }: PropertyComparisonModalProps) {
-  const [copied, setCopied] = useState(false);
-
   if (!isOpen || listings.length === 0) return null;
 
   // Calculate comparative analytics
@@ -64,104 +56,38 @@ export function PropertyComparisonModal({
   const validPpsm = ppsmList.filter((p): p is number => p !== null);
   const bestPpsm = validPpsm.length > 0 ? Math.min(...validPpsm) : null;
 
-  const handleCopySummary = () => {
-    const lines: string[] = [
-      `【AI 物件比較サマリー】${orderName ? `（${orderName} 様向け）` : ""}`,
-      "------------------------------------------",
-    ];
-
-    listings.forEach((item, idx) => {
-      const l = item.listing;
-      const area = l.area || l.landSize || 0;
-      const ppsm =
-        area > 0 && l.price ? Math.round((l.price / area) * 10) / 10 : null;
-      lines.push(
-        `■ 物件${idx + 1}: ${l.title || l.address || "非公開物件"}`,
-        `・価格: ${l.price ? `${l.price.toLocaleString()}万円` : "未定"}${
-          ppsm ? ` (平米単価: ${ppsm}万円/㎡)` : ""
-        }`,
-        `・利回り: ${l.yield || l.grossYield ? `${l.yield || l.grossYield}%` : "—"}`,
-        `・所在地: ${l.address || l.ward || "—"}`,
-        `・最寄駅: ${l.station || "—"}${l.walkMinutes !== undefined ? ` 徒歩${l.walkMinutes}分` : ""}`,
-        `・専有/敷地面積: ${area ? `${area}㎡` : "—"}`,
-        `・築年月: ${l.buildYear ? `${l.buildYear}年` : "—"} / 構造: ${l.structure || l.buildingStructure || "—"}`,
-        `・AI総合スコア: ${item.score !== undefined ? `${item.score}点` : "未評価"}`,
-        `・詳細URL: ${l.url || "—"}`,
-        "",
-      );
-    });
-
-    lines.push(
-      "------------------------------------------",
-      "【AI 投資判断・比較総括】",
-      `・利回り最優先なら: ${
-        bestYield > 0
-          ? `物件${listings.findIndex((l) => (l.listing.yield || l.listing.grossYield || 0) === bestYield) + 1} (${bestYield}%)`
-          : "—"
-      }`,
-      `・割安感・資産性なら: ${
-        bestPpsm !== null
-          ? `物件${ppsmList.indexOf(bestPpsm) + 1} (平米単価 ${Math.round(bestPpsm * 10) / 10}万円/㎡)`
-          : "—"
-      }`,
-      `・駅チカ・賃貸需要なら: ${
-        bestWalk < 999
-          ? `物件${listings.findIndex((l) => l.listing.walkMinutes === bestWalk) + 1} (徒歩${bestWalk}分)`
-          : "—"
-      }`,
-    );
-
-    navigator.clipboard.writeText(lines.join("\n"));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-6xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-linear-to-r from-slate-900 via-slate-800 to-slate-900 text-white">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="relative w-full max-w-6xl max-h-[92vh] flex flex-col rounded-2xl bg-[var(--bg-surface)] shadow-2xl border border-[var(--border-subtle)] overflow-hidden">
+        {/* Header — light paper, same masthead language as the rest of the app */}
+        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-page-subtle)]">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 shrink-0 rounded-xl border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand)]">
               <Sparkles className="w-5 h-5" />
             </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black tracking-tight">
-                  AI 物件比較マトリクス
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base sm:text-lg font-bold tracking-tight text-[var(--text-primary)]">
+                  物件の比較
                 </h2>
-                <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-black">
-                  {listings.length}物件 比較中
+                <Badge variant="neutral" className="text-[10px] font-bold">
+                  {listings.length}件を比較中
                 </Badge>
               </div>
-              <p className="text-xs text-slate-300 mt-0.5">
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
                 {orderName ? `「${orderName}」の希望条件に沿った` : ""}
-                投資採算・相場乖離・立地利便性の横断対比
+                利回り・相場との差・駅からの距離を並べて比べます
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {onOpenLineProposal && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  onClose();
-                  onOpenLineProposal(listings);
-                }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs"
-              >
-                <Zap className="w-3.5 h-3.5 mr-1" />
-                LINE提案文を作成
-              </Button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 shrink-0 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
+            aria-label="閉じる"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Scrollable Content */}
@@ -170,8 +96,8 @@ export function PropertyComparisonModal({
           <div className="rounded-xl border border-emerald-200 bg-linear-to-br from-emerald-50/80 via-white to-emerald-50/50 p-4 shadow-2xs">
             <div className="flex items-center gap-2 mb-3">
               <Award className="w-4 h-4 text-emerald-700" />
-              <span className="text-xs font-black text-emerald-950 uppercase tracking-wider">
-                AI 総合比較判定 & カテゴリ別おすすめ
+              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
+                AIによる比較判定とおすすめ
               </span>
             </div>
 
@@ -179,10 +105,7 @@ export function PropertyComparisonModal({
               {/* Best Yield */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
                 <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
-                  <span>💰 インカムゲイン（最高利回り）</span>
-                  <Badge variant="neutral" className="text-[9px]">
-                    CASH FLOW
-                  </Badge>
+                  <span>利回りが最も高い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
                   {bestYield > 0 ? (
@@ -207,7 +130,7 @@ export function PropertyComparisonModal({
                         (l) =>
                           (l.listing.yield || l.listing.grossYield || 0) ===
                           bestYield,
-                      )?.listing.title || "利回り重視の買い手向け"
+                      )?.listing.title || "利回りを重視する方向け"
                     : "—"}
                 </div>
               </div>
@@ -215,10 +138,7 @@ export function PropertyComparisonModal({
               {/* Best Value / Ppsm */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
                 <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
-                  <span>💎 資産性・割安感（最安平米単価）</span>
-                  <Badge variant="neutral" className="text-[9px]">
-                    VALUE
-                  </Badge>
+                  <span>平米単価が最も安い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
                   {bestPpsm !== null ? (
@@ -235,7 +155,7 @@ export function PropertyComparisonModal({
                 <div className="text-[10px] text-slate-500 mt-0.5 truncate">
                   {bestPpsm !== null
                     ? listings[ppsmList.indexOf(bestPpsm)]?.listing.title ||
-                      "購入時含み益・割安ディール"
+                      "割安に購入できる可能性がある物件"
                     : "—"}
                 </div>
               </div>
@@ -243,10 +163,7 @@ export function PropertyComparisonModal({
               {/* Best Location */}
               <div className="p-3 rounded-lg bg-white border border-emerald-100 shadow-2xs">
                 <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between">
-                  <span>🚉 立地・賃貸需要（最寄駅チカ）</span>
-                  <Badge variant="neutral" className="text-[9px]">
-                    DEMAND
-                  </Badge>
+                  <span>駅に最も近い物件</span>
                 </div>
                 <div className="text-sm font-black text-emerald-800 mt-1">
                   {bestWalk < 999 ? (
@@ -265,7 +182,7 @@ export function PropertyComparisonModal({
                 </div>
                 <div className="text-[10px] text-slate-500 mt-0.5 truncate">
                   {bestWalk < 999
-                    ? `${listings.find((l) => l.listing.walkMinutes === bestWalk)?.listing.station || "最寄駅"} 徒歩至近で空室リスク極小`
+                    ? `${listings.find((l) => l.listing.walkMinutes === bestWalk)?.listing.station || "最寄駅"} 徒歩至近で空室リスクが低い`
                     : "—"}
                 </div>
               </div>
@@ -309,7 +226,7 @@ export function PropertyComparisonModal({
                     {/* Card Top Banner */}
                     <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-md bg-slate-900 text-white text-xs font-black">
+                        <span className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] text-xs font-bold">
                           {idx + 1}
                         </span>
                         <span className="text-xs font-bold text-slate-700">
@@ -349,8 +266,8 @@ export function PropertyComparisonModal({
                       )}
                       <div className="absolute top-2 left-2 flex flex-wrap gap-1">
                         {l.source && (
-                          <Badge className="bg-slate-900/80 backdrop-blur-xs text-white text-[9px] uppercase font-bold">
-                            {l.source}
+                          <Badge className="border border-[var(--border-subtle)] bg-white/90 text-slate-700 backdrop-blur-xs text-[9px] font-bold">
+                            {l.source === "email" ? "メール" : l.source}
                           </Badge>
                         )}
                         {l.propertyType && (
@@ -538,39 +455,10 @@ export function PropertyComparisonModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
-          <div className="text-xs text-slate-500 font-medium">
-            全{listings.length}件の比較サマリーをクリップボードにコピーしてクライアントへのチャット・提案書に活用できます。
-          </div>
-
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCopySummary}
-              className="flex-1 sm:flex-initial"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-600 mr-1.5" />
-                  コピー完了！
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5 mr-1.5" />
-                  比較サマリーをコピー
-                </>
-              )}
-            </Button>
-
-            <Button
-              size="sm"
-              onClick={onClose}
-              className="bg-slate-900 hover:bg-slate-800 text-white"
-            >
-              閉じる
-            </Button>
-          </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-subtle)] bg-[var(--bg-page-subtle)]">
+          <Button size="sm" onClick={onClose}>
+            閉じる
+          </Button>
         </div>
       </div>
     </div>

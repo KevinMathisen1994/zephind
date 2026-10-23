@@ -6,6 +6,7 @@ import OrdersPage from "./pages/Orders";
 import CustomersPage from "./pages/Customers";
 import DealsPage from "./pages/Deals";
 import SavedListingsPage from "./pages/SavedListings";
+import MapIntelligencePage from "./pages/MapIntelligence";
 import { isClerkEnabled } from "./Providers";
 import { AuthErrorBoundary } from "./components/AuthErrorBoundary";
 
@@ -15,6 +16,10 @@ function AppRoutes() {
       <Route element={<DashboardLayout />}>
         <Route path="/" element={<Navigate to="/orders" replace />} />
         <Route path="/orders" element={<OrdersPage />} />
+        {/* One order, one page. The list used to expand listings inline, which
+            buried the page under 500-row accordions. */}
+        <Route path="/orders/:orderId" element={<OrdersPage />} />
+        <Route path="/map" element={<MapIntelligencePage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/deals" element={<DealsPage />} />
         <Route path="/saved" element={<SavedListingsPage />} />

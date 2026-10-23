@@ -571,6 +571,45 @@ export function computeMatchScore(listing = {}, criteria = {}, ctx = {}) {
     }
   }
 
+  // Disaster / Hazard Safety modifier:
+  // Flood inundation depth and ground stability directly affect asset preservation,
+  // insurance premiums, building longevity, and vacancy risk during extreme weather.
+  if (listing.hazardRisk) {
+    if (listing.hazardRisk === "safe") {
+      market.push({
+        key: "hazardSafety",
+        weight: 10,
+        score: 1.0,
+        label: listing.hazardLabel || "良好地盤・低水害リスク",
+      });
+    } else if (listing.hazardRisk === "medium") {
+      market.push({
+        key: "hazardSafety",
+        weight: 10,
+        score: 0.6,
+        label: listing.hazardLabel || "浸水・地盤要確認",
+      });
+    } else if (listing.hazardRisk === "high") {
+      market.push({
+        key: "hazardSafety",
+        weight: 10,
+        score: 0.2,
+        label: listing.hazardLabel || "高浸水・土砂災害警戒",
+      });
+      unverified.push(
+        `【ハザード高警戒】${listing.hazardLabel || "浸水想定区域"} — 1階住戸浸水・受変電設備位置・避難経路の事前確認必須`,
+      );
+      // High hazard property caps the maximum score so severe flood zone
+      // properties cannot score above 84 without buyer awareness
+      caps.push(84);
+    }
+  }
+
+  // Cross-reference buyer preference for excludeFirstFloor with hazard flood risk
+  if (criteria.excludeFirstFloor && listing.hazardRisk === "high" && (listing.floor === 1 || listing.floor == null)) {
+    unverified.push("【高浸水警戒・1階リスク】高浸水想定エリアかつ1階（または所在階未確認）のため浸水・資産性リスク要精査");
+  }
+
   // ------------------------------------------------------------------ COMBINE
   const fitPct = weighted(fit);
   const marketPct = weighted(market);
