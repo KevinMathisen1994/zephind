@@ -113,6 +113,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
             <div className="px-3 pt-4">
         <button
           type="button"
+          data-tour="new-search"
           onClick={() => {
             navigate("/orders?new=1");
             onNavClick?.();
@@ -135,6 +136,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  data-tour={`nav${item.to}`}
                   onClick={onNavClick}
                   title={item.desc}
                   className={({ isActive }) =>
@@ -173,6 +175,14 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
           <p className="mt-1.5 text-[12.5px] text-[#79827b]">高評価（80点以上）{freshHigh}件</p>
         </button>
       )}
+
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event("zephind:start-tour"))}
+        className="mx-5 mb-3 cursor-pointer text-left text-[12.5px] text-[#79827b] transition-colors hover:text-white"
+      >
+        使い方ガイド
+      </button>
 
       {isClerkEnabled ? (
         <NavAccount />

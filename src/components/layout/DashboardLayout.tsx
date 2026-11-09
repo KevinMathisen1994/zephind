@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import DashboardNav from "./DashboardNav";
+import OnboardingTour from "../OnboardingTour";
 import { Menu, X } from "lucide-react";
 
 export default function DashboardLayout() {
@@ -50,6 +51,7 @@ export default function DashboardLayout() {
       <main className="app-bg min-w-0 flex-1 overflow-y-auto pt-14 lg:pt-0">
         <Outlet />
       </main>
+      <OnboardingTour />
     </div>
   );
 }

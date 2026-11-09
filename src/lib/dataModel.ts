@@ -78,6 +78,8 @@ export interface Listing extends Row {
   emailReceivedAt?: number;
   emailSubject?: string;
   emailBody?: string;
+  /** Every label/value pair from the portal detail page, e.g. { 管理費: "15,910円/月" }. */
+  specs?: Record<string, string>;
   emailAttachments?: { id?: string; filename: string; mimeType: string; size: number }[];
 }
 

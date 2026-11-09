@@ -27,6 +27,7 @@ import { logger } from "../logger";
 import { route } from "./handler";
 import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
+import { enrichListingSpecs } from "../lib/listingSpecs";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -146,6 +147,7 @@ async function findMissingListingColumns(): Promise<Set<string>> {
     "priceDropPct",
     "priceChangedAt",
     "lastSeenAt",
+    "specs",
   ]);
 
   if (missingListingColumns.size > 0) {
@@ -252,6 +254,26 @@ ingestRouter.post("/listings-missing-posted-date", route(async (req) => {
   const { data, error } = await q.limit(limit);
   if (error) throw new HttpError(500, `listingsMissingPostedDate: ${error.message}`);
   return (data ?? []).map((r: any) => ({ listingId: r._id, url: r.url, source: r.source ?? "" }));
+}));
+
+/**
+ * Fill the detail-page spec table for listings stored before it existed.
+ * Small batches (about a second per listing); call repeatedly until it returns 0.
+ */
+ingestRouter.post("/backfill-specs", route(async (req) => {
+  assertSecret(req);
+  const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 40);
+  const { data, error } = await db.raw
+    .from("listings")
+    .select("_id")
+    .is("specs", null)
+    .eq("source", "tokyu")
+    .not("url", "is", null)
+    .order("_creationTime", { ascending: false })
+    .limit(limit);
+  if (error) throw new HttpError(500, `backfillSpecs: ${error.message}`);
+  const saved = await enrichListingSpecs((data ?? []).map((r: any) => r._id));
+  return { attempted: data?.length ?? 0, saved };
 }));
 
 /** Write the 掲載日 found for existing listings (the backfill's other half). */
@@ -430,6 +452,12 @@ ingestRouter.post("/scrape", route(async (req) => {
         if (row.url) listingIdByUrl.set(row.url, row._id);
       }
       listingsInserted += inserted.length;
+      // Detail-page spec table for the new listings only; runs after we respond.
+      if (!missing.has("specs")) {
+        void enrichListingSpecs(inserted.map((row) => row._id)).catch((err) => {
+          logger.warn(`[ingest] spec enrichment failed: ${err}`);
+        });
+      }
     }
   }
 

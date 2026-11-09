@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 // Aliased so the call sites below read unchanged. useAction and useMutation
 // are the same hook now: both just POST to the backend.
 import {
@@ -84,6 +85,28 @@ const GMAPS_KEY = import.meta.env
  * deployed origin the option would just produce connection errors, so it is
  * hidden there and the runner is pinned to GitHub Actions.
  */
+/** Score pill, coloured by band so strong and weak listings read at a glance. */
+function ScoreChip({ score, small = false }: { score: number; small?: boolean }) {
+  const tone =
+    score >= 80
+      ? "bg-[var(--brand)] text-white"
+      : score >= 60
+        ? "bg-[var(--brand-soft)] text-[var(--brand-ink)] ring-1 ring-[var(--brand-border)]"
+        : score >= 40
+          ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+          : "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  return (
+    <span
+      className={`inline-flex items-baseline gap-1 ${small ? "rounded-full px-3 py-0.5" : "rounded-lg px-2.5 py-1"} ${tone}`}
+      title="評価スコア（100点満点）"
+    >
+      <span className="text-[12.5px] font-bold">評価</span>
+      <span className={`font-data font-bold leading-none ${small ? "text-[14px]" : "text-[20px]"}`}>{score}</span>
+      <span className="text-[12.5px] font-bold">点</span>
+    </span>
+  );
+}
+
 const IS_LOCALHOST =
   typeof window !== "undefined" &&
   ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname);
@@ -1158,6 +1181,19 @@ export default function OrdersPage() {
   }, [getRecentRuns]);
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
+  // AI reports stay collapsed until asked for.
+  const [openReports, setOpenReports] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!expandedMatch) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpandedMatch(null);
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [expandedMatch]);
   const [focusListingId, setFocusListingId] = useState<string | null>(null);
   const focusPageRef = useRef<{ orderId: string; page: number } | null>(null);
   // Listings are no longer unfolded inside the dashboard card. Each order has
@@ -1531,10 +1567,6 @@ export default function OrdersPage() {
     setEvaluatingOrderId(order._id);
     const orderMatchList =
       matches?.filter((m) => m.orderId === order._id) ?? [];
-
-    if (orderMatchList.length > 0 && !expandedMatch) {
-      setExpandedMatch(orderMatchList[0]._id);
-    }
 
     const unevaluatedMatches = orderMatchList.filter((m) => {
       const listing = listings?.find((l) => l._id === m.listingId);
@@ -4353,6 +4385,7 @@ export default function OrdersPage() {
                                     <div className="basis-full h-0" />
 
                                     {/* Quick Hazard Map Inspection Badge & Hint */}
+                                    {(listingHazard?.overallRisk === "high" || listingHazard?.overallRisk === "medium") && (
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -4391,6 +4424,7 @@ export default function OrdersPage() {
                                             : "良好地盤"}
                                       </span>
                                     </button>
+                                    )}
 
                                     {/* Source Portal Tag */}
                                     {listing?.source === "email" ? (
@@ -4474,56 +4508,6 @@ export default function OrdersPage() {
                                   </div>
 
                                   <div className="flex items-start gap-4 shrink-0 text-slate-700">
-                                    {/* ★ shortlist. Sends a SNAPSHOT of the listing,
-                                    not just its id: `listings` rows are deleted
-                                    with the last order that matched them, and a
-                                    saved property must outlive that (see
-                                    convex/savedListings.js). */}
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        void toggleSaved({
-                                          listingId: m.listingId,
-                                          orderId: order._id,
-                                          orderName: order.name,
-                                          address: listing?.address,
-                                          ward: listing?.ward,
-                                          price: listing?.price,
-                                          area: listing?.area,
-                                          landSize: listing?.landSize,
-                                          source: listing?.source,
-                                          url: listing?.url,
-                                          propertyType: listing?.propertyType,
-                                          station: listing?.station,
-                                          walkMinutes: listing?.walkMinutes,
-                                          score: extractedScore,
-                                          postedAt: listing?.postedAt,
-                                          postedDateKind:
-                                            listing?.postedDateKind,
-                                        });
-                                      }}
-                                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-white transition-colors cursor-pointer hover:bg-amber-50"
-                                      title={
-                                        m.listingId && savedSet.has(m.listingId)
-                                          ? "保存物件から外す"
-                                          : "保存物件に追加（★）"
-                                      }
-                                      aria-label="保存物件に追加"
-                                      aria-pressed={Boolean(
-                                        m.listingId &&
-                                        savedSet.has(m.listingId),
-                                      )}
-                                    >
-                                      <Star
-                                        className={`w-[18px] h-[18px] transition-colors ${
-                                          m.listingId &&
-                                          savedSet.has(m.listingId)
-                                            ? "text-amber-500 fill-amber-400"
-                                            : "text-slate-400 hover:text-amber-500"
-                                        }`}
-                                      />
-                                    </button>
                                     {listing?.price && (
                                       <div className="flex flex-col items-end">
                                         <div className="flex items-center gap-1.5">
@@ -4564,11 +4548,8 @@ export default function OrdersPage() {
                                           </span>
                                         )}
                                         {extractedScore !== undefined && (
-                                          <span
-                                            className="mt-2 text-[14px] font-medium text-slate-500"
-                                            title="評価スコア"
-                                          >
-                                            評価 {extractedScore}点
+                                          <span className="mt-2">
+                                            <ScoreChip score={extractedScore} />
                                           </span>
                                         )}
                                       </div>
@@ -4586,8 +4567,46 @@ export default function OrdersPage() {
                                 </div>
 
                                 {/* Expanded Details */}
-                                {isExpanded && listing && (
-                                  <div className="px-6 pb-6 pt-5 border-t border-slate-200 bg-white space-y-5 text-sm animate-in fade-in duration-200">
+                                {isExpanded && listing && createPortal(
+                                  <div
+                                    className="listing-modal fixed inset-0 z-[80] flex flex-col overflow-y-auto bg-[var(--bg-page)]"
+                                    role="dialog"
+                                    aria-modal="true"
+                                    aria-label={listing.address || "物件詳細"}
+                                  >
+                                    <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-white/95 backdrop-blur">
+                                      <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3.5">
+                                        <div className="min-w-0 flex-1">
+                                          <div className="truncate text-[17px] font-bold text-[var(--text-primary)]">
+                                            {listing.address || "物件詳細"}
+                                          </div>
+                                          <div className="text-[13.5px] text-[var(--text-muted)]">
+                                            {[
+                                              listing.station
+                                                ? `${listing.station}${listing.walkMinutes != null ? ` 徒歩${listing.walkMinutes}分` : ""}`
+                                                : null,
+                                              listing.area != null || listing.landSize != null
+                                                ? `${listing.area ?? listing.landSize}㎡`
+                                                : null,
+                                            ]
+                                              .filter(Boolean)
+                                              .join(" ・ ")}
+                                          </div>
+                                        </div>
+                                        {listing.price ? (
+                                          <div className="shrink-0 text-right">
+                                            <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
+                                              {listing.price.toLocaleString()}
+                                            </span>
+                                            <span className="ml-1.5 text-[13px] text-slate-600">万円</span>
+                                            {extractedScore !== undefined && (
+                                              <div className="mt-1.5"><ScoreChip score={extractedScore} small /></div>
+                                            )}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  <div className="mx-auto w-full max-w-5xl flex-1 space-y-5 px-5 pb-10 pt-6 text-sm">
                                     {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
                                     {(listing.area != null ||
                                       listing.landSize != null ||
@@ -4600,7 +4619,7 @@ export default function OrdersPage() {
                                       listing.buildYear != null ||
                                       listing.buildingCoverageRatio != null ||
                                       listing.floorAreaRatio != null) && (
-                                      <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4">
+                                      <div className="grid grid-cols-2 gap-x-8 gap-y-5 rounded-xl border border-[var(--border-subtle)] bg-white p-5 sm:grid-cols-4">
                                         {listing.area != null && (
                                           <div>
                                             <div className="text-xs text-slate-500">専有/延床面積</div>
@@ -4664,6 +4683,30 @@ export default function OrdersPage() {
                                       </div>
                                     )}
 
+                                    {/* Full detail-page table (管理費, 修繕積立金, 向き, 土地権利, ...). */}
+                                    {(() => {
+                                      const rows = Object.entries((listing.specs ?? {}) as Record<string, string>).filter(
+                                        ([k]) => k !== "価格" && k !== "所在地",
+                                      );
+                                      if (rows.length === 0) return null;
+                                      return (
+                                        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
+                                          <div className="mb-2 text-[14.5px] font-bold text-slate-900">物件詳細</div>
+                                          <dl className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+                                            {rows.map(([k, v]) => (
+                                              <div
+                                                key={k}
+                                                className="grid grid-cols-[8.5rem_1fr] gap-3 border-b border-slate-100 py-2.5 text-[14px]"
+                                              >
+                                                <dt className="text-slate-500">{k}</dt>
+                                                <dd className="min-w-0 break-words font-medium text-slate-900">{v}</dd>
+                                              </div>
+                                            ))}
+                                          </dl>
+                                        </div>
+                                      );
+                                    })()}
+
                                     {/* Hazard card: risk level, area description, and the map button. */}
                                     {(() => {
                                       const risk = listingHazard?.overallRisk;
@@ -4672,7 +4715,7 @@ export default function OrdersPage() {
                                           ? { box: "border-rose-200 bg-rose-50/60", pill: "bg-rose-100 text-rose-800", name: "高浸水警戒" }
                                           : risk === "medium"
                                             ? { box: "border-amber-200 bg-amber-50/60", pill: "bg-amber-100 text-amber-900", name: "浸水要確認" }
-                                            : { box: "border-[var(--border-subtle)] bg-[var(--bg-page)]", pill: "bg-[var(--brand-soft)] text-[var(--brand-ink)]", name: "良好地盤" };
+                                            : { box: "border-[var(--border-subtle)] bg-white", pill: "bg-[var(--brand-soft)] text-[var(--brand-ink)]", name: "良好地盤" };
                                       return (
                                         <div
                                           className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${tone.box}`}
@@ -4690,15 +4733,14 @@ export default function OrdersPage() {
                                             </p>
                                           </div>
                                           <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            className="shrink-0 border-[var(--border-subtle)] font-medium"
+                                            className="h-10 shrink-0 gap-2 rounded-xl px-5 text-sm font-bold shadow-sm"
                                             onClick={() =>
                                               setHazardModalListing(
                                                 listing ? { ...listing, _id: m.listingId } : null,
                                               )
                                             }
                                           >
+                                            <MapPin className="h-4 w-4" />
                                             ハザードマップを見る
                                           </Button>
                                         </div>
@@ -4723,7 +4765,7 @@ export default function OrdersPage() {
                                           href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address)}`}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="inline-flex h-8 items-center rounded-md border border-[var(--border-subtle)] bg-white px-3 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                                          className="gmaps-btn inline-flex h-8 items-center rounded-md border-2 border-transparent px-3 text-xs font-semibold text-[var(--text-primary)] transition-opacity hover:opacity-80"
                                         >
                                           Google Maps
                                         </a>
@@ -4785,20 +4827,47 @@ export default function OrdersPage() {
                                               </div>
                                             </div>
                                           );
+                                          // A failed AI run has nothing to hide, so its retry notice stays visible.
+                                          const reportOpen = openReports.has(m._id) || aiFailed;
                                           return (
                                             <div className="space-y-6 text-[var(--text-primary)]">
-                                              <div className="flex items-center justify-between">
-                                                <div className="text-sm font-bold text-[var(--brand)]">物件評価レポート</div>
-                                                <button
-                                                  type="button"
-                                                  className="cursor-pointer text-sm font-bold text-[var(--brand)] hover:underline disabled:opacity-50"
-                                                  onClick={() => handleEvaluate(m._id, listing, order)}
-                                                  disabled={evaluatingId === m._id}
-                                                >
-                                                  {evaluatingId === m._id ? "評価中..." : "再評価"}
-                                                </button>
+                                              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+                                                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                                                  <span className="text-sm font-bold text-[var(--brand)]">物件評価レポート</span>
+                                                  <span className="text-[13.5px] text-slate-600">
+                                                    総合スコア <strong className="font-data text-xl text-slate-900">{score ?? "—"}</strong> / 100
+                                                  </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3.5 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+                                                    onClick={() =>
+                                                      setOpenReports((prev) => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(m._id)) next.delete(m._id);
+                                                        else next.add(m._id);
+                                                        return next;
+                                                      })
+                                                    }
+                                                    aria-expanded={reportOpen}
+                                                  >
+                                                    <Sparkles className="h-4 w-4" />
+                                                    {reportOpen ? "AIレポートを閉じる" : "AIレポートを表示"}
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="h-9 cursor-pointer rounded-lg border border-[var(--border-subtle)] bg-white px-3 text-sm font-medium text-slate-700 hover:bg-[var(--bg-page-subtle)] disabled:opacity-50"
+                                                    onClick={() => handleEvaluate(m._id, listing, order)}
+                                                    disabled={evaluatingId === m._id}
+                                                  >
+                                                    {evaluatingId === m._id ? "評価中..." : "再評価"}
+                                                  </button>
+                                                </div>
                                               </div>
 
+                                              {reportOpen && (
+                                              <div className="space-y-8 rounded-xl border border-[var(--border-subtle)] bg-white p-6">
                                               <div className="grid gap-8 md:grid-cols-[13rem_1fr]">
                                                 <div>
                                                   <div className="text-sm text-slate-500">総合投資スコア</div>
@@ -4960,6 +5029,8 @@ export default function OrdersPage() {
                                                   })()}
                                                 </div>
                                               )}
+                                              </div>
+                                              )}
                                             </div>
                                           );
                                         })()
@@ -5100,6 +5171,78 @@ export default function OrdersPage() {
                                       ) : null;
                                     })()}
                                   </div>
+                                    <div className="sticky bottom-0 z-10 mt-auto border-t border-[var(--border-subtle)] bg-white">
+                                      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-3">
+                                        <button
+                                          type="button"
+                                          onClick={() => setExpandedMatch(null)}
+                                          className="inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-5 text-sm font-medium text-slate-800 transition-colors hover:bg-[#e8e7e2]"
+                                          title="一覧に戻る (Esc)"
+                                        >
+                                          <ArrowLeft className="h-4 w-4" />
+                                          一覧に戻る
+                                        </button>
+                                    {/* ★ shortlist. Sends a SNAPSHOT of the listing,
+                                    not just its id: `listings` rows are deleted
+                                    with the last order that matched them, and a
+                                    saved property must outlive that (see
+                                    convex/savedListings.js). */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void toggleSaved({
+                                          listingId: m.listingId,
+                                          orderId: order._id,
+                                          orderName: order.name,
+                                          address: listing?.address,
+                                          ward: listing?.ward,
+                                          price: listing?.price,
+                                          area: listing?.area,
+                                          landSize: listing?.landSize,
+                                          source: listing?.source,
+                                          url: listing?.url,
+                                          propertyType: listing?.propertyType,
+                                          station: listing?.station,
+                                          walkMinutes: listing?.walkMinutes,
+                                          score: extractedScore,
+                                          postedAt: listing?.postedAt,
+                                          postedDateKind:
+                                            listing?.postedDateKind,
+                                        });
+                                      }}
+                                      className={`inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-bold transition-colors ${
+                                        m.listingId && savedSet.has(m.listingId)
+                                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                          : "border-[var(--brand)] bg-white text-[var(--brand-ink)] hover:bg-[var(--brand-soft)]"
+                                      }`}
+                                      title={
+                                        m.listingId && savedSet.has(m.listingId)
+                                          ? "保存物件から外す"
+                                          : "保存物件に追加（★）"
+                                      }
+                                      aria-label="保存物件に追加"
+                                      aria-pressed={Boolean(
+                                        m.listingId &&
+                                        savedSet.has(m.listingId),
+                                      )}
+                                    >
+                                      <Star
+                                        className={`h-4 w-4 ${
+                                          m.listingId &&
+                                          savedSet.has(m.listingId)
+                                            ? "text-amber-500 fill-amber-400"
+                                            : "text-[var(--brand)]"
+                                        }`}
+                                      />
+                                      {m.listingId && savedSet.has(m.listingId)
+                                        ? "保存済み"
+                                        : "お気に入りに追加"}
+                                    </button>
+                                      </div>
+                                    </div>
+                                  </div>,
+                                  document.body,
                                 )}
                               </div>
                             );
