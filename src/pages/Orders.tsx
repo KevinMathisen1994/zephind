@@ -55,7 +55,6 @@ import {
   Search,
   Sparkles,
   ArrowUpDown,
-  Smartphone,
   Compass,
   ShieldCheck,
   ArrowLeft,
@@ -1358,7 +1357,7 @@ export default function OrdersPage() {
   const frozenOrder = useRef<Record<string, { sig: string; ids: string[] }>>({});
   /** Per-order quick filter; absent means すべて. */
   const [listFilter, setListFilter] = useState<Record<string, string>>({});
-  const [evalProgress, setEvalProgress] = useState<
+  const [, setEvalProgress] = useState<
     Record<string, { current: number; total: number }>
   >({});
   const [orderStatus, setOrderStatus] = useState<string>("pending");
@@ -2429,9 +2428,6 @@ export default function OrdersPage() {
 
   // Top KPI metrics
   const totalOrdersCount = orders?.length ?? 0;
-  const activeOrdersCount =
-    orders?.filter((o) => o.status === "pending" || o.status === "active")
-      .length ?? 0;
   const completedOrdersCount =
     orders?.filter((o) => o.status === "completed").length ?? 0;
   const scrapingOrdersCount =
