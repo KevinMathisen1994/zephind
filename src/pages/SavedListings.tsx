@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { Badge } from "../components/ui/badge";
@@ -14,13 +15,10 @@ import {
   StickyNote,
   Search,
   Clock,
-  Send,
-  CheckSquare,
-  Square,
 } from "lucide-react";
 import type { Id } from "../lib/dataModel";
 import { formatJaDate, formatJaDateTime } from "../lib/dateFormat";
-import { ProposalModal, type ProposalItem } from "../components/ProposalModal";
+import { PropertyHazardModal } from "../components/PropertyHazardModal";
 
 export default function SavedListingsPage() {
   const saved = useQuery(api.savedListings.list);
@@ -30,17 +28,8 @@ export default function SavedListingsPage() {
   const [search, setSearch] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
-  /** Ticked for the proposal mail. */
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [showProposal, setShowProposal] = useState(false);
-
-  const toggleSelected = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const [detailRow, setDetailRow] = useState<any | null>(null);
+  const navigate = useNavigate();
 
   const filtered = useMemo(() => {
     if (!saved) return undefined;
@@ -52,23 +41,6 @@ export default function SavedListingsPage() {
         .some((field) => String(field).toLowerCase().includes(q)),
     );
   }, [saved, search]);
-
-  const totalValue = (saved ?? []).reduce((sum, row) => sum + (row.price ?? 0), 0);
-
-  const proposalItems: ProposalItem[] = (saved ?? []).map((row) => ({
-    id: row._id,
-    listingId: row.listingId,
-    address: row.address,
-    ward: row.ward,
-    price: row.price,
-    size: row.area ?? row.landSize,
-    station: row.station,
-    walkMinutes: row.walkMinutes,
-    url: row.url,
-    source: row.source,
-    propertyType: row.propertyType,
-    score: row.score,
-  }));
 
   const startEditingNote = (id: string, current?: string) => {
     setEditingNoteId(id);
@@ -85,86 +57,28 @@ export default function SavedListingsPage() {
       {/* ── Page Header ── */}
       <div className="page-header">
         <div>
-          <div className="eyebrow-pill">Saved Listings</div>
           <h1 className="page-title">保存物件</h1>
           <p className="page-subtitle">
-            検索結果で★を付けた物件の一覧です。元の検索条件やオーダーを更新しても保存された状態が維持されます。
+            検索結果で★を付けた物件の一覧です。元の検索条件を更新しても保存された状態が維持されます。
           </p>
         </div>
 
-        {(saved?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative w-full sm:w-60">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="住所・種別・メモで絞り込み"
-                className="field pl-9"
-              />
-            </div>
-
-            <Button
-              onClick={() => setShowProposal(true)}
-              disabled={selected.size === 0}
-              size="lg"
-            >
-              <Send className="h-4 w-4" />
-              顧客へ提案・送信
-              {selected.size > 0 && (
-                <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[14px] font-semibold tabular-nums">
-                  {selected.size}
-                </span>
-              )}
-            </Button>
-          </div>
-        )}
       </div>
 
-      {/* ── Summary Bento ── */}
+      {/* ── List ── */}
       {(saved?.length ?? 0) > 0 && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-          <div className="kpi-card">
-            <div className="flex items-start justify-between gap-2">
-              <span className="stat-label">保存件数</span>
-              <span className="kpi-icon bg-[var(--warning-soft)] text-[var(--warning)]">
-                <Star className="h-[15px] w-[15px] fill-current" />
-              </span>
-            </div>
-            <div className="stat-value">{saved?.length ?? 0}</div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="flex items-start justify-between gap-2">
-              <span className="stat-label">合計価格</span>
-              <span className="kpi-icon bg-[var(--brand-soft)] text-[var(--brand)]">
-                <Ruler className="h-[15px] w-[15px]" />
-              </span>
-            </div>
-            <div className="stat-value">
-              {totalValue.toLocaleString()}
-              <span className="ml-1 font-sans text-xs font-semibold tracking-normal text-[var(--text-muted)]">
-                万円
-              </span>
-            </div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="flex items-start justify-between gap-2">
-              <span className="stat-label">メモ付き物件</span>
-              <span className="kpi-icon bg-[var(--info-soft)] text-[var(--info)]">
-                <StickyNote className="h-[15px] w-[15px]" />
-              </span>
-            </div>
-            <div className="stat-value">
-              {(saved ?? []).filter((r) => r.note?.trim()).length}
-            </div>
-          </div>
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="住所・種別・メモで絞り込み"
+            className="field pl-9"
+          />
         </div>
       )}
 
-      {/* ── List ── */}
       {filtered === undefined ? (
         <div className="space-y-4">
           {[1, 2, 3].map((n) => (
@@ -190,25 +104,12 @@ export default function SavedListingsPage() {
           {filtered.map((row) => (
             <div
               key={row._id}
-              className="bg-white rounded-2xl border border-[var(--border-subtle)] p-5 space-y-3.5 shadow-xs hover:border-[var(--border-default)] hover:shadow-sm transition-all duration-200"
+              onClick={() => setDetailRow(row)}
+              className="cursor-pointer bg-white rounded-2xl border border-[var(--border-subtle)] p-5 space-y-3.5 shadow-xs hover:border-[var(--border-default)] hover:shadow-sm transition-all duration-200"
             >
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                   <div className="min-w-0 space-y-2.5">
                     <div className="flex flex-wrap items-center gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleSelected(row._id)}
-                        className="shrink-0 cursor-pointer transition-transform active:scale-95"
-                        title="提案メールに含める"
-                        aria-label="提案メールに含める"
-                        aria-pressed={selected.has(row._id)}
-                      >
-                        {selected.has(row._id) ? (
-                          <CheckSquare className="w-5 h-5 text-[var(--brand)]" />
-                        ) : (
-                          <Square className="w-5 h-5 text-[var(--border-strong)]" />
-                        )}
-                      </button>
                       <MapPin className="w-4 h-4 text-[var(--brand)] shrink-0" />
                       <span className="text-base font-extrabold text-[var(--text-primary)] tracking-tight">
                         {row.address || "住所不明"}
@@ -267,7 +168,7 @@ export default function SavedListingsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                     {row.url && (
                       <a
                         href={row.url}
@@ -303,7 +204,7 @@ export default function SavedListingsPage() {
                 </div>
 
                 {editingNoteId === row._id ? (
-                  <div className="space-y-2.5 pt-2 border-t border-[var(--border-subtle)]">
+                  <div className="space-y-2.5 pt-2 border-t border-[var(--border-subtle)]" onClick={(e) => e.stopPropagation()}>
                     <textarea
                       rows={3}
                       value={noteDraft}
@@ -337,12 +238,18 @@ export default function SavedListingsPage() {
         </div>
       )}
 
-      {showProposal && (
-        <ProposalModal
-          items={proposalItems}
-          initialSelectedIds={selected}
-          contextName="保存物件"
-          onClose={() => setShowProposal(false)}
+      {detailRow && (
+        <PropertyHazardModal
+          isOpen
+          listing={detailRow}
+          onClose={() => setDetailRow(null)}
+          onOpenMapPage={(l) => {
+            setDetailRow(null);
+            const id = l?.listingId || l?._id;
+            navigate(id ? `/map?focus=${encodeURIComponent(id)}` : "/map", {
+              state: { focusListing: l },
+            });
+          }}
         />
       )}
     </div>

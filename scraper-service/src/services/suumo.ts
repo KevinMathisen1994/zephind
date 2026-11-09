@@ -79,8 +79,10 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       var stationText = stationEl ? stationEl.textContent.trim() : "";
       var station = "";
       var walkMinutes = null;
-      var stM = stationText.match(/([^\\s\\/]+駅)/);
-      if (stM) station = stM[1];
+      // Sale pages print 「新宿」歩5分 with no 駅 suffix.
+      var stM = stationText.match(/「([^」]+)」/);
+      if (stM) station = stM[1] + "駅";
+      else if ((stM = stationText.match(/([^\\s\\/]+駅)/))) station = stM[1];
       var wkM = stationText.match(/歩(\\d+)分/);
       if (wkM) walkMinutes = parseInt(wkM[1], 10);
 
@@ -275,9 +277,11 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       var stationText = getVal("沿線・駅");
       var station = "";
       var walkMinutes = null;
-      var stM = stationText.match(/([^\\s]+駅)/);
-      if (stM) station = stM[1];
-      var wkM = stationText.match(/徒歩(\\d+)分/);
+      // Sale pages print 「新宿」歩5分 with no 駅 suffix.
+      var stM = stationText.match(/「([^」]+)」/);
+      if (stM) station = stM[1] + "駅";
+      else if ((stM = stationText.match(/([^\\s]+駅)/))) station = stM[1];
+      var wkM = stationText.match(/歩(\\d+)分/);
       if (wkM) walkMinutes = parseInt(wkM[1], 10);
 
       // Land vs unit area are DIFFERENT numbers and the cassette prints whichever

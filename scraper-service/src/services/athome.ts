@@ -1,6 +1,7 @@
 import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
+import { pace } from "../lib/pace";
 import type { PropertyListing, ScrapeResult } from "../types";
 
 
@@ -375,6 +376,7 @@ async function scrapeAtHomeChintai(areaCode: string, wardName: string, cityName:
 
       let response;
       try {
+        await pace("athome");
         response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
       } catch (err) {
         logger.warn(`[At Home Scraper] Chintai page ${p} failed to load`);
@@ -495,6 +497,7 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
       if (p > 1) await pause();
       let response;
       try {
+        await pace("athome");
         response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
       } catch (err) {
         logger.warn(`[At Home Scraper] Page ${p} failed to load, stopping`);

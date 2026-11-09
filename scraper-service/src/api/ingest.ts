@@ -145,6 +145,7 @@ async function findMissingListingColumns(): Promise<Set<string>> {
     "initialPrice",
     "priceDropPct",
     "priceChangedAt",
+    "lastSeenAt",
   ]);
 
   if (missingListingColumns.size > 0) {
@@ -407,7 +408,21 @@ ingestRouter.post("/scrape", route(async (req) => {
       }
     }
 
-    const fresh = docs.filter((d) => !existingByUrl.has(d.url));
+    // Seen again today, so not ended. Chunked to keep the URL-encoded id list small.
+    if (!missing.has("lastSeenAt")) {
+      const seenIds = [...existingByUrl.values()].map((r) => r._id);
+      for (let i = 0; i < seenIds.length; i += 200) {
+        const { error } = await db.raw
+          .from("listings")
+          .update({ lastSeenAt: Date.now() })
+          .in("_id", seenIds.slice(i, i + 200));
+        if (error) logger.warn(`[ingest] lastSeenAt update failed: ${error.message}`);
+      }
+    }
+
+    const fresh = docs
+      .filter((d) => !existingByUrl.has(d.url))
+      .map((d) => ({ ...d, lastSeenAt: Date.now() }));
     listingsSkipped += docs.length - fresh.length;
     if (fresh.length > 0) {
       const inserted = await insertListings(fresh);

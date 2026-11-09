@@ -86,7 +86,6 @@ export default function DealsPage() {
       {/* ── Page Header ── */}
       <div className="page-header">
         <div>
-          <div className="eyebrow-pill">Pipeline & Deals</div>
           <h1 className="page-title">案件・提案管理</h1>
           <p className="page-subtitle">
             買主への物件提案履歴、交渉ステータス、成約完了案件を統合管理します
@@ -170,7 +169,7 @@ export default function DealsPage() {
             該当する提案案件がありません
           </p>
           <p className="text-xs text-[var(--text-muted)] mt-1.5 font-medium">
-            買主オーダー画面から「顧客へ物件を提案・メール送信」を行うと提案案件が自動登録されます。
+            買主物件画面から「顧客へ物件を提案・メール送信」を行うと提案案件が自動登録されます。
           </p>
         </div>
       ) : (

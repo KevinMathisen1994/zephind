@@ -27,6 +27,12 @@ const INVESTORS_WARD_CODE: Record<string, string> = {
   "13121": "27", "13122": "29", "13123": "2a",
 };
 
+// During 緊急メンテナンス the site serves HTTP 200 with an unrelated page title
+// ("重要なお知らせ・店舗情報"), so status and title alone read as "0 listings".
+async function isMaintenancePage(page: any): Promise<boolean> {
+  return page.evaluate(() => /メンテナンス/.test(document.body?.innerText?.slice(0, 600) ?? "")).catch(() => false);
+}
+
 async function extractListings(page: any, propertyType: string): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function("propertyType", `
     // The site renders one <div class="bukkenItemBox"> per listing on the
@@ -174,7 +180,7 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[], dea
 
           const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
           const title = await page.title().catch(() => "");
-          if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance")) {
+          if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance") || (await isMaintenancePage(page))) {
             const msg = `みずほ不動産販売サイトは現在メンテナンス中です (HTTP ${resp?.status() ?? 503}, ${title})`;
             logger.warn(`[Mizuho Scraper] ${msg}`);
             scrapeErrors.push(msg);
@@ -238,7 +244,7 @@ export async function scrapeMizuho(areaCode: string, filterTypes?: string[], dea
 
         const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
         const title = await page.title().catch(() => "");
-        if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance")) {
+        if ((resp && resp.status() >= 500) || title.includes("メンテナンス") || title.includes("Maintenance") || (await isMaintenancePage(page))) {
           const msg = `みずほ不動産販売サイトは現在メンテナンス中です (HTTP ${resp?.status() ?? 503}, ${title})`;
           logger.warn(`[Mizuho Scraper] ${msg}`);
           scrapeErrors.push(msg);

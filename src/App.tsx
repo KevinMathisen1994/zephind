@@ -54,7 +54,7 @@ export default function App() {
               Z
             </div>
             <h1 className="font-serif text-[28px] leading-none tracking-[0.01em] text-[var(--text-primary)]">
-              Zephind
+              Zephinder
             </h1>
             <p className="mt-2 font-mono text-[12.5px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
               Property Intelligence

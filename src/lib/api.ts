@@ -113,6 +113,8 @@ export const api = {
     // Polled: a scrape run writes matches from a GitHub Actions runner, so they
     // appear with no action in this tab to trigger a refetch.
     list: endpoint({ method: "GET", key: "matching", path: () => "/api/matching", refetchInterval: 30_000 }),
+    byOrder: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-order/${encodeURIComponent(a.orderId)}`, refetchInterval: 30_000 }),
+    byListing: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-listing/${encodeURIComponent(a.listingId)}` }),
     saveScore: endpoint({
       method: "PATCH", key: "matching.saveScore", path: (a) => `/api/matching/${encodeURIComponent(a.matchId)}/score`,
       body: (a) => ({ score: a.score }), invalidates: ["matching"],

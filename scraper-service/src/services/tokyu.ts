@@ -88,6 +88,9 @@ async function extractJigyoListings(page: any): Promise<{ listings: PropertyList
       // here (一棟 listings do use "建物", so that label stays first).
       const bldM = plain.match(/^(?:建物|延床|専有|内法|壁芯)\s*([\d,.]+)\s*m/);
       if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
+      // 中古マンション rows carry an unlabeled "46.82m2" (that is the 専有面積).
+      const bareM = plain.match(/^([\d,.]+)\s*(?:m2|m²|㎡)$/);
+      if (bareM && floorArea === undefined) floorArea = parseFloat(bareM[1].replace(/,/g, ""));
       const yearM = plain.match(/(\d{4})年\d{1,2}月築/);
       if (yearM) buildYear = parseInt(yearM[1], 10);
     }
@@ -341,6 +344,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
             if (landM) landSize = parseFloat(landM[1].replace(/,/g, ""));
             const bldM = plain.match(/^(?:建物|延床|専有|内法|壁芯)\s*([\d,.]+)\s*m/);
             if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
+            // 中古マンション rows carry an unlabeled "46.82m2" (that is the 専有面積).
+            const bareM = plain.match(/^([\d,.]+)\s*(?:m2|m²|㎡)$/);
+            if (bareM && floorArea === undefined) floorArea = parseFloat(bareM[1].replace(/,/g, ""));
             const yearM = plain.match(/(\d{4})年(\d{1,2})月築/);
             if (yearM) {
               buildYear = parseInt(yearM[1], 10);

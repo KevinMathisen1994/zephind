@@ -4,6 +4,32 @@
 }
 @import "tw-animate-css";
 
+/* Every emerald/green utility resolves to the one brand green. */
+@theme {
+  --color-emerald-50: #f2f6f1;
+  --color-emerald-100: #e3ebe1;
+  --color-emerald-200: #cfdcca;
+  --color-emerald-300: #aec3a8;
+  --color-emerald-400: #86a380;
+  --color-emerald-500: #527f54;
+  --color-emerald-600: #3d6b3f;
+  --color-emerald-700: #3d6b3f;
+  --color-emerald-800: #2f5531;
+  --color-emerald-900: #25422a;
+  --color-emerald-950: #1a2e1c;
+  --color-green-50: #f2f6f1;
+  --color-green-100: #e3ebe1;
+  --color-green-200: #cfdcca;
+  --color-green-300: #aec3a8;
+  --color-green-400: #86a380;
+  --color-green-500: #527f54;
+  --color-green-600: #3d6b3f;
+  --color-green-700: #3d6b3f;
+  --color-green-800: #2f5531;
+  --color-green-900: #25422a;
+  --color-green-950: #1a2e1c;
+}
+
 :root {
   /* ── Type ────────────────────────────────────────────────────────── */
   --font-ui:
@@ -16,9 +42,9 @@
   --radius: 6px;
 
   /* ── Zephind · "Ledger" — paper, ink, emerald green accent ───────── */
-  --bg-page: #f6f3ec;
-  --bg-surface: #fffdf9;
-  --bg-surface-hover: #faf7f0;
+  --bg-page: #f6f5f1;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #faf9f6;
   --bg-page-subtle: #f1ede4;
   --bg-surface-sunken: #f1ede4;
   --bg-brand: #f0f7ed;
@@ -28,17 +54,17 @@
   --text-muted: #857e74;
   --text-placeholder: #a9a29a;
 
-  --brand: #1a7100;
-  --brand-hover: #155d00;
-  --brand-soft: #f0f7ed;
-  --brand-border: #caddc4;
-  --brand-ink: #114e02;
+  --brand: #3d6b3f;
+  --brand-hover: #335a35;
+  --brand-soft: #eef4ec;
+  --brand-border: #cfdcca;
+  --brand-ink: #2a4d2c;
 
   --ink: #17150f;
   --ink-soft: #23201a;
 
-  --border-subtle: #e8e2d8;
-  --border-default: #dcd5c9;
+  --border-subtle: #e9e7e1;
+  --border-default: #dedbd3;
   --border-strong: #c6bdae;
 
   --success: #1f6b45;
@@ -50,7 +76,7 @@
   --info: #2c4a7c;
   --info-soft: #eef1f7;
 
-  --ring-color: rgba(26, 113, 0, 0.55);
+  --ring-color: rgba(61, 107, 63, 0.55);
 
   /* ── Elevation — near-flat, rules do the separating ──────────────── */
   --shadow-xs: 0 1px 0 rgba(23, 21, 15, 0.035);
@@ -336,8 +362,7 @@
 
   /* Sidebar panel — ink rail, the one dark surface in the product */
   .sidebar-surface {
-    background-color: var(--ink);
-    background-image: linear-gradient(180deg, #1c1913 0%, #121009 100%);
+    background-color: #161a17;
   }
 
   /* Page masthead — a printed section head, not a floating card */

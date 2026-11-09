@@ -258,7 +258,6 @@ export default function AdminPage() {
       {/* ── Header ── */}
       <div className="page-header">
         <div>
-          <div className="eyebrow-pill">Data Operations</div>
           <h1 className="page-title">スクレイピング・データ管理</h1>
           <p className="page-subtitle">
             全19不動産ポータルからの手動データ収集、バックエンド接続状態のリアルタイムモニタリング
@@ -417,11 +416,11 @@ export default function AdminPage() {
           </div>
 
           <div className="space-y-2">
-            <Label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">スキャン対象エリア（オーダー登録エリア）</Label>
+            <Label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">スキャン対象エリア</Label>
             <div className="flex flex-wrap gap-2 p-3 bg-[var(--bg-page-subtle)] rounded-2xl border border-[var(--border-subtle)]">
               {targetWards.length === 0 ? (
                 <span className="text-xs text-[var(--text-muted)] font-medium">
-                  現在オーダーにエリアが指定されていません（デフォルト: 新宿区 13104）
+                  エリアが指定されていません（デフォルト: 新宿区 13104）
                 </span>
               ) : (
                 targetWards.map((w) => (

@@ -4,10 +4,6 @@ import { useApiQuery as useQuery } from "../hooks/useApi";
 import { api } from "../lib/api";
 import TokyoPropertyMap, { type MapListingItem } from "../components/TokyoPropertyMap";
 import {
-  Compass,
-  Sparkles,
-  Building2,
-  TrendingUp,
   Search,
 } from "lucide-react";
 
@@ -112,69 +108,16 @@ export default function MapIntelligencePage() {
     return [focusFromState as MapListingItem, ...filteredListings];
   }, [filteredListings, focusFromState]);
 
-  // Aggregate stats for Tokyo
-  const stats = useMemo(() => {
-    const validYields = filteredListings
-      .map((l) => l.yield)
-      .filter((y): y is number => typeof y === "number" && y > 0);
-    const avgYield = validYields.length > 0 ? validYields.reduce((a, b) => a + b, 0) / validYields.length : 0;
-    const highScores = filteredListings.filter((l) => l.score && l.score >= 80).length;
-    return {
-      total: filteredListings.length,
-      avgYield: avgYield.toFixed(2),
-      highScores,
-    };
-  }, [filteredListings]);
-
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)] lg:h-screen overflow-hidden bg-[#f6f3ec]">
-      {/* ── Top Header & Live Pulse ── */}
-      <div className="shrink-0 p-4 pb-2 border-b border-[var(--border-subtle)] bg-[#fffdf9]/90 backdrop-blur-md space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white shadow-xs">
-              <Compass className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-serif text-xl font-bold tracking-tight text-[var(--text-primary)]">
-                  東京広域 地図インテリジェンス
-                </h1>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[13.5px] font-black tracking-wider uppercase border border-emerald-200">
-                  GIS ANALYTICS
-                </span>
-              </div>
-              <p className="text-xs text-[var(--text-secondary)]">
-                物件立地・ハザード水害リスク・駅徒歩圏・利回り分布の統合リアルタイム可視化
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Metrics (Double-Bezel Mini Pills) */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-xl bg-black/[0.04] p-1 ring-1 ring-black/[0.06]">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-[calc(0.75rem-0.125rem)] bg-white shadow-2xs">
-                <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-xs font-bold text-slate-700">プロット物件:</span>
-                <span className="font-data font-black text-slate-900">{stats.total}件</span>
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-black/[0.04] p-1 ring-1 ring-black/[0.06]">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-[calc(0.75rem-0.125rem)] bg-white shadow-2xs">
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="text-xs font-bold text-slate-700">平均想定利回り:</span>
-                <span className="font-data font-black text-emerald-700">{stats.avgYield}%</span>
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-black/[0.04] p-1 ring-1 ring-black/[0.06]">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-[calc(0.75rem-0.125rem)] bg-white shadow-2xs">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span className="text-xs font-bold text-slate-700">AI高評価:</span>
-                <span className="font-data font-black text-amber-700">{stats.highScores}件</span>
-              </div>
-            </div>
+      {/* ── Page Header ── */}
+      <div className="shrink-0 px-4 pt-6 md:px-8 md:pt-9">
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">地図分析</h1>
+            <p className="page-subtitle">
+              物件立地・ハザード水害リスク・駅徒歩圏・利回り分布の統合リアルタイム可視化
+            </p>
           </div>
         </div>
       </div>

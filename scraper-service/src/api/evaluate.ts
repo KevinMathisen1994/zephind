@@ -9,6 +9,7 @@ import { db, type Doc } from "../db";
 import { HttpError, requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
 // Pure JS module, deliberately untyped (see tsconfig checkJs).
+import { getLocalMarket } from "../lib/localMarket";
 import { computeMatchScore, mlitTypeForListing, wardCityCode } from "../lib/scoring.js";
 import {
   CACHE_TTL_MS, getMlitCache, getPlacesCache, saveMlitCache, savePlacesCache,
@@ -25,12 +26,12 @@ function parseChatCompletion(raw: string, status: number): any {
   // An empty or non-JSON body used to surface as "Unexpected end of JSON
   // input", which names the parser rather than the failure. The gateway
   // answering 405 with no body (its maintenance behaviour) is the common case.
-  if (!trimmed) throw new Error(`Rax AI returned an empty body (HTTP ${status})`);
+  if (!trimmed) throw new Error(`Gemini returned an empty body (HTTP ${status})`);
   if (!trimmed.startsWith("data:")) {
     try {
       return JSON.parse(trimmed);
     } catch {
-      throw new Error(`Rax AI returned a non-JSON body (HTTP ${status}): ${trimmed.slice(0, 200)}`);
+      throw new Error(`Gemini returned a non-JSON body (HTTP ${status}): ${trimmed.slice(0, 200)}`);
     }
   }
 
@@ -168,11 +169,7 @@ async function callRaxChat(apiKey: string, payload: unknown): Promise<any> {
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; ; attempt++) {
     const { data, rateLimited } = await queueRaxCall(async () => {
-      // `www.` is required. The bare host 301-redirects here, and fetch replays a
-      // redirected POST as a GET, which this endpoint answers 405 with an empty
-      // body — surfacing as "Unexpected end of JSON input" rather than anything
-      // resembling a wrong URL.
-      const response = await fetch("https://www.ai.raxcore.dev/api/v1/chat/completions", {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -198,15 +195,19 @@ async function callRaxChat(apiKey: string, payload: unknown): Promise<any> {
  * Market context and deterministic score for one listing. No LLM call, so a
  * batch can gather several of these in parallel and share one Rax request.
  */
-async function prepareListing(req: Request, args: any) {
+async function prepareListing(req: Request, args: any, withPlaces = false) {
   // The match is patched at the end. Check ownership NOW: the Convex version
   // got this from the mutations it called through, which no longer exist here,
   // and a late check would mean the LLM spend happens before the refusal.
   if (args.matchId) await requireOwned(req, "matching", args.matchId, "マッチング");
-  return prepareListingInternal(args);
+  return prepareListingInternal(args, withPlaces);
 }
 
-export async function prepareListingInternal(args: any) {
+/**
+ * withPlaces: set only by the per-listing AI button. It allows every network
+ * call (Google Places, MLIT fetch). Bulk grading reads cached MLIT data only.
+ */
+export async function prepareListingInternal(args: any, withPlaces = false) {
   const c: any = args.orderCriteria || {};
   const isRental = (args.dealType ?? c.dealType) === "rent";
 
@@ -278,7 +279,7 @@ ${
   // "this comparison didn't run" instead of silently dropping the component.
   const dataWarnings: string[] = [];
   const placesKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (placesKey && args.address) {
+  if (withPlaces && placesKey && args.address) {
     const addressKey = String(args.address).trim();
     try {
       const cached = await getPlacesCache(addressKey);
@@ -356,6 +357,9 @@ ${
           let items: any[];
           if (cached && Date.now() - (cached.fetchedAt as number) < CACHE_TTL_MS) {
             items = cached.comparables || [];
+          } else if (!withPlaces) {
+            // Bulk grading never touches the network: cached comps or none.
+            items = [];
           } else {
             const mlitUrl = `https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001?year=${year}&area=13&city=${cityCode}&language=ja`;
             const mlitRes = await fetch(mlitUrl, {
@@ -434,7 +438,7 @@ ${
               pricePerSqm: cItem.area && cItem.area > 0 ? +(cItem.price / cItem.area).toFixed(1) : null,
             }));
         }
-        if (allItems.length === 0) {
+        if (allItems.length === 0 && withPlaces) {
           dataWarnings.push(
             `「${args.ward}」の直近2年の${targetType}取引データが見つからず、市場価格との比較なしで評価されています。`,
           );
@@ -459,13 +463,26 @@ ${
     }
   }
 
+  // No MLIT data (not cached, or bulk grading): fall back to the median asking
+  // price of our own listings in the same ward and type. Free, no network.
+  let marketSource: "mlit" | "local" | null = marketAvgPrice != null ? "mlit" : null;
+  if (marketAvgPrice == null && !isRental) {
+    const local = await getLocalMarket(args.ward, args.propertyType);
+    if (local) {
+      marketAvgPrice = local.medianPrice;
+      marketAvgPricePerSqm = local.medianPpsm;
+      marketSource = "local";
+    }
+  }
+
   // 5. Score deterministically, BEFORE the LLM call. The model is told the
   // verdict and writes narrative to match it, rather than inventing a number we
   // then trust.
+  // Amenities stay out of the score so the AI button never changes the grade.
   const assessment = computeMatchScore(args, c, {
     marketAvgPrice,
     marketAvgPricePerSqm,
-    amenityCount: nearbyTotalCount,
+    amenityCount: null,
   });
   const score = assessment.score;
 
@@ -488,6 +505,7 @@ ${
     breakdown: assessment.breakdown,
     marketAvgPrice,
     marketAvgPricePerSqm,
+    marketSource,
     listingPricePerSqm,
     amenityCount: nearbyTotalCount,
     comparables,
@@ -531,8 +549,22 @@ async function persistScore(p: Prepared, evaluation: string) {
     // One patch, not three round trips — ownership was checked up front.
     await db.patch("matching", p.matchId, { evaluation, score: p.score, scoreDetail: p.scoreDetail });
   } catch (dbErr) {
-    console.error("[Rax AI] DB save failed:", dbErr);
+    console.error("[Gemini] DB save failed:", dbErr);
   }
+}
+
+/** Rule-based grade only: no LLM, no Places. Leaves any existing AI report untouched. */
+async function gradePrepared(items: Prepared[]) {
+  return Promise.all(items.map(async (p) => {
+    if (p.matchId) {
+      try {
+        await db.patch("matching", p.matchId, { score: p.score, scoreDetail: p.scoreDetail });
+      } catch (dbErr) {
+        console.error("[Grade] DB save failed:", dbErr);
+      }
+    }
+    return { matchId: p.matchId, score: p.score, scoreDetail: p.scoreDetail };
+  }));
 }
 
 const fallbackText = (message: string, score: number) =>
@@ -572,24 +604,27 @@ ${sections.join("\n\n")}
 
 【出力フォーマット指示】
 物件ごとに、必ず「=== 物件N ===」（Nは上記の物件番号）だけの行から書き始め、全${items.length}件を番号順に出力してください。
-各物件について、以下の4つの見出し（①〜④）をそのまま使用し、プロの不動産実務者としての視点と客観的なデータに基づいてわかりやすく記述してください。
+各物件は次の構成で、要点だけを極めて簡潔に書いてください。前置き・繰り返し・一般論は不要です。
+・最初に「【要約】」で始まる1文（60字以内）で、結論（買い・見送り・条件付きなど）と最大の理由を述べる。
+・続けて、以下の4つの見出し（①〜④）をそのまま使い、各見出しの下は「- 」で始まる箇条書き最大3項目のみとする。1項目は40字以内。重要度の高い順。数値は具体的に。段落文は書かない。
+・重要な語句・数値は **太字** にしてよい（1項目につき1〜2箇所まで）。
 
 ① 顧客ニーズ適合度
-（顧客の希望条件「価格、利回り、エリア、駅徒歩、道路幅員、構造、階数、こだわり等」に対する当物件の合致状況を明記）
+（希望条件に対する合致・不一致を項目ごとに）
 
 ② 物件の強み・投資メリット
-（立地、資産性、地盤・防災安定性（強固台地・水害低リスク等の場合は強みとして言及）、周辺環境、収益性、将来の出口戦略など。周辺施設データと成約相場・類似取引事例を具体的に引用すること）
+（立地、資産性、成約相場・類似取引事例との比較など）
 
 ③ 留意点・主要リスク
-（道路条件、耐震・築年数、法令制限、設備・管理面、および【ハザードマップ・地盤リスク（浸水深・液状化・1階居住部や受変電設備への影響）】を具体的に検証して記述）
+（価格乖離、ハザード・地盤、築年・構造、法令制限など。重大なものから順に）
 
 ④ プロの総合アドバイス・提案方針
-（買主顧客へ提示する際のポイントや交渉戦略、防災面・ハザード対策を踏まえた提案方針のまとめ）
+（顧客への提示ポイントと交渉方針）
 
 ※ 採点は既に確定しています。点数を自分で計算・変更・出力しないでください。
 ※ 各物件の【確定スコア】と矛盾しない論調で記述してください（低評価なら明確に低評価として、率直に書くこと）。
 ※【致命的な不適合】がある場合は、①と③で必ず明示し、他の長所で相殺できない旨を明記してください。
-※【要確認事項】は③に「現地調査・売主資料での確認が必要な項目」として列挙してください。推測で埋めないこと。
+※【要確認事項】は③の最後の1項目として「- 要確認: A、B、C」のように1行にまとめてください（項目ごとに行を分けない）。推測で埋めないこと。
 `.trim();
 
   const fail = async (message: string) =>
@@ -601,7 +636,7 @@ ${sections.join("\n\n")}
 
   try {
     const data = await callRaxChat(apiKey, {
-      model: "rax-4.0",
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       messages: [
         {
           role: "system",
@@ -610,17 +645,25 @@ ${sections.join("\n\n")}
         },
         { role: "user", content: fullPrompt },
       ],
-      temperature: 0.7,
-      max_tokens: Math.min(4096, 2000 * items.length),
+      temperature: 0.3,
+      // Gemini 2.5 counts hidden "thinking" against max_tokens; left on, it can
+      // exhaust the budget and return an empty answer.
+      reasoning_effort: "none",
+      max_tokens: Math.min(16000, 1500 * items.length),
       stream: false,
     });
 
     if (data.error) {
-      console.error("[Rax AI] API error:", data.error);
+      console.error("[Gemini] API error:", data.error);
       return fail(data.error.message || JSON.stringify(data.error));
     }
     const content: string = data.choices?.[0]?.message?.content || "";
     const texts = splitBatchReply(content, items.length);
+    if (texts.some((t) => !t)) {
+      console.warn(
+        `[Gemini] missing sections: finish_reason=${data.choices?.[0]?.finish_reason} len=${content.length} head=${JSON.stringify(content.slice(0, 300))}`,
+      );
+    }
 
     return Promise.all(items.map(async (p, i) => {
       if (!texts[i]) {
@@ -650,7 +693,7 @@ ${sections.join("\n\n")}
       return { matchId: p.matchId, evaluation, score: p.score, model: data.model, scoreDetail: p.scoreDetail };
     }));
   } catch (err) {
-    console.error("[Rax AI] Request failed:", err);
+    console.error("[Gemini] Request failed:", err);
     return fail(err instanceof Error ? err.message : String(err));
   }
 }
@@ -660,41 +703,40 @@ export const evaluateRouter = Router();
 evaluateRouter.post("/", route(async (req: Request) => {
   // Unauthenticated callers could otherwise burn LLM / Places / MLIT quota.
   requireUserId(req);
-  const apiKey = process.env.RAX_API_KEY;
-  if (!apiKey) return { error: "RAX_API_KEY not configured" };
-  const [result] = await evaluatePrepared(apiKey, [await prepareListing(req, req.body ?? {})]);
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return { error: "GEMINI_API_KEY not configured" };
+  const [result] = await evaluatePrepared(apiKey, [await prepareListing(req, req.body ?? {}, true)]);
   return result;
 }));
 
 export const MAX_BATCH = 5;
 
-/** Body: { items: EvaluateArgs[] } (≤ MAX_BATCH). Returns { results } in the same order. */
+/**
+ * Body: { items: EvaluateArgs[] } (≤ MAX_BATCH). Returns { results } in the same order.
+ * Grade only: bulk AI/Places calls per listing caused a ¥1.8M Google bill.
+ */
 evaluateRouter.post("/batch", route(async (req: Request) => {
   requireUserId(req);
-  const apiKey = process.env.RAX_API_KEY;
-  if (!apiKey) return { error: "RAX_API_KEY not configured" };
   const items = req.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > MAX_BATCH) {
     throw new HttpError(400, `items must be an array of 1-${MAX_BATCH} listings`);
   }
-  // Ownership is checked inside prepareListing, before any LLM spend.
   const prepared = await Promise.all(items.map((args: any) => prepareListing(req, args ?? {})));
-  return { results: await evaluatePrepared(apiKey, prepared) };
+  return { results: await gradePrepared(prepared) };
 }));
 
 /**
- * Server-side evaluation of matches by their IDs.
+ * Server-side grading of matches by their IDs (rule-based, no AI, no Places).
  * Bypasses Clerk HTTP auth since it runs on the backend server with direct DB access.
  */
 export async function evaluateMatchIdsServer(matchIds: string[]): Promise<number> {
-  const apiKey = process.env.RAX_API_KEY;
-  if (!apiKey || matchIds.length === 0) return 0;
+  if (matchIds.length === 0) return 0;
 
   // 1. Fetch matching rows
   const rawMatches = await db.getMany("matching", matchIds);
   const validMatches: Doc[] = [];
   for (const m of rawMatches) {
-    if (m && (!m.evaluation || !m.score)) validMatches.push(m);
+    if (m && m.score == null) validMatches.push(m);
   }
   if (validMatches.length === 0) return 0;
 
@@ -791,7 +833,7 @@ export async function evaluateMatchIdsServer(matchIds: string[]): Promise<number
     const chunk = items.slice(i, i + MAX_BATCH);
     try {
       const prepared = await Promise.all(chunk.map((args) => prepareListingInternal(args)));
-      const results = await evaluatePrepared(apiKey, prepared);
+      const results = await gradePrepared(prepared);
       evaluatedCount += results.filter((r) => r.score != null).length;
     } catch (chunkErr) {
       console.error(`[Server evaluate] batch error for chunk ${i}-${i + chunk.length}:`, chunkErr);

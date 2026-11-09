@@ -17,7 +17,6 @@ import {
   Trash2,
   Edit,
   X,
-  FileCheck2,
   ArrowRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -129,13 +128,11 @@ export default function CustomersPage() {
 
   return (
     <div className="page-shell">
-      {/* ── Page Header ── */}
       <div className="page-header">
         <div>
-          <div className="eyebrow-pill">Customer Registry</div>
           <h1 className="page-title">顧客管理</h1>
           <p className="page-subtitle">
-            買主情報の登録、連絡先管理、希望物件オーダーとの紐付けが一括で行えます
+            買主情報の登録、連絡先管理、希望物件との紐付けが一括で行えます
           </p>
         </div>
         <Button onClick={handleOpenCreate}>
@@ -144,11 +141,9 @@ export default function CustomersPage() {
         </Button>
       </div>
 
-      {/* ── KPI cards ── */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {[
           { icon: Users, color: "var(--brand)", bg: "var(--brand-soft)", label: "登録顧客数", value: customers?.length, loading: customers === undefined },
-          { icon: FileCheck2, color: "var(--info)", bg: "var(--info-soft)", label: "連携済みオーダー数", value: orders?.filter((o) => !!o.customerId).length, loading: orders === undefined },
           { icon: Building, color: "var(--warning)", bg: "var(--warning-soft)", label: "法人顧客数", value: customers?.filter((c) => !!c.company).length, loading: customers === undefined },
         ].map((kpi, i) => (
           <div key={i} className="kpi-card">
@@ -170,7 +165,6 @@ export default function CustomersPage() {
         ))}
       </div>
 
-      {/* ── Search bar ── */}
       <div className="toolbar">
         <div className="relative w-full flex-1 md:max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
@@ -187,7 +181,6 @@ export default function CustomersPage() {
         </Badge>
       </div>
 
-      {/* Customer List */}
       {customers === undefined ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {[1, 2, 3].map((n) => <Skeleton key={n} className="h-52 w-full rounded-2xl" />)}
@@ -262,9 +255,9 @@ export default function CustomersPage() {
                 </div>
 
                 <div className="pt-3 flex items-center justify-between border-t border-[var(--border-subtle)]">
-                  <Badge variant="brand" className="font-bold">オーダー {orderCount} 件</Badge>
+                  <Badge variant="brand" className="font-bold">{orderCount} 件</Badge>
                   <Button variant="ghost" size="sm" onClick={() => navigate("/orders")} className="text-xs text-[var(--brand)] font-bold hover:bg-[var(--brand-soft)]">
-                    オーダー確認
+                    確認
                     <ArrowRight className="w-3 h-3 ml-1" />
                   </Button>
                 </div>
@@ -274,7 +267,6 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {/* Create / Edit Customer Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">

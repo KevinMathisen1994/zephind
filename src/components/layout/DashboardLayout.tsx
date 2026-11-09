@@ -24,7 +24,7 @@ export default function DashboardLayout() {
             <span className="font-serif text-[17.5px] leading-none">Z</span>
           </div>
           <span className="font-serif text-[18px] leading-none tracking-[0.01em] text-[#f4efe6]">
-            Zephind
+            Zephinder
           </span>
         </div>
         <button

@@ -1,6 +1,7 @@
 import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
+import { pace } from "../lib/pace";
 import type { PropertyListing, ScrapeResult } from "../types";
 
 
@@ -250,8 +251,19 @@ export async function scrapeKenbiya(areaCode: string, filterTypes?: string[], de
       logger.info(`[Kenbiya Scraper] Loading page ${p + 1} for ${wardName}: ${pageUrl}`);
 
       try {
-        await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-      } catch {
+        await pace("kenbiya");
+        let resp = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+        // kenbiya answers bursts with HTTP 429 and an empty page, which reads
+        // exactly like "0 listings". Back off once, then fail loudly.
+        if (resp?.status() === 429) {
+          logger.warn(`[Kenbiya Scraper] 429 on ${pageUrl}, waiting 45s before one retry`);
+          await new Promise((r) => setTimeout(r, 45_000));
+          await pace("kenbiya");
+          resp = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+          if (resp?.status() === 429) throw new Error(`kenbiya rate-limited (HTTP 429) on ${pageUrl}`);
+        }
+      } catch (err) {
+        if (String((err as Error).message).includes("rate-limited")) throw err;
         logger.warn(`[Kenbiya Scraper] Failed to load ${pageUrl}`);
         break;
       }

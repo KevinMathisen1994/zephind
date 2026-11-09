@@ -17,6 +17,11 @@ matchingRouter.get("/by-order/:orderId", route(async (req) => {
   return db.list("matching", { where: { orderId: req.params.orderId, userId } });
 }));
 
+matchingRouter.get("/by-listing/:listingId", route(async (req) => {
+  const userId = requireUserId(req);
+  return db.list("matching", { where: { listingId: req.params.listingId, userId } });
+}));
+
 matchingRouter.post("/", route(async (req) => {
   const userId = requireUserId(req);
   const { orderId, listingId, score, status } = req.body ?? {};
