@@ -387,6 +387,13 @@ type ListingFilter = {
 /** 14 days, the window the portals themselves treat as 新着. */
 const NEW_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
+function isNewListing(listing: Doc<"listings"> | undefined): boolean {
+  return (
+    Boolean(listing?.isNew) ||
+    (listing?.postedAt != null && Date.now() - listing.postedAt <= NEW_WINDOW_MS)
+  );
+}
+
 const BASE_FILTERS: ListingFilter[] = [
   {
     key: "recentMatch",
@@ -410,10 +417,7 @@ const BASE_FILTERS: ListingFilter[] = [
     label: "新着",
     // The portal's own badge, or a posted date inside the same window. Discovery
     // time is deliberately NOT used: everything is "new" on a first sweep.
-    test: (_m, listing) =>
-      Boolean(listing?.isNew) ||
-      (listing?.postedAt != null &&
-        Date.now() - listing.postedAt <= NEW_WINDOW_MS),
+    test: (_m, listing) => isNewListing(listing),
   },
   {
     key: "hasPostedDate",
@@ -1054,7 +1058,28 @@ export default function OrdersPage() {
     setSyncingMail(true);
     setMailNotice(null);
     try {
-      const results = await syncMailNow({ fullSync: true, daysBack: 90 });
+      // Server handles a small batch per call (edge function time limit), so loop and sum per account.
+      const totals = new Map<string, any>();
+      let offset = 0;
+      for (;;) {
+        const batch = await syncMailNow({ fullSync: true, daysBack: 90, offset });
+        for (const r of batch.results) {
+          const t = totals.get(r.provider);
+          totals.set(r.provider, t ? {
+            ...r,
+            error: r.error ?? t.error,
+            synced: (t.synced ?? 0) + (r.synced ?? 0),
+            listingsFound: (t.listingsFound ?? 0) + (r.listingsFound ?? 0),
+            filteredOut: (t.filteredOut ?? 0) + (r.filteredOut ?? 0),
+            messageErrors: [...(t.messageErrors ?? []), ...(r.messageErrors ?? [])],
+          } : r);
+        }
+        if (batch.results.every((r: any) => r.done || r.error)) break;
+        offset = batch.nextOffset;
+        const total = Math.max(...batch.results.map((r: any) => r.total ?? 0));
+        setMailNotice(`同期中… ${Math.min(offset, total)} / ${total}件`);
+      }
+      const results = [...totals.values()];
       // "0 listings found" and "every message failed extraction" (e.g. Rax AI
       // down) used to look identical — surface message counts and any real
       // errors so a stuck sync is diagnosable instead of looking like "no new
@@ -1386,6 +1411,11 @@ export default function OrdersPage() {
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({});
+  const goToPage = (orderId: string, page: number) => {
+    setCurrentPage((prev) => ({ ...prev, [orderId]: page }));
+    // Page scrolls inside DashboardLayout's <main>, so window.scrollTo is a no-op.
+    document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
+  };
   // Per-order sort of the extracted listings. Newest-first is the default.
   const [sortKey, setSortKey] = useState<Record<string, SortKey>>({});
   // Row order per order, kept until the sort, filter or match set changes. Without it
@@ -4356,13 +4386,17 @@ export default function OrdersPage() {
                                       title="提案メールに含める"
                                       aria-label="提案に含める"
                                     />
-                                    {/* One 新着 badge: today's match OR the portal's
-                                        own flag. Two badges said the same thing. */}
                                     <span className="text-[17px] font-bold text-[var(--text-primary)] truncate">
                                       {listing?.address ||
                                         m.listingId?.slice(0, 8) ||
                                         "—"}
                                     </span>
+                                    {/* Same rule as the 新着 tab so badge and count agree. */}
+                                    {isNewListing(listing) && (
+                                      <span className="shrink-0 rounded-full bg-[#3f6b3f] px-2.5 py-0.5 text-[12.5px] font-bold text-white">
+                                        新着
+                                      </span>
+                                    )}
                                     {(listing?.station || listing?.walkMinutes != null || listing?.area != null || listing?.landSize != null) && (
                                       <>
                                         <div className="basis-full h-0" />
@@ -4576,39 +4610,39 @@ export default function OrdersPage() {
                                   >
                                     <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-white/95 backdrop-blur">
                                       <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3.5">
-                                        <div className="min-w-0 flex-1">
-                                          <div className="truncate text-[17px] font-bold text-[var(--text-primary)]">
-                                            {listing.address || "物件詳細"}
-                                          </div>
-                                          <div className="text-[13.5px] text-[var(--text-muted)]">
-                                            {[
-                                              listing.station
-                                                ? `${listing.station}${listing.walkMinutes != null ? ` 徒歩${listing.walkMinutes}分` : ""}`
-                                                : null,
-                                              listing.area != null || listing.landSize != null
-                                                ? `${listing.area ?? listing.landSize}㎡`
-                                                : null,
-                                            ]
-                                              .filter(Boolean)
-                                              .join(" ・ ")}
-                                          </div>
-                                        </div>
-                                        {listing.price ? (
-                                          <div className="shrink-0 text-right">
-                                            <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
-                                              {listing.price.toLocaleString()}
-                                            </span>
-                                            <span className="ml-1.5 text-[13px] text-slate-600">万円</span>
-                                            {extractedScore !== undefined && (
-                                              <div className="mt-1.5"><ScoreChip score={extractedScore} small /></div>
-                                            )}
-                                          </div>
-                                        ) : null}
+                                        <button
+                                          type="button"
+                                          onClick={() => setExpandedMatch(null)}
+                                          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-medium text-slate-800 transition-colors hover:bg-[#e8e7e2]"
+                                          title="一覧に戻る (Esc)"
+                                        >
+                                          <ArrowLeft className="h-4 w-4" />
+                                          一覧に戻る
+                                        </button>
+                                        {extractedScore !== undefined && (
+                                          <div className="ml-auto shrink-0"><ScoreChip score={extractedScore} small /></div>
+                                        )}
                                       </div>
                                     </div>
                                   <div className="mx-auto w-full max-w-5xl flex-1 space-y-5 px-5 pb-10 pt-6 text-sm">
+                                    <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
+                                    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+                                      <h2 className="min-w-0 text-[20px] font-bold text-[var(--text-primary)]">
+                                        {listing.address || "物件詳細"}
+                                      </h2>
+                                      {listing.price ? (
+                                        <div className="shrink-0">
+                                          <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
+                                            {listing.price.toLocaleString()}
+                                          </span>
+                                          <span className="ml-1.5 text-[13px] text-slate-600">万円</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                     {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
-                                    {(listing.area != null ||
+                                    {(listing.station ||
+                                      listing.walkMinutes != null ||
+                                      listing.area != null ||
                                       listing.landSize != null ||
                                       listing.floor != null ||
                                       listing.elevators != null ||
@@ -4619,17 +4653,25 @@ export default function OrdersPage() {
                                       listing.buildYear != null ||
                                       listing.buildingCoverageRatio != null ||
                                       listing.floorAreaRatio != null) && (
-                                      <div className="grid grid-cols-2 gap-x-8 gap-y-5 rounded-xl border border-[var(--border-subtle)] bg-white p-5 sm:grid-cols-4">
-                                        {listing.area != null && (
+                                      <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-[var(--border-subtle)] pt-5 sm:grid-cols-4">
+                                        {(listing.station || listing.walkMinutes != null) && (
                                           <div>
-                                            <div className="text-xs text-slate-500">専有/延床面積</div>
-                                            <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.area}㎡</div>
+                                            <div className="text-xs text-slate-500">最寄駅</div>
+                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                              {[listing.station, listing.walkMinutes != null ? `徒歩${listing.walkMinutes}分` : null].filter(Boolean).join(" ")}
+                                            </div>
                                           </div>
                                         )}
                                         {listing.landSize != null && (
                                           <div>
                                             <div className="text-xs text-slate-500">土地面積</div>
                                             <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.landSize}㎡</div>
+                                          </div>
+                                        )}
+                                        {listing.area != null && (
+                                          <div>
+                                            <div className="text-xs text-slate-500">専有/延床面積</div>
+                                            <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.area}㎡</div>
                                           </div>
                                         )}
                                         {listing.floor != null && (
@@ -4682,6 +4724,7 @@ export default function OrdersPage() {
                                         )}
                                       </div>
                                     )}
+                                    </div>
 
                                     {/* Full detail-page table (管理費, 修繕積立金, 向き, 土地権利, ...). */}
                                     {(() => {
@@ -5172,16 +5215,7 @@ export default function OrdersPage() {
                                     })()}
                                   </div>
                                     <div className="sticky bottom-0 z-10 mt-auto border-t border-[var(--border-subtle)] bg-white">
-                                      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-3">
-                                        <button
-                                          type="button"
-                                          onClick={() => setExpandedMatch(null)}
-                                          className="inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-5 text-sm font-medium text-slate-800 transition-colors hover:bg-[#e8e7e2]"
-                                          title="一覧に戻る (Esc)"
-                                        >
-                                          <ArrowLeft className="h-4 w-4" />
-                                          一覧に戻る
-                                        </button>
+                                      <div className="mx-auto flex max-w-5xl items-center justify-end gap-3 px-5 py-3">
                                     {/* ★ shortlist. Sends a SNAPSHOT of the listing,
                                     not just its id: `listings` rows are deleted
                                     with the last order that matched them, and a
@@ -5303,10 +5337,7 @@ export default function OrdersPage() {
                                       size="sm"
                                       disabled={validPage <= 1}
                                       onClick={() =>
-                                        setCurrentPage((prev) => ({
-                                          ...prev,
-                                          [order._id]: validPage - 1,
-                                        }))
+                                        goToPage(order._id, validPage - 1)
                                       }
                                       className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
                                     >
@@ -5330,10 +5361,7 @@ export default function OrdersPage() {
                                               key={p}
                                               type="button"
                                               onClick={() =>
-                                                setCurrentPage((prev) => ({
-                                                  ...prev,
-                                                  [order._id]: p,
-                                                }))
+                                                goToPage(order._id, p)
                                               }
                                               className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
                                                 validPage === p
@@ -5368,10 +5396,7 @@ export default function OrdersPage() {
                                       size="sm"
                                       disabled={validPage >= totalPages}
                                       onClick={() =>
-                                        setCurrentPage((prev) => ({
-                                          ...prev,
-                                          [order._id]: validPage + 1,
-                                        }))
+                                        goToPage(order._id, validPage + 1)
                                       }
                                       className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
                                     >

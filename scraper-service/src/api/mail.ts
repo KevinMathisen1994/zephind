@@ -87,7 +87,47 @@ mailRouter.put("/settings", route(async (req) => {
 
 mailRouter.post("/sync", route(async (req) => {
   const userId = requireUserId(req);
-  return syncNow(userId, { fullSync: req.body?.fullSync, daysBack: req.body?.daysBack });
+  const offset = Number(req.body?.offset ?? 0);
+  if (!Number.isInteger(offset) || offset < 0) throw new Error("offset must be a non-negative integer");
+  return syncNow(userId, { fullSync: req.body?.fullSync, daysBack: req.body?.daysBack, offset });
+}));
+
+/** Emails the sync turned into listings, newest first, with the caller's orders each one matched. */
+mailRouter.get("/matched-emails", route(async (req) => {
+  const userId = requireUserId(req);
+  const { data, error } = await db.raw
+    .from("listings")
+    .select("_id,url,title,address,price,emailSubject,emailFrom,emailReceivedAt")
+    .eq("source", "email")
+    .eq("userId", userId)
+    .order("emailReceivedAt", { ascending: false })
+    .limit(1000);
+  if (error) throw new Error(`matched emails: ${error.message}`);
+  const listings = data ?? [];
+
+  const matches = listings.length
+    ? (await db.selectIn("matching", "listingId,orderId,userId", "listingId", listings.map((l) => l._id)))
+      .filter((m) => m.userId === userId)
+    : [];
+  const orders = matches.length
+    ? await db.selectIn("orders", "_id,name", "_id", [...new Set(matches.map((m) => m.orderId))])
+    : [];
+  const orderName = new Map(orders.map((o) => [o._id, o.name || "(名称なし)"]));
+
+  // Listing urls are `email:{provider}:{messageId}:{n}`; one email can yield several listings.
+  const byMessage = new Map<string, any>();
+  for (const l of listings) {
+    const key = String(l.url).split(":").slice(0, 3).join(":");
+    const mail = byMessage.get(key) ?? {
+      id: key, subject: l.emailSubject, from: l.emailFrom, receivedAt: l.emailReceivedAt, listings: [],
+    };
+    mail.listings.push({
+      _id: l._id, title: l.title, address: l.address, price: l.price,
+      orders: matches.filter((m) => m.listingId === l._id).map((m) => orderName.get(m.orderId) ?? "(削除済み)"),
+    });
+    byMessage.set(key, mail);
+  }
+  return [...byMessage.values()];
 }));
 
 mailRouter.post("/inspect", route(async (req) => {

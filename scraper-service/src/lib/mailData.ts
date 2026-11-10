@@ -118,8 +118,9 @@ export async function ingestSettingsForUser(userId: string) {
  * frontend's buildOrderCriteria() and cli.ts's toCriteria(), so an older order
  * that only has walkMinutes etc. nested still matches correctly.
  */
-export async function listAllOrderCriteria() {
-  const orders = await db.list("orders");
+/** Only the mailbox owner's orders: matching against everyone's leaked one user's mail to another. */
+export async function orderCriteriaForUser(userId: string) {
+  const orders = await db.list("orders", { where: { userId } });
   return orders.map((order) => {
     const nested: any = order.criteria || {};
     const pick = (name: string) => (order[name] !== undefined && order[name] !== null ? order[name] : nested[name]);
@@ -184,13 +185,17 @@ export async function saveEmailListing(args: {
 
   let listingId: string;
   if (existing) {
+    if (existing.userId && existing.userId !== args.userId) return { listingId: existing._id, matchesCreated: 0 };
     listingId = existing._id;
+    // Rows written before listings had an owner column.
+    if (!existing.userId) await db.patch("listings", listingId, { userId: args.userId });
   } else {
     const l = args.listing ?? {};
     const str = (v: unknown) => (typeof v === "string" ? v : undefined);
     const num = (v: unknown) => (typeof v === "number" ? v : undefined);
     listingId = await db.insert("listings", {
       url: args.url,
+      userId: args.userId,
       source: "email",
       status: "new",
       title: str(l.title),

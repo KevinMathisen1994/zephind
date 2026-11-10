@@ -27,7 +27,7 @@ import { logger } from "../logger";
 import { route } from "./handler";
 import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
-import { enrichListingSpecs } from "../lib/listingSpecs";
+import { enrichListingSpecs, SPEC_SOURCES } from "../lib/listingSpecs";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -267,7 +267,7 @@ ingestRouter.post("/backfill-specs", route(async (req) => {
     .from("listings")
     .select("_id")
     .is("specs", null)
-    .eq("source", "tokyu")
+    .in("source", [...SPEC_SOURCES])
     .not("url", "is", null)
     .order("_creationTime", { ascending: false })
     .limit(limit);

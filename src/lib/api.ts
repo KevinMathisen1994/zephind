@@ -192,6 +192,7 @@ export const api = {
     inspectRecentMail: endpoint({
       method: "POST", key: "mail.inspect", path: () => "/api/mail/inspect", body: (a) => a,
     }),
+    matchedEmails: endpoint({ method: "GET", key: "mail.matchedEmails", path: () => "/api/mail/matched-emails" }),
     getAttachmentData: endpoint({
       method: "POST", key: "mail.attachment", path: () => "/api/mail/attachment", body: (a) => a,
     }),

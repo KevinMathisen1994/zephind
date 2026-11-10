@@ -811,16 +811,21 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
     return { synced: 0, listingsFound: 0, error: "REAUTH_REQUIRED" };
   }
 
-  const orders = await mailData.listAllOrderCriteria();
+  const orders = await mailData.orderCriteriaForUser(account.userId);
   // Read once per account, not per message: these rules never change mid-sync.
   const ingestSettings = await mailData.ingestSettingsForUser(account.userId);
 
   const cursorToUse = options.fullSync ? null : account.syncCursor;
-  const { ids, nextCursor } = await listNewMessageIds(account.provider, accessToken, cursorToUse, {
+  const { ids: allIds, nextCursor } = await listNewMessageIds(account.provider, accessToken, cursorToUse, {
     daysBack: options.daysBack ?? 90,
     maxTotal: options.maxTotal ?? 500,
     settings: ingestSettings,
   });
+  // Batched mode (UI sync): the edge function dies (546) if one request handles hundreds of mails.
+  // shortcut: offset over a fresh newest-first list, so mail arriving mid-sync can be missed until the next sync.
+  const offset = options.batchSize ? options.offset ?? 0 : 0;
+  const ids = options.batchSize ? allIds.slice(offset, offset + options.batchSize) : allIds;
+  const done = offset + ids.length >= allIds.length;
 
   let listingsFound = 0;
   let messagesWithListings = 0;
@@ -891,12 +896,15 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
           listingsFound,
           filteredOut,
           messageErrors,
+          done: true,
+          total: allIds.length,
         };
       }
     }
   }
 
-  await mailData.saveSyncCursor(account._id, nextCursor, Date.now());
+  // Cursor only after the last batch, else the next incremental sync skips unprocessed mail.
+  if (done) await mailData.saveSyncCursor(account._id, nextCursor, Date.now());
 
   return {
     synced: ids.length,
@@ -905,10 +913,18 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
     listingsFound,
     filteredOut,
     messageErrors,
+    done,
+    total: allIds.length,
   };
 }
 
-export async function syncNow(userId: string, opts: { fullSync?: boolean; daysBack?: number } = {}) {
+const SYNC_BATCH_SIZE = 10;
+
+/** One batch per account per call; the client repeats with `nextOffset` until every result is `done`. */
+export async function syncNow(
+  userId: string,
+  opts: { fullSync?: boolean; daysBack?: number; offset?: number } = {},
+) {
   const accounts = await mailData.accountsForUser(userId);
   const results = [];
   for (const account of accounts) {
@@ -917,10 +933,12 @@ export async function syncNow(userId: string, opts: { fullSync?: boolean; daysBa
       ...(await syncOneAccount(account, {
         fullSync: opts.fullSync ?? true,
         daysBack: opts.daysBack ?? 90,
+        offset: opts.offset ?? 0,
+        batchSize: SYNC_BATCH_SIZE,
       })),
     });
   }
-  return results;
+  return { results, nextOffset: (opts.offset ?? 0) + SYNC_BATCH_SIZE };
 }
 
 export async function inspectRecentMail(
@@ -1071,7 +1089,7 @@ export async function getAttachmentData(
 
 export async function getEmailDetailsForListing(userId: string, listingId: string) {
   const listing = await mailData.getListingById(listingId);
-  if (!listing || listing.source !== "email" || !listing.url) return null;
+  if (!listing || listing.source !== "email" || !listing.url || listing.userId !== userId) return null;
 
   const parts = String(listing.url).split(":");
   const provider = parts[1] || "gmail";

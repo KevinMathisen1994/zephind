@@ -1,5 +1,5 @@
-import { Router } from "express";
-import { db } from "../db";
+import { Router, type Request } from "express";
+import { db, type Doc } from "../db";
 import { requireUserId } from "../auth/authz";
 import { route } from "./handler";
 
@@ -19,6 +19,10 @@ const LISTING_FIELDS = [
   "roadWidth", "frontage", "yield",
   "previousPrice", "initialPrice", "priceDropPct", "priceDropped", "priceChangedAt",
 ] as const;
+
+/** Scraped listings are shared; email listings hold someone's mail, so only their owner sees them. */
+const visibleTo = (req: Request) => (row: Doc | null): row is Doc =>
+  !!row && (row.source !== "email" || (!!row.userId && row.userId === req.identity?.subject));
 
 function num(v: unknown): number | undefined {
   const n = Number(v);
@@ -40,23 +44,28 @@ listingsRouter.get("/", route(async (req) => {
   if (priceMax != null) q = q.or(`price.is.null,price.lte.${priceMax}`);
   const { data, error } = await q.limit(limit);
   if (error) throw new Error(`list listings: ${error.message}`);
-  return data ?? [];
+  // shortcut: filtered after the limit, so other users' email rows can use up part of it; move into the query if that matters.
+  return (data ?? []).filter(visibleTo(req));
 }));
 
 listingsRouter.post("/by-ids", route(async (req) => {
   const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (ids.length === 0) return [];
   const rows = await db.getMany("listings", ids);
-  return rows.filter(Boolean);
+  return rows.filter(visibleTo(req));
 }));
 
 listingsRouter.get("/by-url", route(async (req) => {
   const url = typeof req.query.url === "string" ? req.query.url : "";
   if (!url) throw new Error("url is required");
-  return db.first("listings", { where: { url } });
+  const row = await db.first("listings", { where: { url } });
+  return visibleTo(req)(row) ? row : null;
 }));
 
-listingsRouter.get("/:id", route(async (req) => db.get("listings", req.params.id)));
+listingsRouter.get("/:id", route(async (req) => {
+  const row = await db.get("listings", req.params.id);
+  return visibleTo(req)(row) ? row : null;
+}));
 
 listingsRouter.post("/", route(async (req) => {
   requireUserId(req);
