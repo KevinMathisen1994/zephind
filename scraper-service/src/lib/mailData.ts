@@ -246,6 +246,24 @@ export async function saveEmailListing(args: {
   return { listingId, matchesCreated };
 }
 
+export async function processedMessageIds(provider: string, messageIds: string[]): Promise<Set<string>> {
+  if (messageIds.length === 0) return new Set();
+  const { data, error } = await db.raw
+    .from("mailProcessed")
+    .select("messageId")
+    .eq("provider", provider)
+    .in("messageId", messageIds);
+  if (error) throw new Error(`processedMessageIds: ${error.message}`);
+  return new Set((data ?? []).map((r: any) => r.messageId));
+}
+
+export async function markMessageProcessed(provider: string, messageId: string, userId: string) {
+  const { error } = await db.raw
+    .from("mailProcessed")
+    .upsert({ provider, messageId, userId, processedAt: Date.now() });
+  if (error) throw new Error(`markMessageProcessed: ${error.message}`);
+}
+
 /**
  * Listings already ingested from one message, found by the `email:{provider}:
  * {messageId}:{n}` pseudo-url saveEmailListing mints. Lets the inspector show

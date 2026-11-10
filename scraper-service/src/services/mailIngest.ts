@@ -477,15 +477,13 @@ export async function extractListings(
     return { listings: parsed.listings, engine: "rules", reason: parsed.reason };
   }
 
-  // Gemini before the rules' verdict, whenever there is a PDF to read. The
-  // needsLlm gate exists to keep contentless text away from a text-only model;
-  // it does not apply to a model reading the document itself, and a "not a
-  // listing" verdict reached from unreadable pdfToText output is exactly the
-  // case Gemini is here to rescue.
-  if (process.env.GEMINI_API_KEY && pdfBuffers?.length > 0) {
+  // Gemini first: always when there is a PDF (the needsLlm gate is for text-only
+  // input, and unreadable pdfToText output is what Gemini rescues), and for
+  // text that needs a model, since Groq's free tier runs out at ~55 mails/day.
+  if (process.env.GEMINI_API_KEY && (pdfBuffers?.length > 0 || parsed.needsLlm)) {
     try {
-      const fromPdf = await extractListingsWithGemini(emailText, pdfBuffers);
-      console.log(`[MailIngest] Gemini read ${pdfBuffers.length} PDF(s): ${fromPdf.length} listing(s)`);
+      const fromPdf = await extractListingsWithGemini(emailText, pdfBuffers ?? []);
+      console.log(`[MailIngest] Gemini read ${pdfBuffers?.length ?? 0} PDF(s): ${fromPdf.length} listing(s)`);
       // [] is Gemini's answer, not a failure, so it is not second-guessed by
       // re-running the text-only path over the same unreadable text.
       return { listings: fromPdf, engine: fromPdf.length > 0 ? "gemini" : "none", reason: parsed.reason };
@@ -832,8 +830,11 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
   let filteredOut = 0;
   const messageErrors: string[] = [];
   const subjectsSeen: string[] = [];
+  const processed = await mailData.processedMessageIds(account.provider, ids);
+  const alreadyProcessed = processed.size;
 
   for (const id of ids) {
+    if (processed.has(id)) continue;
     try {
       const msg =
         account.provider === "gmail"
@@ -850,7 +851,11 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
 
       const emailText = `件名: ${msg.subject}\n差出人: ${msg.from}\n\n${msg.bodyText}`;
       const { listings: extracted } = await extractListings(emailText, msg.pdfBuffers);
-      if (extracted.length === 0) continue;
+      // Not marked when rules filtered it out or extraction threw, so a settings change or retry still reaches it.
+      if (extracted.length === 0) {
+        await mailData.markMessageProcessed(account.provider, id, account.userId);
+        continue;
+      }
       messagesWithListings++;
 
       for (let i = 0; i < extracted.length; i++) {
@@ -878,6 +883,7 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
         });
         listingsFound++;
       }
+      await mailData.markMessageProcessed(account.provider, id, account.userId);
     } catch (e: any) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[MailIngest] Failed to process message ${id}:`, e);
@@ -896,6 +902,7 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
           listingsFound,
           filteredOut,
           messageErrors,
+          alreadyProcessed,
           done: true,
           total: allIds.length,
         };
@@ -913,6 +920,7 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
     listingsFound,
     filteredOut,
     messageErrors,
+    alreadyProcessed,
     done,
     total: allIds.length,
   };
@@ -1044,7 +1052,8 @@ export async function inspectRecentMail(
 export async function syncAllAccounts() {
   const accounts = await mailData.allAccounts();
   for (const account of accounts) {
-    if (account.needsReconnect) continue;
+    // No cursor = never fully synced; the 90-day backfill is the button's job, it does not fit one cron call.
+    if (account.needsReconnect || !account.syncCursor) continue;
     try {
       await syncOneAccount(account);
     } catch (e) {
