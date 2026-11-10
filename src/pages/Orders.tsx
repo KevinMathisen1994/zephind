@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 // Aliased so the call sites below read unchanged. useAction and useMutation
 // are the same hook now: both just POST to the backend.
 import {
@@ -989,6 +990,7 @@ export default function OrdersPage() {
     }
   };
 
+  const queryClient = useQueryClient();
   const handleConnectMail = async (provider: string) => {
     setConnectingMailProvider(provider);
     setMailNotice(null);
@@ -998,23 +1000,36 @@ export default function OrdersPage() {
         redirectTo: window.location.href,
       });
       const popup = window.open(url, "zephind-mail-oauth", "width=520,height=680");
-      if (!popup) window.location.assign(url);
+      if (!popup) {
+        // Whole tab navigates to Google; leave the spinner on until it does.
+        window.location.assign(url);
+        return;
+      }
+      // Spinner stays while the popup is open; closing it without finishing ends the wait.
+      const timer = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(timer);
+          setConnectingMailProvider(null);
+          void queryClient.invalidateQueries({ queryKey: ["mail.accounts"] });
+        }
+      }, 500);
     } catch (err) {
       setMailNotice(
         `メールアカウントの接続を開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
       );
-    } finally {
       setConnectingMailProvider(null);
     }
   };
 
-  // The OAuth popup posts back here on completion (see convex/http.js
-  // resultPage) — Convex's own reactivity then refreshes mailAccounts.
+  // The OAuth popup posts back here on completion. Accounts are a REST query now,
+  // so they must be refetched explicitly or the new account (and the sync button) stays hidden.
   useEffect(() => {
     const fallback = (ok: boolean) => (ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "zephind-oauth") {
         setMailNotice(e.data.message || fallback(e.data.ok));
+        setConnectingMailProvider(null);
+        void queryClient.invalidateQueries({ queryKey: ["mail.accounts"] });
       }
     };
     window.addEventListener("message", onMessage);
@@ -1029,13 +1044,14 @@ export default function OrdersPage() {
       window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
     }
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [queryClient]);
 
   const handleInspectMail = async (runAi = false) => {
     setInspecting(true);
     try {
       const rows = (await inspectRecentMail({
-        limit: 100,
+        // 100 in one request hit the edge function's limit (HTTP 546).
+        limit: 20,
         daysBack: 90,
         matchingOnly: true,
         // Runs the same extraction a sync performs — one model call per message
@@ -1071,6 +1087,7 @@ export default function OrdersPage() {
             synced: (t.synced ?? 0) + (r.synced ?? 0),
             listingsFound: (t.listingsFound ?? 0) + (r.listingsFound ?? 0),
             filteredOut: (t.filteredOut ?? 0) + (r.filteredOut ?? 0),
+            alreadyProcessed: (t.alreadyProcessed ?? 0) + (r.alreadyProcessed ?? 0),
             messageErrors: [...(t.messageErrors ?? []), ...(r.messageErrors ?? [])],
           } : r);
         }
@@ -1094,6 +1111,9 @@ export default function OrdersPage() {
         }
         if ((r.filteredOut ?? 0) > 0) {
           parts.push(`${r.filteredOut}件を設定により除外`);
+        }
+        if ((r.alreadyProcessed ?? 0) > 0) {
+          parts.push(`${r.alreadyProcessed}件は処理済み`);
         }
         if ((r.messageErrors?.length ?? 0) > 0) {
           parts.push(`${r.messageErrors.length}件でエラー: ${r.messageErrors[0]}`);
@@ -2815,7 +2835,7 @@ export default function OrdersPage() {
                   ) : (
                     <Mail className="h-3.5 w-3.5" />
                   )}
-                  {p.label}を接続
+                  {connectingMailProvider === p.provider ? `${p.label}に接続中…` : `${p.label}を接続`}
                 </Button>
               ))}
 
