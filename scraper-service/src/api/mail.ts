@@ -89,7 +89,9 @@ mailRouter.post("/sync", route(async (req) => {
   const userId = requireUserId(req);
   const offset = Number(req.body?.offset ?? 0);
   if (!Number.isInteger(offset) || offset < 0) throw new Error("offset must be a non-negative integer");
-  return syncNow(userId, { fullSync: req.body?.fullSync, daysBack: req.body?.daysBack, offset });
+  const res = await syncNow(userId, { fullSync: req.body?.fullSync, daysBack: req.body?.daysBack, offset });
+  // Frontends built before batching send no offset and expect a bare array (one batch per click).
+  return req.body?.offset === undefined ? res.results : res;
 }));
 
 /** Emails the sync turned into listings, newest first, with the caller's orders each one matched. */
