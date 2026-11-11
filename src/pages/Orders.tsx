@@ -26,7 +26,6 @@ import {
   formatJaDate,
   formatJaDateTime,
   formatJaDateTimeShort,
-  formatJaTime,
 } from "../lib/dateFormat";
 import { TOKYO_WARDS, TOKYO_CITIES, wardLabelToCode } from "../lib/tokyoWards";
 import {
@@ -586,21 +585,18 @@ function scrapeProgressSummary(order: Doc<"orders">) {
   return { done, total, active: shards.flatMap((s) => s.active), etaMin };
 }
 
-function ScrapeProgressLine({ order }: { order: Doc<"orders"> }) {
+function ScrapeProgressLine({ order, showSites = false }: { order: Doc<"orders">; showSites?: boolean }) {
   const s = scrapeProgressSummary(order);
   if (!s) {
-    return <span className="text-emerald-700">起動中（クラウド準備に1〜2分）…</span>;
+    return <span className="text-emerald-800">準備中です（1〜2分ほどかかります）</span>;
   }
   const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+  const sites =
+    s.active.length > 2 ? `${s.active.slice(0, 2).join("、")} ほか${s.active.length - 2}サイト` : s.active.join("、");
   return (
-    <span className="flex w-full flex-col gap-1">
-      <span className="flex flex-wrap items-center gap-x-2 text-emerald-800">
-        <span className="truncate">
-          {s.active.length ? `${s.active.join("・")} を検索中` : "仕上げ中"}
-        </span>
-        <span className="font-mono">
-          {s.done}/{s.total}
-        </span>
+    <span className="flex w-full flex-col gap-1.5">
+      <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-emerald-900">
+        <span className="font-semibold">{pct}% 完了</span>
         <span>
           {s.etaMin != null ? `残り約${s.etaMin}分` : s.done >= s.total ? "まもなく完了" : "残り時間を計算中"}
         </span>
@@ -614,6 +610,7 @@ function ScrapeProgressLine({ order }: { order: Doc<"orders"> }) {
       >
         <span className="block h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
       </span>
+      {showSites && sites && <span className="text-[13px] text-emerald-700">確認中のサイト: {sites}</span>}
     </span>
   );
 }
@@ -1464,31 +1461,6 @@ export default function OrdersPage() {
   const canceledLocalRunsRef = useRef<Set<string>>(new Set());
 
   const [scrapeSource, setScrapeSource] = useState<Record<string, string>>({});
-  const [activeScrapeSites, setActiveScrapeSites] = useState<
-    Record<string, string>
-  >({});
-
-  const getOrderSiteLabel = (order: Doc<"orders">) => {
-    if (
-      order.scrapingStatus &&
-      order.scrapingStatus !== "completed" &&
-      order.scrapingStatus !== "failed" &&
-      order.scrapingStatus !== "cancelled" &&
-      order.scrapingStatus !== "dispatched"
-    ) {
-      return order.scrapingStatus;
-    }
-    if (order.activeSource && order.activeSource !== "all") {
-      const src = order.activeSource;
-      const label = SOURCE_LABELS[src] || src;
-      return `${label} を検索中...`;
-    }
-    if (activeScrapeSites[order._id]) {
-      const s = activeScrapeSites[order._id];
-      return s.includes("検索中") ? s : `${s} を検索中...`;
-    }
-    return "新着を順に検索中...";
-  };
 
   const [showLimit, setShowLimit] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({});
@@ -1810,7 +1782,6 @@ export default function OrdersPage() {
       sources.length > 1
         ? "すべてのサイト (全19サイト)"
         : SOURCE_LABELS[sources[0]] || sources[0];
-    setActiveScrapeSites((prev) => ({ ...prev, [order._id]: siteLabel }));
 
     setScrapeNotice((prev) => {
       const next = { ...prev };
@@ -2035,7 +2006,6 @@ export default function OrdersPage() {
       sources.length > 1
         ? "すべてのサイト (全19サイト)"
         : SOURCE_LABELS[sources[0]] || sources[0];
-    setActiveScrapeSites((prev) => ({ ...prev, [order._id]: siteLabel }));
     setScrapeNotice((prev) => {
       const next = { ...prev };
       delete next[order._id];
@@ -3635,25 +3605,6 @@ export default function OrdersPage() {
         </div>
         )}
 
-        {/* Live GitHub Actions run banner */}
-        {activeRun && (orders ?? []).some(isMyRun) && (
-          <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--brand-soft)] border border-[var(--brand-border)] shadow-xs">
-            <RefreshCw className="w-4 h-4 text-[var(--brand)] animate-spin shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-[var(--brand-ink)]">
-                {activeRun.status === "queued"
-                  ? "物件検索の実行を待機中です"
-                  : "物件検索を実行中です"}
-              </div>
-              <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                完了まで数分〜数十分かかります。物件は取得され次第、自動で一覧に追加されます。
-                {activeRun.created_at &&
-                  ` （開始: ${formatJaTime(new Date(activeRun.created_at).getTime())}）`}
-              </div>
-            </div>
-          </div>
-        )}
-
         {effectiveView === "map" ? (
           <div className="rounded-2xl border border-[var(--border-subtle)] overflow-hidden shadow-sm">
             <TokyoPropertyMap
@@ -3880,19 +3831,6 @@ export default function OrdersPage() {
                               {order.status === "completed" ? "完了" : "未検索"}
                             </button>
                           )}
-                          {isMyRun(order) && (
-                            <Badge
-                              variant="brand"
-                              className="gap-1.5 font-bold py-1 px-2.5 shrink-0"
-                            >
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>
-                                {activeRun?.status === "queued"
-                                  ? "取得待機中"
-                                  : "取得中"}
-                              </span>
-                            </Badge>
-                          )}
                           {recentMatchesInOrder > 0 && (
                             <Badge className="font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white border-0 shadow-xs gap-1 py-1 px-2.5">
                               <Sparkles className="w-3.5 h-3.5 animate-pulse" />
@@ -3975,24 +3913,13 @@ export default function OrdersPage() {
                       (order.scrapingStatus &&
                         order.scrapingStatus.includes("検索中")) ? (
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-2 px-3.5 py-2 bg-emerald-50 text-emerald-900 text-xs font-bold rounded-xl border border-emerald-200 shadow-xs">
-                            <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
-                            <span>
-                              {getOrderSiteLabel(order) || "物件検索中..."}
-                            </span>
-                          </div>
-
                           <Button
                             variant="destructive"
                             size="sm"
                             disabled={cancellingOrderId === order._id}
                             onClick={() => void handleCancelScrape(order)}
                             className="h-9 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-                            title={
-                              (order.lastScrapeBy ?? "").includes("ローカル実行")
-                                ? "このPC上で実行中のローカルスクレイピングを停止します"
-                                : "GitHub Actions で実行中のスクレイピング処理を停止します"
-                            }
+                            title="実行中の物件検索を止めます"
                           >
                             {cancellingOrderId === order._id ? (
                               <>
@@ -4160,31 +4087,21 @@ export default function OrdersPage() {
 
                     {/* Active Scrape Live Status Banner */}
                     {(order.isScraping || (order.scrapingStatus && order.scrapingStatus.includes("検索中")) || isMyRun(order) || localRunOrderId === order._id) ? (
-                      <div className="mt-2.5 p-3.5 rounded-xl text-xs font-bold leading-relaxed bg-emerald-50 text-emerald-950 border border-emerald-200 flex flex-wrap items-center justify-between gap-3 shadow-2xs animate-in fade-in duration-200">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="font-extrabold text-emerald-900 text-sm flex items-center gap-2 flex-wrap">
-                              <span>現在スクレイピング中:</span>
-                              <span className="text-emerald-950 font-mono bg-white px-2 py-0.5 rounded border border-emerald-300 shadow-2xs">
-                                {getOrderSiteLabel(order)}
-                              </span>
-                            </div>
-                            <div className="text-[14px] font-normal text-emerald-700 mt-0.5">
-                              {localRunOrderId === order._id ? "ローカル（このPC）でスクレイパーを実行しています。" : "GitHub Actions クラウドで実行中。"} 取得された物件はリアルタイムで自動反映されます。
-                            </div>
-                            {localRunOrderId !== order._id && (
-                              <div className="mt-2 max-w-md text-[13.5px]">
-                                <ScrapeProgressLine order={order} />
-                              </div>
+                      <div className="mt-2.5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 animate-in fade-in duration-200">
+                        <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-emerald-700" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[15px] font-bold">物件を探しています</div>
+                          <div className="mt-2 max-w-xl text-[14px]">
+                            {localRunOrderId === order._id ? (
+                              <span className="text-emerald-800">このパソコンで実行中です。</span>
+                            ) : (
+                              <ScrapeProgressLine order={order} showSites />
                             )}
                           </div>
+                          <div className="mt-2 text-[13px] text-emerald-700">
+                            見つかった物件は下の一覧に自動で追加されます。画面を閉じても検索は続きます。
+                          </div>
                         </div>
-                        {order.activeSource && SOURCE_LABELS[order.activeSource] && (
-                          <span className="px-2.5 py-1 bg-white text-emerald-800 border border-emerald-300 rounded-md text-[14px] font-bold shrink-0">
-                            {SOURCE_LABELS[order.activeSource]}
-                          </span>
-                        )}
                       </div>
                     ) : scrapeNotice[order._id] ? (
                       <div
