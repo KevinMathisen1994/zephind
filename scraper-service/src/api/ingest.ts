@@ -27,7 +27,7 @@ import { logger } from "../logger";
 import { route } from "./handler";
 import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
-import { enrichListingSpecs, SPEC_SOURCES } from "../lib/listingSpecs";
+import { backfillSpecs, enrichListingSpecs } from "../lib/listingSpecs";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -263,17 +263,7 @@ ingestRouter.post("/listings-missing-posted-date", route(async (req) => {
 ingestRouter.post("/backfill-specs", route(async (req) => {
   assertSecret(req);
   const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 40);
-  const { data, error } = await db.raw
-    .from("listings")
-    .select("_id")
-    .is("specs", null)
-    .in("source", [...SPEC_SOURCES])
-    .not("url", "is", null)
-    .order("_creationTime", { ascending: false })
-    .limit(limit);
-  if (error) throw new HttpError(500, `backfillSpecs: ${error.message}`);
-  const saved = await enrichListingSpecs((data ?? []).map((r: any) => r._id));
-  return { attempted: data?.length ?? 0, saved };
+  return await backfillSpecs(limit);
 }));
 
 /** Write the 掲載日 found for existing listings (the backfill's other half). */
@@ -566,12 +556,21 @@ ingestRouter.post("/mark-scrape-run", route(async (req) => {
 
 ingestRouter.post("/progress", route(async (req) => {
   assertSecret(req);
-  const { source, orderId, statusText } = req.body ?? {};
+  const { source, orderId, statusText, runId, shard, progress } = req.body ?? {};
   if (orderId) {
     await db.patch("orders", orderId, {
       activeSource: source,
       scrapingStatus: statusText || `${source} を検索中...`,
     });
+    if (progress && runId != null) {
+      const { error } = await db.raw.rpc("merge_scrape_progress", {
+        p_order_id: orderId,
+        p_run_id: String(runId),
+        p_shard: String(shard ?? 0),
+        p_data: progress,
+      });
+      if (error) throw new HttpError(500, `progress: ${error.message}`);
+    }
   }
   return { ok: true };
 }));

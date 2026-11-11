@@ -88,7 +88,8 @@ export function canonicalPropertyType(raw: string): string {
 /** Text on the listing that can reveal 一棟 / オーナーチェンジ when the site's own
  *  category label is only as specific as "マンション". */
 function listingText(listing: PropertyListing): string {
-  return `${listing.propertyType ?? ""} ${listing.title ?? ""} ${listing.description ?? ""}`.replace(
+  const specs = listing.specs ? Object.values(listing.specs).join(" ") : "";
+  return `${listing.propertyType ?? ""} ${listing.title ?? ""} ${listing.description ?? ""} ${specs}`.replace(
     /\s+/g,
     "",
   );
@@ -104,8 +105,23 @@ const WHOLE_BUILDING_RE = /(一棟|1棟|１棟)(売|マンション|アパート
 const OWNER_CHANGE_RE =
   /(オーナーチェンジ|オーナーチェンジ物件|賃貸中|入居中|現況賃貸|賃借人有)/;
 
-export function looksOwnerChange(listing: PropertyListing): boolean {
-  return OWNER_CHANGE_RE.test(listingText(listing));
+/** 一棟 listings state occupancy instead; 満室想定/満室時 is a projection, not a fact. */
+const OCCUPIED_BUILDING_RE = /満室(?!想定|時)|稼働率|入居率|稼働中/;
+
+const WHOLE_BUILDING_TYPES = new Set(["一棟マンション", "アパート", "ビル", "店舗"]);
+
+/**
+ * null = the concept does not apply to this listing's type (土地/一戸建て), so the
+ * filter should not reject it.
+ */
+export function looksOwnerChange(listing: PropertyListing): boolean | null {
+  const text = listingText(listing);
+  const canon = canonicalPropertyType(listing.propertyType ?? "");
+  if (WHOLE_BUILDING_TYPES.has(canon) || WHOLE_BUILDING_RE.test(text)) {
+    return OWNER_CHANGE_RE.test(text) || OCCUPIED_BUILDING_RE.test(text);
+  }
+  if (canon === "マンション") return OWNER_CHANGE_RE.test(text);
+  return null;
 }
 
 /**
@@ -309,7 +325,7 @@ function matchesOrder(
   // it only finds listings whose title/description actually say so; portals that
   // bury the tenancy in a detail page will be missed rather than guessed at.
   if (criteria.ownerChange) {
-    if (!looksOwnerChange(listing)) {
+    if (looksOwnerChange(listing) === false) {
       incrementReason(reasons, "オーナーチェンジ物件でない");
       return [false, "オーナーチェンジ物件でない"];
     }

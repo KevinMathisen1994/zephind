@@ -20,6 +20,8 @@ export interface PropertyListing {
   frontage?: number;
   propertyType?: string; // "土地" | "一戸建て" | "マンション" | etc
   title?: string; // 掲載タイトル。一棟/オーナーチェンジ判定の手掛かりになる
+  /** Detail-page spec table; set by the CLI only for オーナーチェンジ candidates. */
+  specs?: Record<string, string>;
   /**
    * 掲載日 (epoch ms). From the list card where the portal prints one, otherwise
    * from the detail page — see services/postedDate.ts for which sites publish

@@ -264,9 +264,10 @@ const isAutomaticTrigger = (by: string | undefined) =>
   by === AUTOMATIC_TRIGGER_LABEL || /自動/.test(by ?? "");
 
 /**
- * 物件種別, grouped so each row shows what belongs with what: オーナーチェンジ is a
- * property OF a 区分マンション, and 一棟マンション / アパート / ビル are all
- * whole-building purchases — a different product from a single unit.
+ * 物件種別, grouped so each row shows what belongs with what. 一棟マンション /
+ * アパート / ビル are whole-building purchases, a different product from a unit.
+ * オーナーチェンジ is one flag shown on both rows; the matcher checks 賃貸中 text for
+ * 区分 and 満室/稼働率 for 一棟.
  */
 const PROPERTY_TYPE_GROUPS: {
   label: string;
@@ -279,7 +280,11 @@ const PROPERTY_TYPE_GROUPS: {
     types: ["マンション"],
     ownerChangeToggle: true,
   },
-  { label: "一棟・事業用", types: ["ビル", "一棟マンション", "アパート"] },
+  {
+    label: "一棟・事業用",
+    types: ["ビル", "一棟マンション", "アパート"],
+    ownerChangeToggle: true,
+  },
 ];
 
 /**
@@ -555,6 +560,62 @@ function matchScore(
   const text = match.evaluation || localEvaluations[match._id];
   const parsed = text?.match(/評価[：:\s]*(\d+)/)?.[1];
   return parsed ? Number(parsed) : undefined;
+}
+
+// Written by scraper-service/src/cli.ts, one entry per GitHub matrix shard.
+type ScrapeProgress = {
+  runId: string;
+  shards: Record<
+    string,
+    { done: number; globalTotal: number; active: string[]; startedAt: number }
+  >;
+};
+
+/** Combined progress of the order's current run, or null before any shard reports. */
+function scrapeProgressSummary(order: Doc<"orders">) {
+  const p = (order as { scrapeProgress?: ScrapeProgress | null }).scrapeProgress;
+  if (!p?.shards) return null;
+  if (order.scrapeRunId != null && p.runId !== String(order.scrapeRunId)) return null;
+  const shards = Object.values(p.shards);
+  if (shards.length === 0) return null;
+  const done = shards.reduce((n, s) => n + s.done, 0);
+  const total = Math.max(...shards.map((s) => s.globalTotal));
+  const elapsed = Date.now() - Math.min(...shards.map((s) => s.startedAt));
+  // Linear extrapolation; the slowest site (usually athome) makes this optimistic near the end.
+  const etaMin = done > 0 && done < total ? Math.ceil(((elapsed / done) * (total - done)) / 60000) : null;
+  return { done, total, active: shards.flatMap((s) => s.active), etaMin };
+}
+
+function ScrapeProgressLine({ order }: { order: Doc<"orders"> }) {
+  const s = scrapeProgressSummary(order);
+  if (!s) {
+    return <span className="text-emerald-700">起動中（クラウド準備に1〜2分）…</span>;
+  }
+  const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+  return (
+    <span className="flex w-full flex-col gap-1">
+      <span className="flex flex-wrap items-center gap-x-2 text-emerald-800">
+        <span className="truncate">
+          {s.active.length ? `${s.active.join("・")} を検索中` : "仕上げ中"}
+        </span>
+        <span className="font-mono">
+          {s.done}/{s.total}
+        </span>
+        <span>
+          {s.etaMin != null ? `残り約${s.etaMin}分` : s.done >= s.total ? "まもなく完了" : "残り時間を計算中"}
+        </span>
+      </span>
+      <span
+        className="block h-1.5 w-full overflow-hidden rounded-full bg-emerald-100"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <span className="block h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+      </span>
+    </span>
+  );
 }
 
 // Some orders store requirements in the nested `criteria` blob rather than as
@@ -2225,8 +2286,8 @@ export default function OrdersPage() {
   const [minBuildingCoverageRatio, setMinBuildingCoverageRatio] = useState("");
   const [minFloorAreaRatio, setMinFloorAreaRatio] = useState("");
   const [propertyTypes, setPropertyTypes] = useState<string[]>([]);
-  // オーナーチェンジ = 賃貸中のマンションをそのまま売却する物件。物件の形ではなく
-  // 売り方なので、種別ボタンではなく マンション の隣のチェックボックスにしている。
+  // オーナーチェンジ = 賃貸中のまま売却する物件。物件の形ではなく売り方なので、
+  // 種別ボタンではなく マンション・一棟 の行のチェックボックスにしている。
   const [ownerChange, setOwnerChange] = useState(false);
   const [landSizeMin, setLandSizeMin] = useState("");
   const [landSizeMax, setLandSizeMax] = useState("");
@@ -3104,7 +3165,7 @@ export default function OrdersPage() {
                   )}
 
                   {/* One row per group, so it is visible which option belongs to
-                      which: オーナーチェンジ modifies マンション (区分), and
+                      which: オーナーチェンジ sits on the マンション and 一棟 rows, and
                       一棟マンション / アパート sit with ビル because they are all
                       whole-building purchases.
 
@@ -3148,7 +3209,7 @@ export default function OrdersPage() {
                             </button>
                           );
                         })}
-                        {/* Immediately to the right of マンション, in its row. */}
+                        {/* Same flag in both rows; ticking one ticks both. */}
                         {group.ownerChangeToggle && (
                           <label
                             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border cursor-pointer transition-all duration-150 select-none ${
@@ -3156,7 +3217,7 @@ export default function OrdersPage() {
                                 ? "bg-emerald-50 text-emerald-900 border-emerald-300"
                                 : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
                             }`}
-                            title="賃貸中のマンションをそのまま売却する物件（オーナーチェンジ）のみを抽出します"
+                            title="賃貸中のまま売却する物件（オーナーチェンジ）のみを抽出します。一棟は満室・稼働率の記載で判定します"
                           >
                             <input
                               type="checkbox"
@@ -3174,7 +3235,7 @@ export default function OrdersPage() {
                   {ownerChange && (
                     <p className="text-xs text-emerald-800 font-semibold bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 leading-relaxed">
                       オーナーチェンジ（賃貸中のまま売却）の物件のみを抽出します。
-                      各ポータルの掲載文に「オーナーチェンジ」「賃貸中」等の記載があるものを対象とするため、
+                      各ポータルの掲載文に「オーナーチェンジ」「賃貸中」（一棟は「満室」「稼働率」）等の記載があるものを対象とするため、
                       賃貸状況が詳細ページにしか書かれていない物件は抽出されないことがあります。
                     </p>
                   )}
@@ -3760,6 +3821,11 @@ export default function OrdersPage() {
                       {wardSummary ? " ・ " : ""}
                       {priceSummary}
                     </span>
+                    {isScrapingNow && localRunOrderId !== order._id && (
+                      <span className="mt-2 block max-w-md text-[13.5px] font-semibold">
+                        <ScrapeProgressLine order={order} />
+                      </span>
+                    )}
                   </span>
 
                   <span className="hidden shrink-0 text-right sm:block">
@@ -4107,6 +4173,11 @@ export default function OrdersPage() {
                             <div className="text-[14px] font-normal text-emerald-700 mt-0.5">
                               {localRunOrderId === order._id ? "ローカル（このPC）でスクレイパーを実行しています。" : "GitHub Actions クラウドで実行中。"} 取得された物件はリアルタイムで自動反映されます。
                             </div>
+                            {localRunOrderId !== order._id && (
+                              <div className="mt-2 max-w-md text-[13.5px]">
+                                <ScrapeProgressLine order={order} />
+                              </div>
+                            )}
                           </div>
                         </div>
                         {order.activeSource && SOURCE_LABELS[order.activeSource] && (

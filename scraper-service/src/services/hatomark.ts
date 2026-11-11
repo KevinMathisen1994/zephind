@@ -102,6 +102,24 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         }
       });
 
+      // マンション cards carry 専有面積/築年月/建物構造 instead of 土地面積.
+      var exclusiveArea = null;
+      var buildYear = null;
+      var structure = "";
+      detailRows.forEach(function(titleEl) {
+        var label = titleEl.textContent?.trim();
+        var v = titleEl.closest(".col")?.querySelector(".room-detail-value")?.textContent?.trim() || "";
+        if (label === "専有面積") {
+          var m = v.match(/([\\d,.]+)㎡/);
+          if (m) exclusiveArea = parseFloat(m[1].replace(/,/g, ""));
+        } else if (label === "築年月") {
+          var y = v.match(/(\\d{4})/);
+          if (y) buildYear = parseInt(y[1]);
+        } else if (label === "建物構造") {
+          structure = v;
+        }
+      });
+
       // BCR / FAR from "建・容率"
       var bcr = null;
       var far = null;
@@ -147,9 +165,11 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         // undefined, not 0) — a building listing with no 土地面積 row (most
         // of them; they report 建物延面積 instead) was getting hard-rejected
         // by any landSizeMin filter as if its land were confirmed to be 0m².
-        area: area || floorArea || undefined,
+        area: area || exclusiveArea || floorArea || undefined,
         landSize: area || undefined,
         floorArea: floorArea || undefined,
+        buildYear: buildYear ?? undefined,
+        structure: structure || undefined,
         source: "hatomark",
         station: station || undefined,
         walkMinutes: walkMinutes ?? undefined,

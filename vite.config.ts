@@ -5,6 +5,13 @@ import path from "path"
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Phone access via ngrok: one public origin serves the app and proxies the scraper API.
+  server: {
+    allowedHosts: [".ngrok-free.app", ".ngrok-free.dev", ".ngrok.app"],
+    proxy: {
+      "/scraper": { target: "http://127.0.0.1:3001", rewrite: (p) => p.replace(/^\/scraper/, "") },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

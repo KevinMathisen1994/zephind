@@ -1,6 +1,7 @@
 import { logger } from "../logger";
 import { syncAllAccounts } from "../services/mailIngest";
 import { evaluateUnevaluatedMatches } from "../api/evaluate";
+import { backfillSpecs } from "../lib/listingSpecs";
 
 /**
  * Scheduled mailbox sync and server-side match evaluation. Ported from convex/crons.js.
@@ -50,6 +51,12 @@ export async function runBackgroundTasks() {
     await syncAllAccounts();
   } catch (e) {
     logger.error("[cron] mail sync failed: " + ((e as Error).stack || e));
+  }
+
+  try {
+    await backfillSpecs(20);
+  } catch (e) {
+    logger.error("[cron] spec backfill failed: " + ((e as Error).stack || e));
   }
 
   try {

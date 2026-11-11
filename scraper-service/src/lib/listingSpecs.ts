@@ -168,8 +168,14 @@ export async function enrichListingSpecs(listingIds: string[], opts: { delayMs?:
     for (const row of rows) {
       if (!row.url || row.specs || !SPEC_SOURCES.has(row.source)) continue;
       const html = await fetchHtml(row.url);
-      const specs = html ? parseSpecPairs(html) : {};
-      if (Object.keys(specs).length > 0 && (await saveSpecs(row._id, specs, row))) saved++;
+      if (!html) continue; // transient fetch failure: leave specs null so it is retried
+      const specs = parseSpecPairs(html);
+      if (Object.keys(specs).length > 0) {
+        if (await saveSpecs(row._id, specs, row)) saved++;
+      } else {
+        // {} marks "page has no spec table" so the backfill queue cannot stall on it.
+        await db.patch("listings", row._id, { specs: {} }).catch(() => {});
+      }
       await new Promise((r) => setTimeout(r, opts.delayMs ?? 700));
     }
   } catch (err) {
@@ -177,4 +183,20 @@ export async function enrichListingSpecs(listingIds: string[], opts: { delayMs?:
   }
   logger.info(`[specs] saved specs for ${saved}/${listingIds.length} listing(s)`);
   return saved;
+}
+
+/** Newest listings still missing specs. Run from the background cron: the
+ *  post-ingest enrichment dies with the scrape process. */
+export async function backfillSpecs(limit = 20): Promise<{ attempted: number; saved: number }> {
+  const { data, error } = await db.raw
+    .from("listings")
+    .select("_id")
+    .is("specs", null)
+    .in("source", [...SPEC_SOURCES])
+    .not("url", "is", null)
+    .order("_creationTime", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`backfillSpecs: ${error.message}`);
+  const saved = await enrichListingSpecs((data ?? []).map((r: any) => r._id));
+  return { attempted: data?.length ?? 0, saved };
 }

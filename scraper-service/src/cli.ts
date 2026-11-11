@@ -16,7 +16,8 @@ dotenv.config();
 import puppeteer from "./puppeteerStealth";
 import type { Browser, Page } from "puppeteer";
 import { KNOWN_SOURCES, SOURCE_LABELS, runScraper } from "./services/scraperRegistry";
-import { hardFilter } from "./services/propertyMatcher";
+import { hardFilter, looksOwnerChange } from "./services/propertyMatcher";
+import { SPEC_SOURCES, fetchHtml, parseSpecPairs } from "./lib/listingSpecs";
 import {
   DETAIL_DATE_SOURCES,
   fetchPostedDates,
@@ -188,6 +189,35 @@ function urlOf(listing: PropertyListing & { detailUrl?: string }): string {
  * Failure here is never fatal: a missing 掲載日 is a missing field, and the UI
  * falls back to 取得日時 (when we found the listing) with a label that says so.
  */
+/** Per source+area cap on detail fetches for オーナーチェンジ candidates. */
+const OWNER_CHANGE_DETAIL_BUDGET = 30;
+
+/**
+ * List cards almost never say 賃貸中 (0 of 100 suumo cards); the detail page's
+ * 現況 row does. For orders with ownerChange, fetch specs for listings that pass
+ * everything else so the real hardFilter can see them.
+ */
+async function attachOwnerChangeSpecs(source: string, scraped: PropertyListing[], criteria: OrderCriteria[]) {
+  if (!SPEC_SOURCES.has(source)) return;
+  const relaxed = criteria.filter((c) => c.ownerChange).map((c) => ({ ...c, ownerChange: false }));
+  if (relaxed.length === 0) return;
+  const urls = new Set(
+    hardFilter(scraped, relaxed).passed
+      .filter((l) => l.url && looksOwnerChange(l) === false)
+      .map((l) => l.url!),
+  );
+  let fetched = 0;
+  for (const l of scraped) {
+    if (fetched >= OWNER_CHANGE_DETAIL_BUDGET) break;
+    if (!l.url || !urls.has(l.url)) continue;
+    const html = await fetchHtml(l.url);
+    if (html) l.specs = parseSpecPairs(html);
+    fetched++;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  if (fetched > 0) logger.info(`${source}: fetched ${fetched} detail page(s) for オーナーチェンジ check`);
+}
+
 async function enrichPostedDates(
   client: { unknownListingUrls(urls: string[]): Promise<string[]> },
   source: string,
@@ -369,6 +399,24 @@ async function backfillPostedDates(
   return saved;
 }
 
+/** Auto-evaluate newly matched listings on the server. */
+async function autoEvaluate(): Promise<void> {
+  try {
+    logger.info("Running server auto-evaluation for new matches...");
+    const { evaluateUnevaluatedMatches } = await import("./api/evaluate");
+    const evaluated = await evaluateUnevaluatedMatches(30);
+    if (evaluated > 0) {
+      logger.info(
+        `Server auto-evaluated ${evaluated} new match(es) with AI score & market comparison`,
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      `Server auto-evaluation skipped or failed: ${(err as Error).message}`,
+    );
+  }
+}
+
 async function main(): Promise<number> {
   const startedAt = Date.now();
   const client = await createIngestClient();
@@ -377,7 +425,9 @@ async function main(): Promise<number> {
   // --backfill-dates: fill in 掲載日 for stored listings and exit, without
   // scraping. Useful to catch up the whole table in one go after adding date
   // support, instead of waiting for nightly runs to trickle through it.
-  if (process.argv.slice(2).includes("--backfill-dates")) {
+  // --finalize: the same backfill plus auto-evaluation, run once after sharded scrape jobs.
+  const finalize = process.argv.slice(2).includes("--finalize");
+  if (finalize || process.argv.slice(2).includes("--backfill-dates")) {
     const state: { browser: Browser | null; page: Page | null; budgetLeft: number } = {
       browser: null,
       page: null,
@@ -396,6 +446,7 @@ async function main(): Promise<number> {
       }
     }
     logger.info(`掲載日 backfill only: ${filled} listing(s) updated`);
+    if (finalize) await autoEvaluate();
     return 0;
   }
 
@@ -439,10 +490,19 @@ async function main(): Promise<number> {
         ? splitList(process.env.SCRAPE_SOURCES)
         : KNOWN_SOURCES;
 
-  const sources = requestedSources.filter((s) => KNOWN_SOURCES.includes(s));
+  // SCRAPE_SHARD="i/n": this runner takes every n-th source (GitHub matrix job i of n).
+  const [shardIdx, shardCount] = (process.env.SCRAPE_SHARD || "0/1").split("/").map(Number);
+  const sharded = shardCount > 1;
+  const allSources = requestedSources.filter((s) => KNOWN_SOURCES.includes(s));
+  const sources = allSources.filter((_, i) => i % shardCount === shardIdx);
   const rejected = requestedSources.filter((s) => !KNOWN_SOURCES.includes(s));
   if (rejected.length > 0) {
     logger.error(`Unknown source(s) ignored: ${rejected.join(", ")}`);
+  }
+  if (sharded) logger.info(`Shard ${shardIdx + 1}/${shardCount}: [${sources.join(", ")}]`);
+  if (sharded && sources.length === 0 && rejected.length < requestedSources.length) {
+    logger.info("More shards than sources — nothing for this shard.");
+    return 0;
   }
 
   if (areaCodes.length === 0) {
@@ -533,24 +593,47 @@ async function main(): Promise<number> {
   const failedSources: string[] = [];
   const okSources: string[] = [];
 
-  for (let i = 0; i < sources.length; i++) {
+  // Sources run concurrently (different sites, so per-site pace()/bot limits are
+  // unaffected); areas within one source stay sequential. Each worker holds one
+  // Chrome at a time, so SCRAPE_CONCURRENCY bounds RAM (~4 fits a 16GB runner).
+  const concurrency = Math.max(1, Number(process.env.SCRAPE_CONCURRENCY || 4));
+  // enrichPostedDates shares one page; concurrent navigations on it would clobber each other.
+  let dateLock: Promise<unknown> = Promise.resolve();
+  let nextSource = 0;
+  // Live progress for the order card (orders.scrapeProgress, one key per shard).
+  // Only user-initiated runs carry an order to report on.
+  const progress = {
+    done: 0,
+    total: sources.length * areaCodes.length,
+    globalTotal: allSources.length * areaCodes.length,
+    active: [] as string[],
+    startedAt: Date.now(),
+    finished: false,
+  };
+  const reportProgress = (source: string) => {
+    if (!onlyOrderId) return;
+    const statusText = progress.active.length
+      ? `${progress.active.join("・")} を検索中...`
+      : "他のサイトを検索中...";
+    void client.updateProgress({
+      source,
+      orderId: onlyOrderId,
+      statusText,
+      runId: process.env.GITHUB_RUN_ID || "local",
+      shard: shardIdx,
+      progress: { ...progress, updatedAt: Date.now() },
+    });
+  };
+  const runSource = async (i: number) => {
     const source = sources[i];
     const label = SOURCE_LABELS[source] || source;
     let sourceOk = 0;
     let sourceFailed = 0;
 
-    const progressTag = sources.length > 1 ? `[${i + 1}/${sources.length}] ` : "";
-    const statusText = `${progressTag}${label} を検索中...`;
+    progress.active.push(label);
+    reportProgress(source);
 
-    await client.updateProgress({
-      source,
-      orderId: onlyOrderId || undefined,
-      statusText,
-    });
-
-    // SEQUENTIAL, deliberately. Concurrent Chrome launches exhaust memory on
-    // this machine and on constrained CI runners; do not "optimise" this into
-    // Promise.all.
+    // SEQUENTIAL per source: same site, so parallel areas would trip its bot check.
     for (const areaCode of areaCodes) {
       const jobStart = Date.now();
       try {
@@ -564,13 +647,17 @@ async function main(): Promise<number> {
         }
         const scraped = results.flatMap((r) => r.listings ?? []);
 
+        await attachOwnerChangeSpecs(source, scraped, criteria);
+
         // Reuse the existing matcher — do not reimplement matching here.
         const { passed, stats } = hardFilter(scraped, criteria);
 
         // 掲載日 only for listings that survived matching: fetching a detail page
         // for a listing nobody asked for would be the most wasteful thing in the
         // whole run.
-        const dateResult = await enrichPostedDates(client, source, passed, dateState);
+        const datePromise = dateLock.then(() => enrichPostedDates(client, source, passed, dateState));
+        dateLock = datePromise.catch(() => {});
+        const dateResult = await datePromise;
         datesFilled += dateResult.filled;
 
         // Only listings that satisfy at least one order are persisted, which is
@@ -640,19 +727,32 @@ async function main(): Promise<number> {
         jobsFailed++;
         logger.error(`[${label}/${areaCode}] FAILED: ${(err as Error).message}`);
       }
+      progress.done++;
+      reportProgress(source);
     }
 
     if (sourceOk > 0) okSources.push(source);
     else if (sourceFailed > 0) failedSources.push(source);
-  }
+    progress.active = progress.active.filter((l) => l !== label);
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
+      while (nextSource < sources.length) await runSource(nextSource++);
+    }),
+  );
+  progress.finished = true;
+  reportProgress(sources[sources.length - 1]);
 
   // Spend whatever detail-page budget the sweep left over on listings already
   // stored without a 掲載日. Runs after the sweep so fresh inventory always gets
   // first claim on the budget.
-  try {
-    datesFilled += await backfillPostedDates(client, dateState);
-  } catch (err) {
-    logger.warn(`掲載日 backfill failed: ${(err as Error).message}`);
+  // Sharded runs leave this to the --finalize job, else each shard spends a full budget.
+  if (!sharded) {
+    try {
+      datesFilled += await backfillPostedDates(client, dateState);
+    } catch (err) {
+      logger.warn(`掲載日 backfill failed: ${(err as Error).message}`);
+    }
   }
 
   // Attribute the run. A run scoped to one order (SCRAPE_ORDER_ID) was dispatched
@@ -684,23 +784,8 @@ async function main(): Promise<number> {
     }
   }
 
-  // Auto-evaluate newly matched listings on the server if any were created
-  if (total.matchesCreated > 0) {
-    try {
-      logger.info("Running server auto-evaluation for new matches...");
-      const { evaluateUnevaluatedMatches } = await import("./api/evaluate");
-      const evaluated = await evaluateUnevaluatedMatches(30);
-      if (evaluated > 0) {
-        logger.info(
-          `Server auto-evaluated ${evaluated} new match(es) with AI score & market comparison`,
-        );
-      }
-    } catch (err) {
-      logger.warn(
-        `Server auto-evaluation skipped or failed: ${(err as Error).message}`,
-      );
-    }
-  }
+  // Sharded runs evaluate once in the --finalize job; parallel shards would double-evaluate.
+  if (total.matchesCreated > 0 && !sharded) await autoEvaluate();
 
   const mins = Math.round((Date.now() - startedAt) / 6000) / 10;
   logger.info(

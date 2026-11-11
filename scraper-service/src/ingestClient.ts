@@ -55,6 +55,9 @@ export interface IngestClient {
     source: string;
     orderId?: string;
     statusText?: string;
+    runId?: string;
+    shard?: number;
+    progress?: Record<string, unknown>;
   }): Promise<void>;
   /** Of `urls`, those not yet stored — i.e. the ones worth a 掲載日 lookup. */
   unknownListingUrls(urls: string[]): Promise<string[]>;
@@ -166,6 +169,9 @@ export async function createIngestClient(): Promise<IngestClient> {
           source: input.source,
           orderId: input.orderId,
           statusText: input.statusText,
+          runId: input.runId,
+          shard: input.shard,
+          progress: input.progress,
         });
       } catch {
         /* non-fatal progress update error */
