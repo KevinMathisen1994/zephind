@@ -33,7 +33,6 @@ const IS_LOCALHOST = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
 );
 const visibleSections = navSections.filter((s) => s.label !== "設定" || IS_LOCALHOST);
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Clerk hooks throw unless a ClerkProvider is mounted, so the account footer
@@ -87,10 +86,10 @@ function NavAccount() {
 
 export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }) {
   const navigate = useNavigate();
-  const matches = useQuery(api.matching.list) as any[] | undefined;
-  const total = matches?.length ?? 0;
-  const fresh = (matches ?? []).filter((m) => Date.now() - (m._creationTime ?? 0) <= DAY_MS);
-  const freshHigh = fresh.filter((m) => (m.score ?? 0) >= 80).length;
+  const summary = useQuery(api.matching.summary) ?? [];
+  const total = summary.reduce((n, s) => n + s.total, 0);
+  const freshCount = summary.reduce((n, s) => n + s.new24h, 0);
+  const freshHigh = summary.reduce((n, s) => n + s.new24hHigh, 0);
 
   return (
     <aside className="sidebar-surface z-20 flex h-full w-[248px] shrink-0 select-none flex-col overflow-y-auto">
@@ -158,7 +157,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
         ))}
       </nav>
 
-      {fresh.length > 0 && (
+      {freshCount > 0 && (
         <button
           type="button"
           onClick={() => {
@@ -169,7 +168,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
         >
           <p className="text-[12.5px] text-[#79827b]">本日の新着</p>
           <p className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-[34px] font-bold leading-none">{fresh.length}</span>
+            <span className="text-[34px] font-bold leading-none">{freshCount}</span>
             <span className="text-sm">件</span>
           </p>
           <p className="mt-1.5 text-[12.5px] text-[#79827b]">高評価（80点以上）{freshHigh}件</p>

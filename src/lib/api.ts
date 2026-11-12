@@ -42,7 +42,7 @@ export const api = {
     }),
     update: endpoint({
       method: "PATCH", key: "orders.update", path: (a) => `/api/orders/${id(a)}`,
-      body: withoutId, invalidates: ["orders", "orders.get"],
+      body: withoutId, invalidates: ["orders", "orders.get", "matching"],
     }),
     remove: endpoint({
       method: "DELETE", key: "orders.remove", path: (a) => `/api/orders/${id(a)}`,
@@ -114,6 +114,10 @@ export const api = {
     // appear with no action in this tab to trigger a refetch.
     list: endpoint({ method: "GET", key: "matching", path: () => "/api/matching", refetchInterval: 30_000 }),
     byOrder: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-order/${encodeURIComponent(a.orderId)}`, refetchInterval: 30_000 }),
+    // Real per-order counts; list/byOrder return only the newest 1000 rows.
+    summary: endpoint<void, { orderId: string; total: number; new24h: number; high: number; new24hHigh: number }[]>({
+      method: "GET", key: "matching", path: () => "/api/matching/summary", refetchInterval: 30_000,
+    }),
     byListing: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-listing/${encodeURIComponent(a.listingId)}` }),
     saveScore: endpoint({
       method: "PATCH", key: "matching.saveScore", path: (a) => `/api/matching/${encodeURIComponent(a.matchId)}/score`,

@@ -1,12 +1,28 @@
 import { Router } from "express";
 import { db } from "../db";
-import { listOwned, requireOwned, requireUserId } from "../auth/authz";
+import { HttpError, listOwned, requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
 
 /** Ported from convex/matching.js. */
 export const matchingRouter = Router();
 
+// Lists are the newest 1000 rows (PostgREST max-rows); counts come from /summary.
 matchingRouter.get("/", route(async (req) => listOwned(req, "matching")));
+
+/** Per-order totals: { orderId, total, new24h, high, new24hHigh }[]. */
+matchingRouter.get("/summary", route(async (req) => {
+  const userId = requireUserId(req);
+  const { data, error } = await db.raw.rpc("matching_summary", { p_user_id: userId });
+  if (error) throw new HttpError(500, `matching summary: ${error.message}`);
+  // bigint arrives as string from PostgREST.
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    orderId: r.orderId,
+    total: Number(r.total),
+    new24h: Number(r.new24h),
+    high: Number(r.high),
+    new24hHigh: Number(r.new24hHigh),
+  }));
+}));
 
 matchingRouter.get("/by-order/:orderId", route(async (req) => {
   // The caller must own the parent ORDER.
@@ -14,7 +30,10 @@ matchingRouter.get("/by-order/:orderId", route(async (req) => {
   // Second filter on the match's own userId: matching.orderId is a plain string
   // column, so owning the order alone would not stop a legacy or mis-owned row
   // from leaking through.
-  return db.list("matching", { where: { orderId: req.params.orderId, userId } });
+  return db.list("matching", {
+    where: { orderId: req.params.orderId, userId },
+    order: { by: "_creationTime", desc: true },
+  });
 }));
 
 matchingRouter.get("/by-listing/:listingId", route(async (req) => {

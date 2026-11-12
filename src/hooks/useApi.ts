@@ -27,7 +27,8 @@ export function useApiQuery<Args, Result>(
   const { data } = useRqQuery({
     // Args are part of the key so a different filter is a different cache
     // entry, the way a different Convex query subscription was.
-    queryKey: [ep.key, callArgs ?? null],
+    // Path too, so two endpoints sharing an invalidation key (matching list/summary) don't share a cache entry.
+    queryKey: [ep.key, enabled ? ep.path(callArgs) : null, callArgs ?? null],
     queryFn: () =>
       apiFetch<Result>(ep.path(callArgs), {
         method: ep.method,

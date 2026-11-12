@@ -889,6 +889,12 @@ export default function OrdersPage() {
     routeOrderId ? { orderId: routeOrderId } : SKIP,
   );
   const matches = routeOrderId ? routeOrderMatches : allMatches;
+  // Real counts (lists above hold at most the newest 1000 rows).
+  const matchSummary = useQuery(api.matching.summary);
+  const summaryByOrder = useMemo(
+    () => new Map((matchSummary ?? []).map((s) => [s.orderId, s])),
+    [matchSummary],
+  );
   // Only the ids: the star state for a 500-row list needs nothing else, and the
   // full snapshots belong to the 保存物件 page.
   const savedListingIds = useQuery(api.savedListings.savedListingIds);
@@ -2551,49 +2557,19 @@ export default function OrdersPage() {
         isMyRun(o) ||
         localRunOrderId === o._id,
     ).length ?? 0;
-  const totalMatchesCount = matches?.length ?? 0;
-  const newMatches24hCount = useMemo(
-    () =>
-      matches?.filter(
-        (m) =>
-          m._creationTime &&
-          Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-      ).length ?? 0,
-    [matches],
-  );
-  const highScoreMatchesCount = useMemo(
-    () =>
-      matches?.filter((m) => {
-        const s = matchScore(m, evaluations);
-        return s !== undefined && s >= 80;
-      }).length ?? 0,
-    [matches, evaluations],
-  );
-  const ordersWithNewMatchesCount = useMemo(
-    () =>
-      orders?.filter((o) => {
-        const oMatches = orderMatches(o._id);
-        return (oMatches ?? []).some(
-          (m) =>
-            m._creationTime &&
-            Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-        );
-      }).length ?? 0,
-    [orders, matches],
-  );
-  const ordersWithMatchesCount = useMemo(
-    () =>
-      orders?.filter((o) => (orderMatches(o._id)?.length ?? 0) > 0).length ?? 0,
-    [orders, matches],
-  );
-  const pendingOrdersCount = useMemo(
-    () =>
-      orders?.filter(
-        (o) =>
-          o.status !== "completed" && (orderMatches(o._id)?.length ?? 0) === 0,
-      ).length ?? 0,
-    [orders, matches],
-  );
+  const sumSummary = (field: "total" | "new24h" | "high") =>
+    (matchSummary ?? []).reduce((n, s) => n + s[field], 0);
+  const totalMatchesCount = sumSummary("total");
+  const newMatches24hCount = sumSummary("new24h");
+  const highScoreMatchesCount = sumSummary("high");
+  const ordersWithNewMatchesCount =
+    orders?.filter((o) => (summaryByOrder.get(o._id)?.new24h ?? 0) > 0).length ?? 0;
+  const ordersWithMatchesCount =
+    orders?.filter((o) => (summaryByOrder.get(o._id)?.total ?? 0) > 0).length ?? 0;
+  const pendingOrdersCount =
+    orders?.filter(
+      (o) => o.status !== "completed" && (summaryByOrder.get(o._id)?.total ?? 0) === 0,
+    ).length ?? 0;
 
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
@@ -2622,18 +2598,14 @@ export default function OrdersPage() {
         }
 
         // Status Filter
-        const oMatches = orderMatches(order._id) || [];
-        const matchCount = oMatches.length;
+        const counts = summaryByOrder.get(order._id);
+        const matchCount = counts?.total ?? 0;
         const isScraping =
           order.isScraping ||
           (order.scrapingStatus && order.scrapingStatus.includes("検索中")) ||
           isMyRun(order) ||
           localRunOrderId === order._id;
-        const hasRecent = oMatches.some(
-          (m) =>
-            m._creationTime &&
-            Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-        );
+        const hasRecent = (counts?.new24h ?? 0) > 0;
 
         if (orderStatusFilter === "scraping") return isScraping;
         if (orderStatusFilter === "newMatches") return hasRecent;
@@ -2645,23 +2617,13 @@ export default function OrdersPage() {
         return true;
       })
       .sort((a, b) => {
-        const listA = orderMatches(a._id) || [];
-        const listB = orderMatches(b._id) || [];
+        const countsA = summaryByOrder.get(a._id);
+        const countsB = summaryByOrder.get(b._id);
         if (orderSortKey === "matchesDesc") {
-          return listB.length - listA.length;
+          return (countsB?.total ?? 0) - (countsA?.total ?? 0);
         }
         if (orderSortKey === "newMatchesDesc") {
-          const recentA = listA.filter(
-            (m) =>
-              m._creationTime &&
-              Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-          ).length;
-          const recentB = listB.filter(
-            (m) =>
-              m._creationTime &&
-              Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-          ).length;
-          return recentB - recentA;
+          return (countsB?.new24h ?? 0) - (countsA?.new24h ?? 0);
         }
         if (orderSortKey === "nameAsc") {
           return (a.name || "").localeCompare(b.name || "", "ja");
@@ -2673,7 +2635,7 @@ export default function OrdersPage() {
     orderSearchQuery,
     orderStatusFilter,
     orderSortKey,
-    matches,
+    summaryByOrder,
     customers,
     activeRun,
     localRunOrderId,
@@ -2707,7 +2669,7 @@ export default function OrdersPage() {
           </h1>
           {detailOrder && (orderMatches(detailOrder._id)?.length ?? 0) > 0 && (
             <span className="text-[14.5px] font-bold text-[var(--brand)]">
-              マッチ {orderMatches(detailOrder._id)?.length}件
+              マッチ {(summaryByOrder.get(detailOrder._id)?.total ?? orderMatches(detailOrder._id)?.length ?? 0).toLocaleString()}件
             </span>
           )}
         </div>
@@ -3682,12 +3644,15 @@ export default function OrdersPage() {
         ) : (
           filteredOrders.map((order) => {
             const orderMatchList = orderMatches(order._id);
-            const matchCount = orderMatchList?.length ?? 0;
-            const recentMatchesInOrder = (orderMatchList ?? []).filter(
-              (m) =>
-                m._creationTime &&
-                Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-            ).length;
+            const orderCounts = summaryByOrder.get(order._id);
+            const matchCount = orderCounts?.total ?? orderMatchList?.length ?? 0;
+            const recentMatchesInOrder =
+              orderCounts?.new24h ??
+              (orderMatchList ?? []).filter(
+                (m) =>
+                  m._creationTime &&
+                  Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+              ).length;
             const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
               selectedForProposal.has(m._id),
             ).length;
@@ -4127,7 +4092,9 @@ export default function OrdersPage() {
                         <div className="text-[17px] font-bold text-[var(--text-primary)]">
                           物件一覧
                           <span className="ml-2 text-[15px] font-normal text-[var(--text-muted)]">
-                            {matchCount}件
+                            {matchCount.toLocaleString()}件
+                            {orderMatchList.length < matchCount &&
+                              `（新しい順に${orderMatchList.length.toLocaleString()}件を表示）`}
                           </span>
                         </div>
 

@@ -509,3 +509,50 @@ export function filterUnderMarket(listings: PropertyListing[], benchmark?: numbe
   if (!benchmark) return listings;
   return listings.filter((l) => isUnderMarket(l, benchmark, threshold));
 }
+
+/**
+ * Order document -> OrderCriteria for hardFilter.
+ * Mirrors the mapping Orders.tsx builds before calling the scrape endpoint,
+ * including the `order.criteria` fallback for older rows.
+ */
+export function toCriteria(order: Record<string, any>): OrderCriteria {
+  const nested = (order.criteria ?? {}) as Record<string, any>;
+  const pick = <T,>(key: string): T | undefined => {
+    const direct = (order as Record<string, any>)[key];
+    if (direct !== undefined && direct !== null) return direct as T;
+    const fallback = nested[key];
+    return fallback === null ? undefined : (fallback as T | undefined);
+  };
+  return {
+    ward: pick<string>("ward"),
+    wards: pick<string[]>("wards"),
+    dealType: pick<"buy" | "rent">("dealType"),
+    priceMin: pick<number>("priceMin"),
+    priceMax: pick<number>("priceMax"),
+    rentMin: pick<number>("rentMin"),
+    rentMax: pick<number>("rentMax"),
+    maxDeposit: pick<number>("maxDeposit"),
+    maxKeyMoney: pick<number>("maxKeyMoney"),
+    petsRequired: pick<boolean>("petsRequired"),
+    walkMinutes: pick<number>("walkMinutes"),
+    minBuildingCoverageRatio: pick<number>("minBuildingCoverageRatio"),
+    minFloorAreaRatio: pick<number>("minFloorAreaRatio"),
+    propertyTypes: pick<string[]>("propertyTypes"),
+    ownerChange: pick<boolean>("ownerChange"),
+    landSizeMin: pick<number>("landSizeMin"),
+    landSizeMax: pick<number>("landSizeMax"),
+    buildingSizeMin: pick<number>("buildingSizeMin"),
+    buildingSizeMax: pick<number>("buildingSizeMax"),
+    maxBuildAge: pick<number>("maxBuildAge"),
+    minBuildYear: pick<number>("minBuildYear"),
+    minYield: pick<number>("minYield"),
+    maxYield: pick<number>("maxYield"),
+    minRoadWidth: pick<number>("minRoadWidth"),
+    minTotalUnits: pick<number>("minTotalUnits"),
+    maxFloor: pick<number>("maxFloor"),
+    excludeFirstFloor: pick<boolean>("excludeFirstFloor"),
+    minElevators: pick<number>("minElevators"),
+    structureTypes: pick<string[]>("structureTypes"),
+    layoutTypes: pick<string[]>("layoutTypes"),
+  };
+}
