@@ -5,6 +5,9 @@ import { route } from "./handler";
 import { ORDER_FIELDS, pick } from "./fields";
 import { hardFilter, toCriteria } from "../services/propertyMatcher";
 import type { PropertyListing } from "../types";
+import { supabase } from "../db/supabase";
+import { evaluateMatchIdsServer } from "./evaluate";
+import { logger } from "../logger";
 
 /** Ported from convex/orders.js. */
 export const ordersRouter = Router();
@@ -34,7 +37,8 @@ ordersRouter.patch("/:id", route(async (req) => {
   const { userId } = await requireOwned(req, "orders", req.params.id, "オーダー");
   await db.patch("orders", req.params.id, pick(req.body ?? {}, ORDER_FIELDS));
   const removedMatches = await pruneMatches(req.params.id, userId);
-  return { ok: true, removedMatches };
+  const addedMatches = await addMatchesFromKnownListings(req.params.id, userId);
+  return { ok: true, removedMatches, addedMatches };
 }));
 
 ordersRouter.delete("/:id", route(async (req) => {
@@ -68,4 +72,39 @@ async function pruneMatches(orderId: string, userId: string): Promise<number> {
     if (page.length < PAGE) break;
   }
   return stale.length ? db.deleteMany("matching", stale) : 0;
+}
+
+/**
+ * Match the order against listings already stored, so loosening criteria shows results
+ * before the next scrape. Portal listings are shared; email listings only for their owner.
+ */
+async function addMatchesFromKnownListings(orderId: string, userId: string): Promise<number> {
+  const order = await db.get("orders", orderId);
+  if (!order) return 0;
+  const criteria = toCriteria(order);
+  const have = new Set<string>();
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await db.list("matching", { where: { orderId }, order: { by: "_id" }, limit: PAGE, offset });
+    for (const m of page) have.add(m.listingId);
+    if (page.length < PAGE) break;
+  }
+  const toInsert: Record<string, any>[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    let q = supabase.from("listings").select("*")
+      .or(`source.is.null,source.neq.email,userId.eq.${userId}`)
+      .order("_id").range(offset, offset + PAGE - 1);
+    // hardFilter lets a null price through, so the DB pre-filter must too.
+    if (criteria.priceMin) q = q.or(`price.is.null,price.gte.${Number(criteria.priceMin)}`);
+    if (criteria.priceMax) q = q.or(`price.is.null,price.lte.${Number(criteria.priceMax)}`);
+    const { data, error } = await q;
+    if (error) throw new HttpError(500, `listings: ${error.message}`);
+    for (const l of hardFilter((data ?? []) as unknown as PropertyListing[], [criteria]).passed as any[]) {
+      if (!have.has(l._id)) toInsert.push({ userId, orderId, listingId: l._id, status: "matched" });
+    }
+    if ((data ?? []).length < PAGE) break;
+  }
+  if (toInsert.length === 0) return 0;
+  const ids = await db.insertMany("matching", toInsert);
+  void evaluateMatchIdsServer(ids).catch((err) => logger.error(`[Order edit] evaluate failed: ${err}`));
+  return ids.length;
 }
