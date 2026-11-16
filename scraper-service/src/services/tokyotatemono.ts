@@ -143,6 +143,9 @@ async function extractListings(
         landSize = senyu !== null ? senyu : tochi;
       }
 
+      var imgEl = row.querySelector(".thumb img");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-original") || imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
       var layout = txt(row.querySelector("span.madori"));
       if (layout === "-") layout = "";
 
@@ -213,6 +216,7 @@ async function extractListings(
           totalUnits: totalUnits !== null ? totalUnits : undefined,
           description: buildingName || undefined,
           isNew: isNew || undefined,
+          images: image ? [image] : undefined,
         });
       }
     });
@@ -274,6 +278,11 @@ async function extractBizListings(page: any, propertyType: string, wardName: str
       // every non-land icon (confirmed live across all categories) — no split
       // land/building fields like the residential rows have.
       var floorArea = num(txt(row.querySelector("span.senyu")));
+      // "想定利回り7.74%"
+      var yieldRate = num(txt(row.querySelector(".condition .yield span")));
+      var imgEl = row.querySelector(".photo-area img");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-original") || imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
 
       var station = "", walkMinutes = null;
       var stationEl = row.querySelector(".transport .kotsu-set .station");
@@ -302,6 +311,8 @@ async function extractBizListings(page: any, propertyType: string, wardName: str
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           propertyType: propertyType,
           description: [icon, buildingName].filter(Boolean).join(" ") || undefined,
+          yield: yieldRate !== null ? yieldRate : undefined,
+          images: image ? [image] : undefined,
         });
       }
     });
@@ -375,6 +386,9 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       var keyMoney = monthNums.length > 1 ? monthNums[1] * rent : null;
 
       var senyu = num(txt(row.querySelector("span.senyu")));
+      var imgEl = row.querySelector(".thumb img");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-original") || imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
       var layout = txt(row.querySelector("span.madori"));
       if (layout === "-") layout = "";
 
@@ -424,6 +438,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
         walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
         propertyType: "マンション",
         layout: layout || undefined,
+        images: image ? [image] : undefined,
         dealType: "rent",
       });
     });

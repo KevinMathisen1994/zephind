@@ -37,6 +37,17 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
 
     var clean = function(el) { return ((el && el.textContent) || "").replace(/\\s+/g, " ").trim(); };
 
+    // Slider thumbnails: src is a loading gif until slick swaps in data-lazy; skip slick clones and floor plans.
+    var cardImage = function(card) {
+      var imgs = Array.prototype.slice.call(card.querySelectorAll(".card-props-detail__image img"));
+      for (var i = 0; i < imgs.length; i++) {
+        if (imgs[i].closest(".slick-cloned")) continue;
+        var s = imgs[i].getAttribute("data-lazy") || imgs[i].getAttribute("src") || "";
+        if (s && !/noimage|loading|madori|^data:/i.test(s)) return new URL(s, location.href).href;
+      }
+      return "";
+    };
+
     // "1億979万円" and "4,980万円" both have to work: sum the 億 and 万 parts and
     // strip thousands separators before parseFloat.
     var parsePrice = function(t) {
@@ -180,6 +191,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           totalUnits: totalUnits !== null ? totalUnits : undefined,
           isNew: isNew || undefined,
           postedText: postedText || undefined,
+          images: cardImage(card) ? [cardImage(card)] : undefined,
         });
       }
     });
@@ -206,6 +218,17 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
     var cards = Array.prototype.slice.call(document.querySelectorAll("li.list-search-result__item"));
     var results = [];
     var clean = function(el) { return ((el && el.textContent) || "").replace(/\\s+/g, " ").trim(); };
+
+    // Slider thumbnails: src is a loading gif until slick swaps in data-lazy; skip slick clones and floor plans.
+    var cardImage = function(card) {
+      var imgs = Array.prototype.slice.call(card.querySelectorAll(".card-props-detail__image img"));
+      for (var i = 0; i < imgs.length; i++) {
+        if (imgs[i].closest(".slick-cloned")) continue;
+        var s = imgs[i].getAttribute("data-lazy") || imgs[i].getAttribute("src") || "";
+        if (s && !/noimage|loading|madori|^data:/i.test(s)) return new URL(s, location.href).href;
+      }
+      return "";
+    };
 
     var parseManYen = function(t) {
       var s = (t || "").replace(/\\s/g, "");
@@ -307,6 +330,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           propertyType: propertyType || undefined,
           layout: layout || undefined,
           dealType: "rent",
+          images: cardImage(card) ? [cardImage(card)] : undefined,
         });
       }
     });

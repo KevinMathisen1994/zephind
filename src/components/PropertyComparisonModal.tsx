@@ -10,6 +10,7 @@ import {
   MapPin,
   ExternalLink,
 } from "lucide-react";
+import { formatMan } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import type { Doc } from "../lib/dataModel";
@@ -300,7 +301,7 @@ export function PropertyComparisonModal({
                           </div>
                           <div className="text-xl font-black text-emerald-700 font-data">
                             {l.price
-                              ? `${l.price.toLocaleString()} 万円`
+                              ? `${formatMan(l.price)}円`
                               : l.rent
                                 ? `${l.rent.toLocaleString()} 万円/月`
                                 : "価格相談"}

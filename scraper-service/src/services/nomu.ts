@@ -69,6 +69,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var tds = tr.querySelectorAll("td");
       if (tds.length < 5) return;
       
+      var imgEl = tds[0].querySelector(".item_images img");
+      var imgSrc = imgEl ? imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
+
       var addressTd = tds[1];
       var address = "";
       var station = "";
@@ -178,6 +182,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         propertyType: propertyType,
         layout: layout || undefined,
         age: age || undefined,
+        images: image ? [image] : undefined,
       });
     });
 
@@ -242,6 +247,10 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       var walkMinutes = null;
       var buildYear = null;
       var petsAllowed = undefined;
+      var structure = "";
+      var imgEl = building.querySelector(".mansion__img img");
+      var imgSrc = imgEl ? imgEl.getAttribute("original") || imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
 
       gaiyouTables.forEach(function(table) {
         table.querySelectorAll("tr").forEach(function(row) {
@@ -260,6 +269,8 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
             var ageM = val.match(/築(\\d+)年/);
             if (ageM) buildYear = new Date().getFullYear() - parseInt(ageM[1], 10);
             else if (/新築/.test(val)) buildYear = new Date().getFullYear();
+          } else if (label === "構造") {
+            structure = val;
           } else if (label === "ペット") {
             if (val.indexOf("可") !== -1) petsAllowed = true;
             else if (val.indexOf("不可") !== -1) petsAllowed = false;
@@ -322,6 +333,8 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           station: station || undefined,
           walkMinutes: walkMinutes != null ? walkMinutes : undefined,
           petsAllowed: petsAllowed,
+          structure: structure || undefined,
+          images: image ? [image] : undefined,
           url: url,
           source: "nomu",
           propertyType: "マンション",

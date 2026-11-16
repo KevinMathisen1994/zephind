@@ -25,11 +25,8 @@ const CATEGORY_MAP: Record<string, string> = {
  * one URL mixes 賃貸マンション/賃貸アパート/賃貸一戸建て together, each unit's
  * real type readable per-card (same pattern as suumo.ts/kenbiya.ts).
  *
- * DOM gotcha: each building's metadata (".property-index-lease-card": title,
- * type tag, address, station, build year) is NOT an ancestor of its units —
- * it is a PRECEDING SIBLING inside a shared, class-less wrapper div. Read
- * `card.parentElement.querySelectorAll(".property-section")` to reach that
- * building's units instead of walking up from a unit.
+ * Each ".property-index-lease-card" (title, type tag, address, station, build
+ * year) contains its own ".property-section" units (checked live 2026-11).
  */
 async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
   const raw = await page.evaluate(new Function(`
@@ -38,9 +35,6 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
     var cards = document.querySelectorAll(".property-index-lease-card");
 
     cards.forEach(function(card) {
-      var group = card.parentElement;
-      if (!group) return;
-
       var contentPs = Array.prototype.slice.call(card.querySelectorAll(".description-section .content p"));
       var address = "", stationText = "", ageText = "";
       contentPs.forEach(function(p) {
@@ -63,6 +57,11 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       var byM = ageText.match(/(\\d{4})年/);
       if (byM) buildYear = parseInt(byM[1], 10);
 
+      var imgEl = card.querySelector("img.main-image");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-src") || "" : "";
+      if (!imgSrc || imgSrc === "false") imgSrc = imgEl ? imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
+
       var typeTag = card.querySelector(".description-tag");
       var propertyType = typeTag ? clean(typeTag) : "";
 
@@ -73,7 +72,8 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
-      var units = group.querySelectorAll(".property-section");
+      // Units now render inside the card; the shared parent holds every card's units (30x duplication).
+      var units = card.querySelectorAll(".property-section");
       units.forEach(function(unit) {
         var priceEl = unit.querySelector(".rent-info-wrapper .price");
         var rent = priceEl ? parseFloat(clean(priceEl).replace(/,/g, "")) : NaN;
@@ -135,6 +135,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           layout: layout || undefined,
           station: station || undefined,
           walkMinutes: walkMinutes != null ? walkMinutes : undefined,
+          images: image ? [image] : undefined,
           url: url,
           source: "mitsui",
           propertyType: propertyType || undefined,
@@ -243,6 +244,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       
       var h2 = el.querySelector("h2");
       if (!h2) return;
+      // el is the description column; the photo sits in the sibling .image-section.
+      var imgEl = (el.closest(".property-index-card") || el).querySelector("img.main-image");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-src") || "" : "";
+      if (!imgSrc || imgSrc === "false") imgSrc = imgEl ? imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
       var title = h2.textContent.trim();
       
       var ward = "";
@@ -324,8 +330,13 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         
         // Match area / coverage
         if (text.match(/㎡/) || text.match(/建ぺい率/) || text.match(/容積率/)) {
+          // Houses print "建物163.27㎡ / 土地106.09㎡"; the first ㎡ is the building, not the plot.
+          var landM = text.match(/土地\\s*([\\d,.]+)\\s*(?:㎡|m)/);
+          var bldM = text.match(/建物\\s*([\\d,.]+)\\s*(?:㎡|m)/);
           var aM = text.match(/([\\d,.]+)\\s*(?:㎡|m)/);
-          if (aM) {
+          if (landM) landSize = parseFloat(landM[1].replace(/,/g, ""));
+          if (bldM) floorArea = parseFloat(bldM[1].replace(/,/g, ""));
+          if (aM && !landM && !bldM) {
             var parsed = parseFloat(aM[1].replace(/,/g, ""));
             if (isMansion) floorArea = parsed;
             else landSize = parsed;
@@ -351,7 +362,8 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       // Secondary fallback for layout and age inside layout strings like "3LDK / 1999年10月"
       ps.forEach(function(p) {
         var text = p.textContent.trim();
-        if (text.includes("LDK") && text.includes("年")) {
+        // 1K/2SDK/ワンルーム rows ("1K / 建物163.27㎡ / 土地106.09㎡ / 2009年09月築") lack "LDK".
+        if ((text.includes("LDK") || /\\d{4}年\\d+月築/.test(text)) && text.includes("年")) {
           var lM = text.match(/([\\d]+[LDKS]+)/);
           if (lM && !layout) layout = lM[1];
           var aM = text.match(/(\\d{4}年\\d+月)/);
@@ -383,6 +395,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           propertyType: propertyType,
           layout: layout || undefined,
           age: age || undefined,
+          images: image ? [image] : undefined,
         });
       }
     });

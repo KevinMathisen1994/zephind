@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
+import { formatMan } from "../lib/utils";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -296,7 +297,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
       const isSelected = (listing._id || listing.id) === (activeListing?._id || activeListing?.id);
 
       const effectiveYield = listing.yield || listing.grossYield || listing.netYield;
-      const priceText = listing.price ? `¥${listing.price.toLocaleString()}万` : "価格応談";
+      const priceText = listing.price ? `¥${formatMan(listing.price)}` : "価格応談";
       const yieldText = effectiveYield ? `${effectiveYield.toFixed(1)}%` : "—";
       const scoreText = listing.score ? `${Math.round(listing.score)}点` : "未評価";
 
@@ -348,7 +349,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
           <div style="display: flex; gap: 8px; margin-top: 6px; padding: 6px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
             <div>
               <div style="font-size: 9px; color: #64748b; font-weight: 700;">価格</div>
-              <div style="font-size: 13px; font-weight: 900; color: #0f172a;">${listing.price ? `¥${listing.price.toLocaleString()}万` : "価格応談"}</div>
+              <div style="font-size: 13px; font-weight: 900; color: #0f172a;">${listing.price ? `¥${formatMan(listing.price)}` : "価格応談"}</div>
             </div>
             ${effectiveYield ? `
             <div>
@@ -557,7 +558,7 @@ export const TokyoPropertyMap: React.FC<TokyoPropertyMapProps> = ({
                 <div>
                   <div className="text-[13.5px] font-bold text-slate-400 uppercase tracking-wider">物件価格</div>
                   <div className="text-lg font-black text-slate-900 font-data">
-                    {activeListing.price ? `¥${activeListing.price.toLocaleString()}万` : "価格応談"}
+                    {activeListing.price ? `¥${formatMan(activeListing.price)}` : "価格応談"}
                   </div>
                 </div>
                 <div>

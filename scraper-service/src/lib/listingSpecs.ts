@@ -2,6 +2,7 @@ import { db } from "../db";
 import { logger } from "../logger";
 import { config } from "../config";
 import {
+  parseBcrFar,
   parseBuildYear,
   parseFloor,
   parseStructure,
@@ -113,8 +114,15 @@ export function deriveFields(specs: Record<string, string>): Record<string, any>
   const year = ym ? parseInt(ym[1], 10) : parseBuildYear(built ?? "");
   if (year != null) out.buildYear = year;
 
-  const y = pick("予定利回り", "表面利回り", "利回り")?.match(/([\d.]+)\s*%/);
+  const y = pick("予定利回り", "表面利回り", "満室時想定利回り", "想定利回り", "利回り")?.match(/([\d.]+)\s*%/);
   if (y) out.yield = parseFloat(y[1]);
+
+  const both = pick("建ぺい率/容積率", "建蔽率/容積率", "建ぺい率・容積率", "建蔽率・容積率");
+  const bcrText = pick("建ぺい率", "建蔽率", "建ペい率");
+  const farText = pick("容積率");
+  const { bcr, far } = parseBcrFar((both ?? `建ぺい率${bcrText ?? ""} 容積率${farText ?? ""}`).replace(/％/g, "%"));
+  if (bcr != null) out.buildingCoverageRatio = bcr;
+  if (far != null) out.floorAreaRatio = far;
 
   // 管理費 for a sale is the monthly fee, same unit (万円/月) as the rental column.
   const fee = yenToMan(pick("管理費(月額)", "管理費", "管理費等", "管理費・共益費", "管理費・共益費等"));
@@ -143,8 +151,24 @@ export async function fetchHtml(url: string): Promise<string | null> {
   }
 }
 
-async function saveSpecs(id: string, specs: Record<string, string>, existing: Record<string, any>) {
-  const derived = deriveFields(specs);
+/** Listing photo from the detail page's og:image; most portals set it to the main exterior shot. */
+export function parseOgImage(html: string, pageUrl: string): string | undefined {
+  const m =
+    html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ??
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
+  if (!m) return undefined;
+  try {
+    const url = new URL(m[1].replace(/&amp;/g, "&"), pageUrl).href;
+    // Portals fall back to their logo / a no-image placeholder when the listing has no photo.
+    return /logo|noimage|no_image|no-image|ogp_default|default_og|\/common\//i.test(url) ? undefined : url;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveSpecs(id: string, specs: Record<string, string>, existing: Record<string, any>, image?: string) {
+  const derived: Record<string, any> = deriveFields(specs);
+  if (image) derived.images = [image];
   const fill: Record<string, any> = {};
   for (const [k, v] of Object.entries(derived)) if (existing[k] == null) fill[k] = v;
   // A database that lacks a column rejects the whole patch, so fall back step by step.
@@ -171,10 +195,11 @@ export async function enrichListingSpecs(listingIds: string[], opts: { delayMs?:
       if (!html) continue; // transient fetch failure: leave specs null so it is retried
       const specs = parseSpecPairs(html);
       if (Object.keys(specs).length > 0) {
-        if (await saveSpecs(row._id, specs, row)) saved++;
+        if (await saveSpecs(row._id, specs, row, parseOgImage(html, row.url))) saved++;
       } else {
         // {} marks "page has no spec table" so the backfill queue cannot stall on it.
-        await db.patch("listings", row._id, { specs: {} }).catch(() => {});
+        const image = row.images?.length ? undefined : parseOgImage(html, row.url);
+        await db.patch("listings", row._id, image ? { specs: {}, images: [image] } : { specs: {} }).catch(() => {});
       }
       await new Promise((r) => setTimeout(r, opts.delayMs ?? 700));
     }

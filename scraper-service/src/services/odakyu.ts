@@ -116,6 +116,9 @@ async function extractLifescapeListings(page: any): Promise<PropertyListing[]> {
       var area = floorArea || landSize || 0;
 
       var url = "${LIFESCAPE_BASE}" + a.getAttribute("href");
+      var thumbEl = a.querySelector("figure img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
 
       if (address && price) {
         results.push({
@@ -132,6 +135,7 @@ async function extractLifescapeListings(page: any): Promise<PropertyListing[]> {
           propertyType: realType,
           yield: yieldPct !== null ? yieldPct : undefined,
           isNew: isNew || undefined,
+          images: images,
         });
       }
     });
@@ -227,6 +231,10 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       var byM = (spec["築年月"] || "").match(/(\\d{4})年/);
       if (byM) buildYear = parseInt(byM[1], 10);
 
+      var thumbEl = card.querySelector(".estate-photo-top img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+
       var ward = "";
       var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
         .replace(/^[^\\s]{1,4}郡/, "")
@@ -256,6 +264,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
         // instead (unlike the LIFESCAPE ビル cards above).
         propertyType: "マンション",
         dealType: "rent",
+        images: images,
       });
     });
 
@@ -414,6 +423,14 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
 
       area = isMansion ? (floorArea || 0) : (landSize || 0);
 
+      // Card dl prints "築年月2024年11月" (buildings) or "建ぺい率 60% 容積率 200%" (land).
+      var thumbEl = el.querySelector(".estate-photo-top img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+      var byM = text.match(/築年月\\s*((?:19|20)\\d{2})年/);
+      var bcrM = text.match(/建ぺい率\\s*([\\d.]+)\\s*%/);
+      var farM = text.match(/容積率\\s*([\\d.]+)\\s*%/);
+
       if (address && price) {
         results.push({
           address: address,
@@ -427,6 +444,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           propertyType: propertyType,
+          images: images,
+          buildYear: byM ? parseInt(byM[1], 10) : undefined,
+          buildingCoverageRatio: bcrM ? parseFloat(bcrM[1]) : undefined,
+          floorAreaRatio: farM ? parseFloat(farM[1]) : undefined,
         });
       }
     });

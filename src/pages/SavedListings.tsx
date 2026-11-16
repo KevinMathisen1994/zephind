@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatMan } from "../lib/utils";
 import { useNavigate } from "react-router-dom";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
@@ -134,9 +135,9 @@ export default function SavedListingsPage() {
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-semibold text-[var(--text-secondary)]">
                       {row.price !== undefined && (
                         <span className="text-lg font-black text-[var(--text-primary)] font-data">
-                          {row.price.toLocaleString()}
+                          {formatMan(row.price)}
                           <span className="text-xs font-bold ml-1 text-[var(--text-muted)]">
-                            万円
+                            円
                           </span>
                         </span>
                       )}

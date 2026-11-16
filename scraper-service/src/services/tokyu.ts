@@ -117,6 +117,7 @@ async function extractJigyoListings(page: any): Promise<{ listings: PropertyList
       station,
       walkMinutes,
       propertyType: p?.labelList?.[0]?.detailText || "ビル",
+      images: p?.thumbnailImage?.[0]?.src ? [p.thumbnailImage[0].src] : undefined,
     });
   }
   return { listings: results, totalCount };
@@ -241,6 +242,7 @@ function extractChintaiListings(html: string): { listings: PropertyListing[]; to
       walkMinutes,
       propertyType: p?.labelList?.[0]?.detailText || undefined,
       layout: layout || undefined,
+      images: p?.thumbnailImage?.[0]?.src ? [p.thumbnailImage[0].src] : undefined,
       dealType: "rent",
     });
   }
@@ -337,6 +339,8 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           let floorArea: number | undefined;
           let buildYear: number | undefined;
           let age: string | undefined;
+          let bcr: number | undefined;
+          let far: number | undefined;
           const details: string[] = Array.isArray(p.propertyDetail) ? p.propertyDetail : [];
           for (const raw of details) {
             const plain = raw.replace(/<[^>]+>/g, "");
@@ -352,6 +356,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
               buildYear = parseInt(yearM[1], 10);
               age = `${yearM[1]}年${yearM[2]}月`;
             }
+            // "建ぺい率 60％" / "容積率 160％・200％ 前面道路幅員制限による" — first figure.
+            const bcrM = plain.match(/^建ぺい率\s*([\d.]+)/);
+            if (bcrM) bcr = parseFloat(bcrM[1]);
+            const farM = plain.match(/^容積率\s*([\d.]+)/);
+            if (farM) far = parseFloat(farM[1]);
           }
 
           let ward = "";
@@ -375,6 +384,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
             floorArea: floorArea || undefined,
             buildYear: buildYear || undefined,
             age,
+            buildingCoverageRatio: bcr,
+            floorAreaRatio: far,
+            images: p?.thumbnailImage?.[0]?.src ? [p.thumbnailImage[0].src] : undefined,
             source: "tokyu",
             url,
             station,

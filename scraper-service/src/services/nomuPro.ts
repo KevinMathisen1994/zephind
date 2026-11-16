@@ -73,6 +73,10 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
       var floorArea = null;
       var age = "";
       var layout = "";
+      var structure = "";
+      var imgEl = el.querySelector(".pic img");
+      var imgSrc = imgEl ? imgEl.getAttribute("data-original") || imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
 
       // Address
       var addrDl = col2.querySelector("dl.address");
@@ -152,6 +156,8 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
           age = val;
         } else if (label.includes("間取り")) {
           layout = val;
+        } else if (label.includes("構造")) {
+          structure = val;
         }
       });
       
@@ -172,6 +178,8 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         propertyType: propertyType || "収益物件",
         layout: layout || undefined,
         age: age || undefined,
+        structure: structure || undefined,
+        images: image ? [image] : undefined,
         // PropertyListing DOES have `yield` — the old comment was wrong and the
         // value was being stringified into `description`, so buyer criteria like
         // minYield could never match against it. This is the investment-property

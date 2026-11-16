@@ -158,6 +158,15 @@ async function extractPageListings(page: any, wardName: string, label: string): 
         else if (/木造/.test(allText)) { structure = "木造"; structureType = "木造"; }
       }
 
+      // .gaiyo_img holds 外観/間取り thumbs; the first can be no-image210x150.jpg.
+      var images = undefined;
+      Array.from(item.querySelectorAll(".gaiyo_img img")).some(function(im) {
+        var s = im.getAttribute("data-src") || im.getAttribute("src") || "";
+        if (!s || /^data:|noimage|no_image|no-image|dummy|spacer|loading/i.test(s)) return false;
+        images = [new URL(s, location.href).href];
+        return true;
+      });
+
       var area = floorArea != null ? floorArea : landSize;
       var fullUrl = link.startsWith("http") ? link : "https://realestate.rakuten.co.jp" + link;
 
@@ -192,6 +201,7 @@ async function extractPageListings(page: any, wardName: string, label: string): 
         totalUnits: totalUnits !== null ? totalUnits : undefined,
         roadWidth: roadWidth !== null ? roadWidth : undefined,
         buildYear: buildYear !== null ? buildYear : undefined,
+        images: images,
       };
     });
     return JSON.stringify(results);
@@ -264,6 +274,15 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
       });
       if (!address) return;
 
+      // .gaiyo_img holds the building photo; skip no-image placeholders.
+      var images = undefined;
+      Array.from(building.querySelectorAll(".gaiyo_img img")).some(function(im) {
+        var s = im.getAttribute("data-src") || im.getAttribute("src") || "";
+        if (!s || /^data:|noimage|no_image|no-image|dummy|spacer|loading/i.test(s)) return false;
+        images = [new URL(s, location.href).href];
+        return true;
+      });
+
       var ward = "";
       var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
         .replace(/^[^\\s]{1,4}郡/, "")
@@ -322,6 +341,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           source: "rakuten",
           propertyType: propertyType || undefined,
           dealType: "rent",
+          images: images,
         });
       });
     });

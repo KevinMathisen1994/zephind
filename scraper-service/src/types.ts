@@ -9,6 +9,8 @@ export interface PropertyListing {
   age?: string;
   source: string;
   url?: string;
+  /** Listing photo URL(s), absolute. Card thumbnail first; omitted when the portal shows none. */
+  images?: string[];
   description?: string;
   rooms?: number;
   layout?: string;

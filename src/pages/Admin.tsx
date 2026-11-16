@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { formatMan } from "../lib/utils";
 // Aliased so the call sites below read unchanged. useAction and useMutation
 // are the same hook now: both just POST to the backend.
 import {
@@ -660,7 +661,7 @@ export default function AdminPage() {
                         {listing.ward || "—"}
                       </TableCell>
                       <TableCell className="font-data text-sm font-extrabold text-[var(--brand)]">
-                        {listing.price ? listing.price.toLocaleString() : "—"}
+                        {listing.price ? formatMan(listing.price) : "—"}
                       </TableCell>
                       <TableCell className="font-data text-xs font-semibold text-[var(--text-secondary)]">
                         {listing.area ? listing.area.toFixed(1) : "—"}

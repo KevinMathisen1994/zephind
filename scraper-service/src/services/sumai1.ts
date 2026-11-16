@@ -161,6 +161,11 @@ async function extractListings(
         .filter(function(t) { return t && t !== "NEW"; });
       var realType = catLabels.length ? catLabels[0] : propertyType;
 
+      // Photo slider: li.slidebuffer holds carousel clones, so skip it to get slide 1.
+      var thumbEl = row.querySelector(".photos li:not(.slidebuffer) img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+
       if (address && price) {
         results.push({
           address: address,
@@ -181,6 +186,7 @@ async function extractListings(
           floor: floor !== null ? floor : undefined,
           structureType: structureType || undefined,
           description: buildingName || undefined,
+          images: images,
         });
       }
     });

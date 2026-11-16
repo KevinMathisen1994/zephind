@@ -73,6 +73,11 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         if (yM) buildYear = parseInt(yM[1], 10);
       }
 
+      // Building photo; default-thumbnail.png (alt="NoImage") is the no-photo placeholder.
+      const thumbEl = article.querySelector(".tm_data figure img");
+      const thumb = thumbEl ? thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "" : "";
+      const images = thumb && !/noimage|no_image|default-thumbnail|dummy|spacer|transparent\.gif|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+
       // Find room detail rows or fall back to the article container
       const roomRows = Array.from(article.querySelectorAll("table.room_data tr.room-detail")).filter(
         (r) => r.querySelector("td.kokoku-list-condition__price")
@@ -124,6 +129,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
 
         const area = realType === "マンション" ? (floorArea || 0) : (landSize || floorArea || 0);
 
+        // 土地 rows: "60% ・ 200%" (建ぺい率・容積率).
+        const ratioM = (row.querySelector("td.kokoku-list-condition__building_ratio")?.textContent || "").match(/([\d.]+)\s*%\D+([\d.]+)\s*%/);
+
         if (address && price > 0) {
           results.push({
             address,
@@ -140,6 +148,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
             url: url || undefined,
             source: "keio",
             propertyType: realType,
+            images,
+            buildingCoverageRatio: ratioM ? parseFloat(ratioM[1]) : undefined,
+            floorAreaRatio: ratioM ? parseFloat(ratioM[2]) : undefined,
           });
         }
       });
@@ -211,6 +222,10 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
         || address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "").replace(/^[^\\s]{1,4}郡/, "").match(/^(.{1,5}?[町村])/);
       if (wm) ward = wm[1];
 
+      var thumbEl = article.querySelector(".tm_data figure img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|default-thumbnail|dummy|spacer|transparent\\.gif|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+
       var others1Cells = article.querySelectorAll("table.room_data td.kokoku-list-condition__others1");
       Array.prototype.slice.call(others1Cells).forEach(function(othersTd) {
         var row = othersTd.closest("tr");
@@ -265,6 +280,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           source: "keio",
           propertyType: realType,
           dealType: "rent",
+          images: images,
         });
       });
     });

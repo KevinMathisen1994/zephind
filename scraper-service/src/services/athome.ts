@@ -168,6 +168,26 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
         }).replace(/\\u3000/g, " ");
       }
 
+      // 築年月 / 完成時期 label on card-box-inner; buy_other prints "1987年3月（築39年9ヶ月）".
+      var buildYear = null;
+      var byM = cardText.match(/(?:築年月|完成時期)[：:]*\\s*(\\d{4})年/) || cardText.match(/(\\d{4})年\\d{1,2}月（築/);
+      if (byM) buildYear = parseInt(byM[1], 10);
+
+      // buy_other only: 4th spec cell is "<用途地域> <構造>", e.g. "準住居 ＲＣ".
+      var structure = "";
+      var specTds = card.querySelectorAll(".area-inner__right td");
+      if (specTds.length > 3) {
+        var stTok = specTds[3].textContent.trim().split(/\\s+/).pop() || "";
+        stTok = stTok.replace(/[\\uFF01-\\uFF5E]/g, function(ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); });
+        if (/造|RC|鉄骨|ブロック/.test(stTok)) structure = stTok;
+      }
+
+      // Photos sit in .card-box (sibling of .card-box-inner); off-screen ones stay loading_g.gif until scrolled.
+      var images = undefined;
+      var imgEl = (card.closest(".card-box") || card).querySelector(".card-box-image-slide img, .area-inner__left-image--top span img");
+      var imgSrc = imgEl ? (imgEl.getAttribute("data-src") || imgEl.getAttribute("src") || "") : "";
+      if (imgSrc && !/^data:|noimage|no_image|no-image|dummy|spacer|loading/i.test(imgSrc)) images = [new URL(imgSrc, location.href).href];
+
       var detailUrl = "";
       var linkEl = card.closest("a") || card.querySelector("a[href*='/tochi/'], a[href*='/kodate/'], a[href*='/mansion/'], a");
       if (linkEl) {
@@ -180,7 +200,7 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
       // 0, so an unparsed size (common for buy_other/ビル cards, which often
       // have no 土地面積 row) read as "confirmed 0m²" and got hard-rejected
       // by any such filter instead of being treated as unknown.
-      results.push({ address: address, ward: ward, price: price, area: area || undefined, landSize: area || undefined, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined });
+      results.push({ address: address, ward: ward, price: price, area: area || undefined, landSize: area || undefined, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined, buildYear: buildYear || undefined, structure: structure || undefined, images: images });
       if (detailUrl) urls.push(detailUrl);
     });
     return JSON.stringify({ listings: results, detailUrls: urls });
@@ -533,6 +553,8 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
       } else {
         try { await page.waitForSelector(cardSelector, { timeout: 15000 }); } catch { logger.warn(`[At Home Scraper] No card found on page ${p}, assuming end`); break; }
       }
+      // Card photos lazy-load on intersection; scroll through so each card's src is real.
+      await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += 600) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 150)); } });
       await new Promise(r => setTimeout(r, 2000));
 
       const { listings, detailUrls } = await extractListingsFromPage(page, wardName, allCategories[cat]);

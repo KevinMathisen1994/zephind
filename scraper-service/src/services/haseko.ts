@@ -186,6 +186,11 @@ async function extractListings(page: any, propertyType: string, typePath: string
 
       var area = isMansion ? (floorArea || 0) : (landSize || floorArea || 0);
 
+      // Protocol-relative miraie-net CDN thumbnail.
+      var imgEl = row.querySelector("figure.photo img");
+      var imgSrc = imgEl ? imgEl.getAttribute("src") || "" : "";
+      var image = imgSrc && !/noimage|no_image|^data:/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
+
       if (address && price) {
         results.push({
           address: address,
@@ -204,6 +209,7 @@ async function extractListings(page: any, propertyType: string, typePath: string
           propertyType: propertyType,
           layout: layout || undefined,
           yield: yieldPct !== null ? yieldPct : undefined,
+          images: image ? [image] : undefined,
         });
       }
     });

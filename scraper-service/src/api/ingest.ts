@@ -28,6 +28,7 @@ import { route } from "./handler";
 import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
 import { backfillSpecs, enrichListingSpecs } from "../lib/listingSpecs";
+import { parseBuildYear } from "../services/propertyDetail";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -79,6 +80,11 @@ const LISTING_NUMBER_FIELDS = [
   // Price change tracking
   "previousPrice", "initialPrice", "priceDropPct", "priceChangedAt",
 ];
+// Copied onto an already-stored listing only where its column is still null.
+const FILL_BLANK_FIELDS = [
+  "images", "buildYear", "structure", "structureType", "yield",
+  "buildingCoverageRatio", "floorAreaRatio",
+];
 const LISTING_BOOLEAN_FIELDS = ["isNew", "petsAllowed", "priceDropped"];
 
 function normalizeListing(raw: any, source: string): Record<string, any> {
@@ -99,6 +105,11 @@ function normalizeListing(raw: any, source: string): Record<string, any> {
   if (Array.isArray(raw.images)) {
     const images = raw.images.filter((i: unknown) => typeof i === "string");
     if (images.length > 0) doc.images = images;
+  }
+  // Many scrapers emit only the card's 築年月 text ("2005年3月", "平成17年") as `age`.
+  if (doc.buildYear == null && typeof raw.age === "string") {
+    const year = parseBuildYear(raw.age);
+    if (year != null) doc.buildYear = year;
   }
   // Scrapers vary: some call it url, some detailUrl.
   if (!doc.url && typeof raw.detailUrl === "string" && raw.detailUrl) doc.url = raw.detailUrl;
@@ -351,9 +362,10 @@ ingestRouter.post("/scrape", route(async (req) => {
     const priceColumns = ["previousPrice", "initialPrice"].filter(
       (c) => !missing.has(c),
     );
+    const fillColumns = FILL_BLANK_FIELDS.filter((c) => !missing.has(c));
     const rows = await db.selectIn(
       "listings",
-      ["_id", "url", "price", ...priceColumns].join(","),
+      ["_id", "url", "price", ...priceColumns, ...fillColumns].join(","),
       "url",
       docs.map((d) => d.url),
     );
@@ -418,6 +430,18 @@ ingestRouter.post("/scrape", route(async (req) => {
           }
         }
       }
+    }
+
+    // Listings stored before a scraper learned a field (image, 築年, ...) get it on the next sighting.
+    for (const d of docs) {
+      const existing = existingByUrl.get(d.url);
+      if (!existing) continue;
+      const fill: Record<string, any> = {};
+      for (const c of fillColumns) if (existing[c] == null && d[c] != null) fill[c] = d[c];
+      if (Object.keys(fill).length === 0) continue;
+      await db.patch("listings", existing._id, fill).catch((err) =>
+        logger.warn(`[ingest] fill-blank patch ${existing._id} failed: ${err}`),
+      );
     }
 
     // Seen again today, so not ended. Chunked to keep the URL-encoded id list small.

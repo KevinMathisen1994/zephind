@@ -99,6 +99,10 @@ async function extractChintaiListings(page: any, propertyType: string): Promise<
 
       if (rent == null || !address) return;
 
+      var thumbEl = el.querySelector(".view .image img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+
       var station = "";
       var stM = stationText.match(/「([^」]+)」\\s*駅/) || stationText.match(/([^\\s「」]+駅)/);
       if (stM) station = stM[1].indexOf("駅") >= 0 ? stM[1] : stM[1] + "駅";
@@ -131,6 +135,7 @@ async function extractChintaiListings(page: any, propertyType: string): Promise<
         area: area != null ? area : undefined,
         floorArea: area != null ? area : undefined,
         buildYear: buildYear != null ? buildYear : undefined,
+        images: images,
         source: "stepon",
         url: url,
         station: station || undefined,
@@ -277,7 +282,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         var stText = p1 ? p1.textContent.trim() : "";
         if (stText) {
           var ekiSpan = card.querySelector("#station1, #eki1");
-          station = ekiSpan ? ekiSpan.textContent.replace(/[「」]/g, "").trim() + "駅" : "";
+          station = ekiSpan ? ekiSpan.textContent.replace(/[「」]/g, "").trim().replace(/駅$/, "") + "駅" : "";
           var wkM = stText.match(/徒歩(\\d+)分/);
           if (wkM) walkMinutes = parseInt(wkM[1], 10);
         }
@@ -286,6 +291,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         var area = 0;
         var aM = cardAllText.match(/([\\d,.]+)\\s*(?:㎡|m2|m²|平米)/);
         if (aM) area = parseFloat(aM[1].replace(/,/g, ""));
+        // Houses print both 土地 and 建物 areas; take each by its label when present.
+        var landM = cardAllText.match(/土地(?:面積)?\\s*[:：]?\\s*([\\d,.]+)\\s*(?:㎡|m2|m²|平米)/);
+        var bldM = cardAllText.match(/建物(?:面積)?\\s*[:：]?\\s*([\\d,.]+)\\s*(?:㎡|m2|m²|平米)/);
 
         var ward = "";
         var wm = address.replace(/^東京都|^北海道|^[^\\s]{2,3}[府県]/, "")
@@ -295,6 +303,19 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         if (wm) ward = wm[1];
 
         var pType = card.querySelector("#type_label")?.textContent?.trim() || propertyType;
+        // Label reads "中古マンション"/"新築マンション", never bare "マンション".
+        var isMansion = /マンション/.test(pType);
+        var landSize = landM ? parseFloat(landM[1].replace(/,/g, "")) : isMansion ? undefined : area || undefined;
+        var floorArea = bldM ? parseFloat(bldM[1].replace(/,/g, "")) : isMansion ? area || undefined : undefined;
+        if (!isMansion && landSize) area = landSize;
+
+        // Text line prints "2014年01月築" (buildings) or "建ぺい率60% / 容積率150%" (land).
+        var thumbEl = card.querySelector("img.sr-card-img-lg");
+        var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+        var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+        var byM = cardAllText.match(/((?:19|20)\\d{2})年\\d{1,2}月築/);
+        var bcrM = cardAllText.match(/建ぺい率\\s*([\\d.]+)%/);
+        var farM = cardAllText.match(/容積率\\s*([\\d.]+)%/);
 
         if (address && price) {
           results.push({
@@ -302,13 +323,17 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
             ward: ward,
             price: price,
             area: area,
-            landSize: pType === "マンション" ? undefined : area,
-            floorArea: pType === "マンション" ? area : undefined,
+            landSize: landSize,
+            floorArea: floorArea,
             source: "stepon",
             url: url,
             station: station || undefined,
             walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
             propertyType: pType,
+            images: images,
+            buildYear: byM ? parseInt(byM[1], 10) : undefined,
+            buildingCoverageRatio: bcrM ? parseFloat(bcrM[1]) : undefined,
+            floorAreaRatio: farM ? parseFloat(farM[1]) : undefined,
           });
         }
       });

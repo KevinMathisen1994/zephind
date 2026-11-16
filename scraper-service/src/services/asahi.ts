@@ -112,6 +112,15 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
 
       area = isMansion ? (floorArea || 0) : (landSize || 0);
 
+      // cell02 thumbnail; cell07 prints 築年月 ("1977年9月") or 建ペイ率/容積率 for land.
+      var thumbEl = el.querySelector(".cell02 img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+      var c7 = (el.querySelector(".cell07") || {}).textContent || "";
+      var byM7 = c7.match(/((?:19|20)\\d{2})年/);
+      var bcrM = c7.match(/建ペイ率[：:]\\s*([\\d.]+)%/);
+      var farM = c7.match(/容積率[：:]\\s*([\\d.]+)%/);
+
       if (address && price) {
         results.push({
           address: address,
@@ -125,6 +134,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           propertyType: propertyType,
+          images: images,
+          buildYear: byM7 ? parseInt(byM7[1], 10) : undefined,
+          buildingCoverageRatio: bcrM ? parseFloat(bcrM[1]) : undefined,
+          floorAreaRatio: farM ? parseFloat(farM[1]) : undefined,
         });
       }
     });
@@ -207,6 +220,15 @@ async function extractInvestListings(page: any, propertyType: string): Promise<P
 
       var area = floorArea !== null ? floorArea : (landSize || 0);
 
+      // cell02 thumbnail; cell07 prints 築年月 ("1977年9月") or 建ペイ率/容積率 for land.
+      var thumbEl = el.querySelector(".cell02 img");
+      var thumb = thumbEl ? (thumbEl.getAttribute("data-src") || thumbEl.getAttribute("src") || "") : "";
+      var images = thumb && !/noimage|no_image|dummy|spacer|^data:/i.test(thumb) ? [new URL(thumb, location.href).href] : undefined;
+      var c7 = (el.querySelector(".cell07") || {}).textContent || "";
+      var byM7 = c7.match(/((?:19|20)\\d{2})年/);
+      var bcrM = c7.match(/建ペイ率[：:]\\s*([\\d.]+)%/);
+      var farM = c7.match(/容積率[：:]\\s*([\\d.]+)%/);
+
       if (address && price) {
         results.push({
           address: address,
@@ -220,6 +242,10 @@ async function extractInvestListings(page: any, propertyType: string): Promise<P
           station: station || undefined,
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           propertyType: propertyType,
+          images: images,
+          buildYear: byM7 ? parseInt(byM7[1], 10) : undefined,
+          buildingCoverageRatio: bcrM ? parseFloat(bcrM[1]) : undefined,
+          floorAreaRatio: farM ? parseFloat(farM[1]) : undefined,
           description: realType || undefined,
         });
       }

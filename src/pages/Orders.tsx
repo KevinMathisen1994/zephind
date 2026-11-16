@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { formatMan } from "../lib/utils";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 // Aliased so the call sites below read unchanged. useAction and useMutation
@@ -3041,6 +3042,7 @@ export default function OrdersPage() {
                         // box takes over (see the hint).
                         max={50000}
                         step={100}
+                        format={formatMan}
                         minValue={priceMin}
                         maxValue={priceMax}
                         onMinChange={setPriceMin}
@@ -4346,6 +4348,17 @@ export default function OrdersPage() {
                                   className="flex flex-col sm:flex-row sm:items-start justify-between px-5 py-3.5 gap-2 cursor-pointer select-none"
                                   onClick={() => toggleExpand(m._id)}
                                 >
+                                  <div className="flex items-start gap-3 min-w-0">
+                                  {listing?.images?.[0] && (
+                                    <img
+                                      src={listing.images[0]}
+                                      alt=""
+                                      loading="lazy"
+                                      referrerPolicy="no-referrer"
+                                      className="h-20 w-28 shrink-0 rounded-lg object-cover bg-slate-100"
+                                      onError={(e) => (e.currentTarget.style.display = "none")}
+                                    />
+                                  )}
                                   <div className="flex flex-wrap items-center gap-2.5 min-w-0">
                                     {/* Tick here, then 顧客へ物件を提案 opens with these
                                     already chosen. stopPropagation keeps the click
@@ -4361,18 +4374,26 @@ export default function OrdersPage() {
                                       title="提案メールに含める"
                                       aria-label="提案に含める"
                                     />
-                                    <span className="text-[17px] font-bold text-[var(--text-primary)] truncate">
-                                      {listing?.address ||
-                                        m.listingId?.slice(0, 8) ||
-                                        "—"}
-                                    </span>
+                                    {listings === undefined ? (
+                                      <span
+                                        className="h-5 w-56 max-w-full animate-pulse rounded-md bg-slate-200"
+                                        role="status"
+                                        aria-label="物件情報を読み込み中"
+                                      />
+                                    ) : (
+                                      <span className="text-[17px] font-bold text-[var(--text-primary)] truncate">
+                                        {listing?.address || (listing ? "所在地未記載" : "物件情報を取得できませんでした")}
+                                      </span>
+                                    )}
                                     {/* Same rule as the 新着 tab so badge and count agree. */}
                                     {isNewListing(listing) && (
                                       <span className="shrink-0 rounded-full bg-[#3f6b3f] px-2.5 py-0.5 text-[12.5px] font-bold text-white">
                                         新着
                                       </span>
                                     )}
-                                    {(listing?.station || listing?.walkMinutes != null || listing?.area != null || listing?.landSize != null) && (
+                                    {(listing?.station || listing?.walkMinutes != null || listing?.area != null || listing?.landSize != null ||
+                                      listing?.buildYear != null || listing?.structure || listing?.structureType || listing?.yield != null ||
+                                      listing?.buildingCoverageRatio != null || listing?.floorAreaRatio != null) && (
                                       <>
                                         <div className="basis-full h-0" />
                                         <div className="text-[14px] text-slate-500">
@@ -4384,6 +4405,14 @@ export default function OrdersPage() {
                                                 : null,
                                             listing?.area != null || listing?.landSize != null
                                               ? `${listing.area ?? listing.landSize}㎡`
+                                              : null,
+                                            listing?.buildYear != null
+                                              ? `築${Math.max(0, new Date().getFullYear() - listing.buildYear)}年`
+                                              : null,
+                                            listing?.structureType || listing?.structure || null,
+                                            listing?.yield != null ? `利回り${listing.yield}%` : null,
+                                            listing?.buildingCoverageRatio != null || listing?.floorAreaRatio != null
+                                              ? `建蔽/容積 ${listing.buildingCoverageRatio ?? "—"}%/${listing.floorAreaRatio ?? "—"}%`
                                               : null,
                                           ]
                                             .filter(Boolean)
@@ -4515,6 +4544,7 @@ export default function OrdersPage() {
                                     )}
 
                                   </div>
+                                  </div>
 
                                   <div className="flex items-start gap-4 shrink-0 text-slate-700">
                                     {listing?.price && (
@@ -4545,15 +4575,15 @@ export default function OrdersPage() {
                                             </span>
                                           )}
                                           <span className="text-[28px] font-bold leading-none text-slate-900 font-data">
-                                            {listing.price.toLocaleString()}
+                                            {formatMan(listing.price)}
                                             <span className="text-sm font-normal ml-1 text-slate-600">
-                                              万円
+                                              円
                                             </span>
                                           </span>
                                         </div>
                                         {listing.previousPrice && listing.price < listing.previousPrice && (
                                           <span className="text-[14px] text-slate-400 line-through font-data">
-                                            {listing.previousPrice.toLocaleString()} 万円
+                                            {formatMan(listing.previousPrice)}円
                                           </span>
                                         )}
                                         {extractedScore !== undefined && (
@@ -4601,6 +4631,15 @@ export default function OrdersPage() {
                                     </div>
                                   <div className="mx-auto w-full max-w-5xl flex-1 space-y-5 px-5 pb-10 pt-6 text-sm">
                                     <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
+                                    {listing.images?.[0] && (
+                                      <img
+                                        src={listing.images[0]}
+                                        alt="物件写真"
+                                        referrerPolicy="no-referrer"
+                                        className="mb-5 max-h-80 w-full rounded-lg object-cover bg-slate-100"
+                                        onError={(e) => (e.currentTarget.style.display = "none")}
+                                      />
+                                    )}
                                     <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
                                       <h2 className="min-w-0 text-[20px] font-bold text-[var(--text-primary)]">
                                         {listing.address || "物件詳細"}
@@ -4608,9 +4647,9 @@ export default function OrdersPage() {
                                       {listing.price ? (
                                         <div className="shrink-0">
                                           <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
-                                            {listing.price.toLocaleString()}
+                                            {formatMan(listing.price)}
                                           </span>
-                                          <span className="ml-1.5 text-[13px] text-slate-600">万円</span>
+                                          <span className="ml-1.5 text-[13px] text-slate-600">円</span>
                                         </div>
                                       ) : null}
                                     </div>
@@ -4626,6 +4665,7 @@ export default function OrdersPage() {
                                       listing.roadWidth != null ||
                                       listing.frontage != null ||
                                       listing.buildYear != null ||
+                                      listing.yield != null ||
                                       listing.buildingCoverageRatio != null ||
                                       listing.floorAreaRatio != null) && (
                                       <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-[var(--border-subtle)] pt-5 sm:grid-cols-4">
@@ -4677,6 +4717,12 @@ export default function OrdersPage() {
                                           <div>
 <div className="text-xs text-slate-500">築年</div>
 <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildYear}年 ({new Date().getFullYear() - listing.buildYear}年)</div>
+</div>
+                                        )}
+                                        {listing.yield != null && (
+                                          <div>
+<div className="text-xs text-slate-500">利回り</div>
+<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.yield}%</div>
 </div>
                                         )}
                                         {listing.roadWidth != null && (
@@ -4968,7 +5014,7 @@ export default function OrdersPage() {
                                                     <div className="text-xs text-slate-500">
                                                       国土交通省データ
                                                       {listing.area != null ? ` ・ ${listing.area}㎡前後` : ""} ・ 面積が近い順
-                                                      {sd.marketAvgPrice != null ? ` ・ 平均 ${sd.marketAvgPrice.toLocaleString()}万円` : ""}
+                                                      {sd.marketAvgPrice != null ? ` ・ 平均 ${formatMan(sd.marketAvgPrice)}円` : ""}
                                                     </div>
                                                   </div>
                                                   {ppsm != null && mppsm != null && (
@@ -5017,7 +5063,7 @@ export default function OrdersPage() {
                                                               <span className="pl-2">当物件</span>
                                                               <span className="font-normal">{listing.buildYear ? yr(listing.buildYear) : "—"}</span>
                                                               <span />
-                                                              <span className="text-right font-data">{listing.price ? `${listing.price.toLocaleString()}万円` : ""}</span>
+                                                              <span className="text-right font-data">{listing.price ? `${formatMan(listing.price)}円` : ""}</span>
                                                               {bar(ppsm, true)}
                                                               <span className="pr-2 text-right"><span className="font-data">{ppsm}万円</span><br />{diff(ppsm)}</span>
                                                             </div>
@@ -5032,7 +5078,7 @@ export default function OrdersPage() {
                                                               <span className="text-xs text-slate-500">
                                                                 {String(c.period || "").replace(/年第(\d)四半期/, "年$1Q")}
                                                               </span>
-                                                              <span className="text-right font-data">{c.price.toLocaleString()}万円</span>
+                                                              <span className="text-right font-data">{formatMan(c.price)}円</span>
                                                               {bar(c.pricePerSqm)}
                                                               <span className="text-right">
                                                                 <span className="font-data text-slate-700">{c.pricePerSqm != null ? `${c.pricePerSqm}万円` : "—"}</span>

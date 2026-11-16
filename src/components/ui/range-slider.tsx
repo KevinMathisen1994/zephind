@@ -106,6 +106,8 @@ export interface RangeSliderProps {
   onMaxChange: (next: Val) => void;
   minPlaceholder?: string;
   maxPlaceholder?: string;
+  /** Readable form of a value, e.g. 39700 -> "3億9,700万"; shown under the boxes and on the max label. */
+  format?: (n: number) => string;
 }
 
 /**
@@ -128,6 +130,7 @@ export function RangeSlider({
   onMaxChange,
   minPlaceholder = "指定なし",
   maxPlaceholder = "指定なし",
+  format,
 }: RangeSliderProps) {
   const unset = minValue === "" && maxValue === "";
   const low = toNumber(minValue, 0);
@@ -158,6 +161,12 @@ export function RangeSlider({
           />
           <span className="text-xs font-semibold text-slate-500">{unit}</span>
         </div>
+        {format && !unset && (
+          <div className="basis-full text-right text-[13px] font-semibold text-slate-500 tabular-nums">
+            {minValue !== "" ? format(low) : "指定なし"} 〜 {maxValue !== "" ? format(toNumber(maxValue, max)) : "指定なし"}
+            {unit.replace(/^万/, "")}
+          </div>
+        )}
       </Header>
 
       <Slider.Root
@@ -188,8 +197,7 @@ export function RangeSlider({
       <div className="flex justify-between text-[13.5px] font-semibold text-slate-400 tabular-nums">
         <span>0</span>
         <span>
-          {fmt(max)}
-          {unit}
+          {format ? `${format(max)}${unit.replace(/^万/, "")}` : `${fmt(max)}${unit}`}
           {"以上"}
         </span>
       </div>

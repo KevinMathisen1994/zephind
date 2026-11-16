@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { formatMan } from "../lib/utils";
 import {
   X,
   Copy,
@@ -51,7 +52,7 @@ export function LineProposalModal({
       const area = l.area || l.landSize || 0;
       const currentYield = l.yield || l.grossYield;
       const priceStr = l.price
-        ? `${l.price.toLocaleString()}万円`
+        ? `${formatMan(l.price)}円`
         : l.rent
           ? `賃料 ${l.rent.toLocaleString()}万円/月`
           : "価格要相談";
@@ -187,7 +188,7 @@ export function LineProposalModal({
                       </div>
                       <div className="text-[14px] text-emerald-700 font-extrabold">
                         {item.listing.price
-                          ? `${item.listing.price.toLocaleString()}万円`
+                          ? `${formatMan(item.listing.price)}円`
                           : "価格要相談"}
                       </div>
                     </div>

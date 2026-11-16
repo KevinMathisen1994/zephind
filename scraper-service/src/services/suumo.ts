@@ -96,6 +96,12 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
         if (ageM) buildYear = new Date().getFullYear() - parseInt(ageM[1], 10);
       }
 
+      // Thumbnails lazy-load: real URL is in rel, src is a 1x1 data: gif.
+      var images = undefined;
+      var imgEl = building.querySelector(".cassetteitem_object-item img");
+      var imgSrc = imgEl ? (imgEl.getAttribute("rel") || imgEl.getAttribute("data-src") || imgEl.getAttribute("src") || "") : "";
+      if (imgSrc && !/^data:|noimage|no_image|no-image|dummy|spacer|loading/i.test(imgSrc)) images = [new URL(imgSrc, location.href).href];
+
       var rows = building.querySelectorAll("tbody tr.js-cassette_link");
       rows.forEach(function(row) {
         var rentEl = row.querySelector(".cassetteitem_price--rent");
@@ -150,6 +156,7 @@ async function extractChintaiListings(page: any): Promise<PropertyListing[]> {
           source: "suumo",
           propertyType: rawType || undefined,
           dealType: "rent",
+          images: images,
         });
       });
     });
@@ -385,6 +392,12 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         url = href.indexOf("http") === 0 ? href : "https://suumo.jp" + href;
       }
 
+      // Thumbnails lazy-load: real URL is in rel, src is a 1x1 data: gif.
+      var images = undefined;
+      var imgEl = (card || el).querySelector(".property_unit-object img");
+      var imgSrc = imgEl ? (imgEl.getAttribute("rel") || imgEl.getAttribute("data-src") || imgEl.getAttribute("src") || "") : "";
+      if (imgSrc && !/^data:|noimage|no_image|no-image|dummy|spacer|loading/i.test(imgSrc)) images = [new URL(imgSrc, location.href).href];
+
       results.push({
         address: address,
         ward: ward,
@@ -413,6 +426,7 @@ async function extractListings(page: any): Promise<PropertyListing[]> {
         totalUnits: totalUnits != null ? totalUnits : undefined,
         roadWidth: roadWidth != null ? roadWidth : undefined,
         frontage: frontage != null ? frontage : undefined,
+        images: images,
       });
     });
 

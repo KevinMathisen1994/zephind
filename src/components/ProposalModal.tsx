@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { formatMan } from "../lib/utils";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { Button } from "./ui/button";
@@ -198,7 +199,7 @@ export const ProposalModal = ({
       // portal name (l.source) is left out for the same reason.
       ...selectedListingsData.flatMap((l, idx) => [
         `【物件${idx + 1}】${l.address} ${l.propertyType ? `(${l.propertyType})` : ""}`,
-        `・価格: ${l.price ? `${l.price.toLocaleString()} 万円` : "要確認"}`,
+        `・価格: ${l.price ? `${formatMan(l.price)}円` : "要確認"}`,
         `・面積: ${l.size ? `${l.size} ㎡` : "要確認"}`,
         `・アクセス: ${l.station || ""} ${l.walkMinutes !== undefined ? `(徒歩${l.walkMinutes}分)` : ""}`,
         "",
@@ -442,7 +443,7 @@ export const ProposalModal = ({
                           </div>
                           <div className="text-xs text-slate-500 font-semibold flex items-center gap-2 mt-0.5">
                             {item.price !== undefined && (
-                              <span>{item.price.toLocaleString()}万円</span>
+                              <span>{formatMan(item.price)}円</span>
                             )}
                             {item.size !== undefined && <span>{item.size}㎡</span>}
                             {item.propertyType && <span>{item.propertyType}</span>}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { formatMan } from "../lib/utils";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -322,7 +323,7 @@ export function PropertyHazardModal({
         `<div style="font-family: sans-serif; font-size: 12px; font-weight: 800; color: #0f172a; padding: 2px;">
           <div>${listing.address || listing.title || "対象物件"}</div>
           <div style="font-size: 11px; font-weight: 700; color: #16a34a; margin-top: 2px;">
-            ${listing.price ? `¥${listing.price.toLocaleString()}万円` : ""}
+            ${listing.price ? `¥${formatMan(listing.price)}円` : ""}
             ${listing.yield ? ` · 利回り ${listing.yield}%` : ""}
           </div>
         </div>`,
@@ -772,7 +773,7 @@ export function PropertyHazardModal({
                   <span className="text-xs font-bold text-slate-400">物件価格</span>
                   <span className="text-lg font-black text-slate-900 font-data">
                     {listing.price
-                      ? `¥${listing.price.toLocaleString()}万円`
+                      ? `¥${formatMan(listing.price)}円`
                       : "価格応談"}
                   </span>
                 </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatMan } from "../lib/utils";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
@@ -328,7 +329,7 @@ export default function DealsPage() {
                                 <div className="text-[var(--text-muted)] font-semibold flex flex-wrap items-center gap-3">
                                   {l.price && (
                                     <span className="font-black text-[var(--text-primary)] font-data text-sm">
-                                      {l.price.toLocaleString()} 万円
+                                      {formatMan(l.price)}円
                                     </span>
                                   )}
                                   {l.landSize && <span>{l.landSize} ㎡</span>}
