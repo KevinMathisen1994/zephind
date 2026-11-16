@@ -2715,6 +2715,11 @@ export default function OrdersPage() {
                 {syncingMail ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                 今すぐ取り込む
               </Button>
+              {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
+              <Button size="sm" variant="ghost" disabled={inspecting} onClick={() => void handleInspectMail()}>
+                {inspecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                同期メールを確認
+              </Button>
               <Button size="sm" variant="ghost" onClick={() => setShowMailRules(true)}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 取り込み設定
