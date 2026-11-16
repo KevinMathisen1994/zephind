@@ -101,7 +101,7 @@ export function deriveFields(specs: Record<string, string>): Record<string, any>
 
   const floor = parseFloor(pick("所在階数", "所在階", "階数", "全体階/所在階", "所在階/階数") ?? "");
   if (floor != null) out.floor = floor;
-  const structure = parseStructure(pick("建物構造", "構造", "構造・階建て", "所在階/構造", "構造/階建", "所在階/構造・階建") ?? "");
+  const structure = parseStructure(pick("建物構造", "構造", "構造・工法", "構造・階建て", "所在階/構造", "構造/階建", "所在階/構造・階建") ?? "");
   if (structure) {
     out.structure = structure.structure;
     out.structureType = structure.structureType;

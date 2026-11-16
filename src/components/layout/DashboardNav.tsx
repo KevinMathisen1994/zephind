@@ -88,8 +88,6 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
   const navigate = useNavigate();
   const summary = useQuery(api.matching.summary) ?? [];
   const total = summary.reduce((n, s) => n + s.total, 0);
-  const freshCount = summary.reduce((n, s) => n + s.new24h, 0);
-  const freshHigh = summary.reduce((n, s) => n + s.new24hHigh, 0);
 
   return (
     <aside className="sidebar-surface z-20 flex h-full w-[248px] shrink-0 select-none flex-col overflow-y-auto">
@@ -156,24 +154,6 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
           </div>
         ))}
       </nav>
-
-      {freshCount > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            navigate("/orders");
-            onNavClick?.();
-          }}
-          className="mx-5 mb-3 cursor-pointer border-t border-white/[0.09] pb-2 pt-4 text-left text-white"
-        >
-          <p className="text-[12.5px] text-[#79827b]">本日の新着</p>
-          <p className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-[34px] font-bold leading-none">{freshCount}</span>
-            <span className="text-sm">件</span>
-          </p>
-          <p className="mt-1.5 text-[12.5px] text-[#79827b]">高評価（80点以上）{freshHigh}件</p>
-        </button>
-      )}
 
       <button
         type="button"

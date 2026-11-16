@@ -390,23 +390,22 @@ type ListingFilter = {
   ) => boolean;
 };
 
-/** 14 days, the window the portals themselves treat as 新着. */
-const NEW_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+/** First non-empty value of these detail-page spec labels; covers multi-unit text like "101.64㎡・115.61㎡". */
+function specText(listing: Doc<"listings">, ...labels: string[]): string | undefined {
+  const specs = (listing.specs ?? {}) as Record<string, string>;
+  return labels.map((l) => specs[l]).find(Boolean);
+}
 
-function isNewListing(listing: Doc<"listings"> | undefined): boolean {
-  return (
-    Boolean(listing?.isNew) ||
-    (listing?.postedAt != null && Date.now() - listing.postedAt <= NEW_WINDOW_MS)
-  );
+/** Matched to the order in the last 24h: the one meaning of 新着 in this UI. */
+function isFoundToday(match: Doc<"matching"> | undefined): boolean {
+  return match?._creationTime != null && Date.now() - match._creationTime <= 24 * 60 * 60 * 1000;
 }
 
 const BASE_FILTERS: ListingFilter[] = [
   {
     key: "recentMatch",
     label: "本日の新着",
-    test: (m) =>
-      m?._creationTime != null &&
-      Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+    test: (m) => isFoundToday(m),
   },
   {
     key: "highScore",
@@ -417,13 +416,6 @@ const BASE_FILTERS: ListingFilter[] = [
     key: "unevaluated",
     label: "未評価",
     test: (_m, _l, score) => score === undefined,
-  },
-  {
-    key: "new",
-    label: "新着",
-    // The portal's own badge, or a posted date inside the same window. Discovery
-    // time is deliberately NOT used: everything is "new" on a first sweep.
-    test: (_m, listing) => isNewListing(listing),
   },
   {
     key: "hasPostedDate",
@@ -1295,6 +1287,8 @@ export default function OrdersPage() {
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   // AI reports stay collapsed until asked for.
   const [openReports, setOpenReports] = useState<Set<string>>(new Set());
+  // 物件詳細 spec tables start collapsed to a faded preview.
+  const [openSpecs, setOpenSpecs] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!expandedMatch) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpandedMatch(null);
@@ -2704,121 +2698,90 @@ export default function OrdersPage() {
           Dashboard-only: on an order page it is background plumbing. ── */}
       {!isDetailView && (
       <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-        {/* Header: identity + actions */}
-        <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3.5">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand)]">
-              <Mail className="h-4 w-4" />
-            </span>
+        {/* Header: what this is, in one plain sentence; actions on the right. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Mail className="h-5 w-5 shrink-0 text-[var(--brand)]" />
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-[15.5px] font-semibold tracking-[0.01em] text-[var(--text-primary)]">
-                  メール連携
-                </h2>
-                {(mailAccounts?.length ?? 0) > 0 && (
-                  <span className="font-mono text-[12.5px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    {mailAccounts?.length} 件接続中
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-[14.5px] leading-relaxed text-[var(--text-muted)]">
-                仲介会社からの物件紹介メールを自動で抽出・照合します
+              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">メール連携</h2>
+              <p className="text-[13px] text-[var(--text-muted)]">
+                仲介会社から届く物件紹介メールを、自動で物件一覧に取り込みます。
               </p>
             </div>
           </div>
-
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-            {(mailAccounts?.length ?? 0) > 0 && (
-              <Button
-                size="sm"
-                disabled={syncingMail}
-                onClick={() => void handleSyncMailNow()}
-              >
-                {syncingMail ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
-                )}
-                今すぐ同期
+          {(mailAccounts ?? []).some((a) => !a.needsReconnect) && (
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="outline" disabled={syncingMail} onClick={() => void handleSyncMailNow()}>
+                {syncingMail ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                今すぐ取り込む
               </Button>
-            )}
-            {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
-            {(mailAccounts?.length ?? 0) > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={inspecting}
-                onClick={() => void handleInspectMail()}
-              >
-                {inspecting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Mail className="h-3.5 w-3.5" />
-                )}
-                同期メールを確認
-              </Button>
-            )}
-            {(mailAccounts?.length ?? 0) > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowMailRules(true)}
-              >
+              <Button size="sm" variant="ghost" onClick={() => setShowMailRules(true)}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 取り込み設定
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* Connected accounts — one row each, status at a glance */}
-        {(mailAccounts?.length ?? 0) > 0 && (
-          <div className="divide-y divide-[var(--border-subtle)] border-t border-[var(--border-subtle)]">
-            {(mailAccounts ?? []).map((account) => (
-              <div
-                key={account._id}
-                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 transition-colors hover:bg-[var(--bg-surface-hover)]"
-              >
-                <span className="w-16 shrink-0 font-mono text-[12.5px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                  {account.provider === "gmail" ? "Gmail" : "Outlook"}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[14.5px] text-[var(--text-primary)]">
-                  {account.email}
-                </span>
+        {/* One line per connected mailbox, saying in words whether it works. */}
+        {(mailAccounts ?? []).map((account) => {
+          const label = account.provider === "gmail" ? "Gmail" : "Outlook";
+          return (
+            <div
+              key={account._id}
+              className={`flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2.5 ${
+                account.needsReconnect
+                  ? "border-[var(--danger)]/20 bg-[var(--danger-soft)]"
+                  : "border-[var(--border-subtle)]"
+              }`}
+            >
+              <div className="flex min-w-0 items-center gap-3">
                 {account.needsReconnect ? (
-                  <Badge variant="destructive">要再接続</Badge>
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--danger)]" />
                 ) : (
-                  <Badge variant="emerald">接続済み</Badge>
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                )}
+                <p className="min-w-0 text-[13.5px] text-[var(--text-primary)]">
+                  <span className="font-semibold">{account.email}</span>
+                  <span className="text-[var(--text-muted)]">
+                    {account.needsReconnect
+                      ? ` の接続が切れています。もう一度つなぐと、メールの取り込みが再開します。`
+                      : ` とつながっています。`}
+                  </span>
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                {account.needsReconnect && (
+                  <Button
+                    size="sm"
+                    disabled={connectingMailProvider === account.provider}
+                    onClick={() => void handleConnectMail(account.provider)}
+                  >
+                    {connectingMailProvider === account.provider && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {label}にもう一度つなぐ
+                  </Button>
                 )}
                 <button
                   type="button"
                   onClick={() => void disconnectMailAccount({ id: account._id })}
-                  className="cursor-pointer text-[13.5px] text-[var(--text-muted)] underline underline-offset-2 transition-colors hover:text-[var(--danger)]"
+                  className="cursor-pointer text-[13px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--danger)]"
                 >
-                  解除
+                  接続をやめる
                 </button>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          );
+        })}
 
-        {/* Last sync / auth problem */}
-        {mailNotice && (
-          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-2.5 text-[14.5px] leading-relaxed text-[#7d2a24]">
-            <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
-            <p className="whitespace-pre-line">{mailNotice}</p>
-          </div>
-        )}
-
-        {/* Connect a provider */}
-        {((mailProviders ?? []).filter((p) => p.available).length > 0 ||
-          (mailProviders ?? []).filter((p) => !p.available).length > 0) && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] px-4 py-2.5">
+        {/* Mailboxes not connected yet. */}
+        {(mailProviders ?? []).some(
+          (p) => p.available && !(mailAccounts ?? []).some((a) => a.provider === p.provider),
+        ) && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] px-4 py-2.5">
+            <span className="text-[13px] text-[var(--text-muted)]">ほかのメールもつなぐ:</span>
             {(mailProviders ?? [])
               .filter((p) => p.available)
-              .filter(
-                (p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider),
-              )
+              .filter((p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider))
               .map((p) => (
                 <Button
                   key={p.provider}
@@ -2830,23 +2793,19 @@ export default function OrdersPage() {
                   {connectingMailProvider === p.provider ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Mail className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                   )}
-                  {connectingMailProvider === p.provider ? `${p.label}に接続中…` : `${p.label}を接続`}
+                  {connectingMailProvider === p.provider ? `${p.label}に接続中…` : `${p.label}をつなぐ`}
                 </Button>
               ))}
+          </div>
+        )}
 
-            {(mailProviders ?? [])
-              .filter((p) => !p.available)
-              .map((p) => (
-                <span
-                  key={p.provider}
-                  className="text-[14px] text-[var(--text-muted)]"
-                  title={p.unavailableReason}
-                >
-                  {p.label}: 未設定
-                </span>
-              ))}
+        {/* Last sync / auth problem */}
+        {mailNotice && (
+          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-3 py-2 text-[13.5px] leading-relaxed text-[#7d2a24]">
+            <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
+            <p className="whitespace-pre-line">{mailNotice}</p>
           </div>
         )}
       </div>
@@ -4388,8 +4347,8 @@ export default function OrdersPage() {
                                         {listing?.address || (listing ? "所在地未記載" : "物件情報を取得できませんでした")}
                                       </span>
                                     )}
-                                    {/* Same rule as the 新着 tab so badge and count agree. */}
-                                    {isNewListing(listing) && (
+                                    {/* Same rule as the 本日の新着 tab so badge and count agree. */}
+                                    {isFoundToday(m) && (
                                       <span className="shrink-0 rounded-full bg-[#3f6b3f] px-2.5 py-0.5 text-[12.5px] font-bold text-white">
                                         新着
                                       </span>
@@ -4672,7 +4631,9 @@ export default function OrdersPage() {
                                       listing.buildYear != null ||
                                       listing.yield != null ||
                                       listing.buildingCoverageRatio != null ||
-                                      listing.floorAreaRatio != null) && (
+                                      listing.floorAreaRatio != null ||
+                                      listing.layout ||
+                                      listing.specs) && (
                                       <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-[var(--border-subtle)] pt-5 sm:grid-cols-4">
                                         {(listing.station || listing.walkMinutes != null) && (
                                           <div>
@@ -4682,16 +4643,22 @@ export default function OrdersPage() {
                                             </div>
                                           </div>
                                         )}
-                                        {listing.landSize != null && (
+                                        {(listing.layout || specText(listing, "間取り")) && (
                                           <div>
-                                            <div className="text-xs text-slate-500">土地面積</div>
-                                            <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.landSize}㎡</div>
+                                            <div className="text-xs text-slate-500">間取り</div>
+                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{listing.layout || specText(listing, "間取り")}</div>
                                           </div>
                                         )}
-                                        {listing.area != null && (
+                                        {(specText(listing, "土地面積") || listing.landSize != null) && (
+                                          <div>
+                                            <div className="text-xs text-slate-500">土地面積</div>
+                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "土地面積") ?? `${listing.landSize}㎡`}</div>
+                                          </div>
+                                        )}
+                                        {(specText(listing, "建物面積", "専有面積", "延床面積") || listing.area != null) && (
                                           <div>
                                             <div className="text-xs text-slate-500">専有/延床面積</div>
-                                            <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.area}㎡</div>
+                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "建物面積", "専有面積", "延床面積") ?? `${listing.area}㎡`}</div>
                                           </div>
                                         )}
                                         {listing.floor != null && (
@@ -4706,10 +4673,10 @@ export default function OrdersPage() {
 <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.elevators === 0 ? "なし" : `${listing.elevators}基`}</div>
 </div>
                                         )}
-                                        {(listing.structure || listing.structureType) && (
+                                        {(listing.structure || listing.structureType || specText(listing, "構造・工法", "建物構造", "構造")) && (
                                           <div>
 <div className="text-xs text-slate-500">構造</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.structure || listing.structureType}</div>
+<div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "構造・工法") || listing.structure || listing.structureType || specText(listing, "建物構造", "構造")}</div>
 </div>
                                         )}
                                         {listing.totalUnits != null && (
@@ -4758,9 +4725,26 @@ export default function OrdersPage() {
                                         ([k]) => k !== "価格" && k !== "所在地",
                                       );
                                       if (rows.length === 0) return null;
+                                      const specsOpen = openSpecs.has(m._id);
+                                      const toggleSpecs = () =>
+                                        setOpenSpecs((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(m._id)) next.delete(m._id);
+                                          else next.add(m._id);
+                                          return next;
+                                        });
                                       return (
                                         <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
-                                          <div className="mb-2 text-[14.5px] font-bold text-slate-900">物件詳細</div>
+                                          <button
+                                            type="button"
+                                            onClick={toggleSpecs}
+                                            aria-expanded={specsOpen}
+                                            className="mb-2 flex w-full cursor-pointer items-center justify-between text-[14.5px] font-bold text-slate-900"
+                                          >
+                                            <span>物件詳細 <span className="ml-1 text-[13px] font-medium text-slate-500">{rows.length}項目</span></span>
+                                            <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${specsOpen ? "rotate-180" : ""}`} />
+                                          </button>
+                                          <div className={specsOpen ? "" : "relative max-h-36 overflow-hidden"}>
                                           <dl className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
                                             {rows.map(([k, v]) => (
                                               <div
@@ -4772,6 +4756,16 @@ export default function OrdersPage() {
                                               </div>
                                             ))}
                                           </dl>
+                                          {!specsOpen && (
+                                            <button
+                                              type="button"
+                                              onClick={toggleSpecs}
+                                              className="absolute inset-x-0 bottom-0 flex h-20 cursor-pointer items-end justify-center bg-gradient-to-t from-white via-white/85 to-transparent pb-1 text-[13px] font-bold text-[var(--brand)]"
+                                            >
+                                              すべて表示
+                                            </button>
+                                          )}
+                                          </div>
                                         </div>
                                       );
                                     })()}
