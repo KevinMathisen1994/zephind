@@ -913,12 +913,14 @@ export default function OrdersPage() {
           .map((m) => m.listingId)
           .filter((id): id is string => Boolean(id)),
       ),
-    );
+    ).sort(); // sorted: a re-ordered match list must not change the query key
   }, [matches]);
 
   const fetchedListings = useQuery(
     api.listings.getByIds,
     matchListingIds.length > 0 ? { ids: matchListingIds } : "skip",
+    // A new match arriving changes the ids; without this every open detail view unmounts until the refetch lands.
+    { keepPrevious: true },
   );
 
   const listings = useMemo(() => {
@@ -1510,6 +1512,7 @@ export default function OrdersPage() {
   ) => {
     setEvaluatingId(matchId);
     setExpandedMatch(matchId);
+    setOpenReports((prev) => new Set(prev).add(matchId));
 
     // Clear old local evaluation so UI shows fresh state immediately
     setEvaluations((prev) => {
@@ -4407,7 +4410,9 @@ export default function OrdersPage() {
                                               ? `${listing.area ?? listing.landSize}㎡`
                                               : null,
                                             listing?.buildYear != null
-                                              ? `築${Math.max(0, new Date().getFullYear() - listing.buildYear)}年`
+                                              ? listing.buildYear >= new Date().getFullYear()
+                                                ? "新築"
+                                                : `築${new Date().getFullYear() - listing.buildYear}年`
                                               : null,
                                             listing?.structureType || listing?.structure || null,
                                             listing?.yield != null ? `利回り${listing.yield}%` : null,
@@ -4716,7 +4721,7 @@ export default function OrdersPage() {
                                         {listing.buildYear != null && (
                                           <div>
 <div className="text-xs text-slate-500">築年</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildYear}年 ({new Date().getFullYear() - listing.buildYear}年)</div>
+<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildYear}年 ({listing.buildYear >= new Date().getFullYear() ? "新築" : `築${new Date().getFullYear() - listing.buildYear}年`})</div>
 </div>
                                         )}
                                         {listing.yield != null && (

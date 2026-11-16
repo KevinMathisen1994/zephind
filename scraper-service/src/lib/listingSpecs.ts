@@ -151,11 +151,14 @@ export async function fetchHtml(url: string): Promise<string | null> {
   }
 }
 
-/** Listing photo from the detail page's og:image; most portals set it to the main exterior shot. */
+/** Listing photo from the detail page: og:image, else the first 外観 (exterior) photo. */
 export function parseOgImage(html: string, pageUrl: string): string | undefined {
   const m =
     html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ??
-    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ??
+    // ノムコム and others set no og:image; their photo carries alt="…外観".
+    html.match(/<img[^>]+src=["']([^"']+)["'][^>]*alt=["'][^"']*外観/i) ??
+    html.match(/<img[^>]+alt=["'][^"']*外観[^"']*["'][^>]*src=["']([^"']+)["']/i);
   if (!m) return undefined;
   try {
     const url = new URL(m[1].replace(/&amp;/g, "&"), pageUrl).href;

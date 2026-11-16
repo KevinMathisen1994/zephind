@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useMutation as useRqMutation, useQuery as useRqQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation as useRqMutation, useQuery as useRqQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/apiClient";
 import type { Endpoint } from "../lib/api";
 
@@ -20,6 +20,8 @@ export const SKIP = "skip" as const;
 export function useApiQuery<Args, Result>(
   ep: Endpoint<Args, Result>,
   args?: Args | typeof SKIP,
+  /** Keep showing the last result while new args load, instead of going back to undefined. */
+  opts?: { keepPrevious?: boolean },
 ): Result | undefined {
   const enabled = args !== SKIP;
   const callArgs = (enabled ? args : undefined) as Args;
@@ -36,6 +38,7 @@ export function useApiQuery<Args, Result>(
       }),
     enabled,
     refetchInterval: ep.refetchInterval,
+    placeholderData: opts?.keepPrevious ? keepPreviousData : undefined,
   });
 
   // `undefined` while loading, matching what Convex's useQuery returned — the

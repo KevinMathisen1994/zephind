@@ -18,4 +18,8 @@ assert.strictEqual(parseOgImage('<meta property="og:image" content="/img/p/123.j
 assert.strictEqual(parseOgImage('<meta content="https://x.jp/a.jpg?w=1&amp;h=2" property="og:image">', page), "https://x.jp/a.jpg?w=1&h=2");
 assert.strictEqual(parseOgImage('<meta property="og:image" content="/common/img/logo.png">', page), undefined);
 assert.strictEqual(parseOgImage("<html></html>", page), undefined);
+assert.strictEqual(
+  parseOgImage('<img src="https://image.nomu.com/02/V8670021_0101_01.jpg" alt="【東京都/品川区戸越】戸越3丁目一戸建て 外観" />', page),
+  "https://image.nomu.com/02/V8670021_0101_01.jpg",
+);
 console.log("listingSpecs tests passed");
