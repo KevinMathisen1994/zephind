@@ -934,7 +934,8 @@ export default function OrdersPage() {
     string | null
   >(null);
   const [syncingMail, setSyncingMail] = useState(false);
-  const [mailNotice, setMailNotice] = useState<string | null>(null);
+  const [mailNotice, setMailNotice] = useState<{ text: string; kind: "ok" | "info" | "error" } | null>(null);
+  const mailError = (text: string) => setMailNotice({ text, kind: "error" });
 
   // TEMPORARY: inspector for what the mail sync actually saw. A sync only
   // reports counts, so "物件情報は見つかりませんでした" cannot be told apart from a
@@ -952,7 +953,7 @@ export default function OrdersPage() {
     attachment: { id?: string; filename: string; mimeType: string },
   ) => {
     if (!attachment.id) {
-      setMailNotice("添付ファイルIDが見つかりませんでした");
+      mailError("添付ファイルIDが見つかりませんでした");
       return;
     }
 
@@ -987,11 +988,11 @@ export default function OrdersPage() {
         }
       } else {
         newWindow?.close();
-        setMailNotice("PDFデータの取得に失敗しました");
+        mailError("PDFデータの取得に失敗しました");
       }
     } catch (err) {
       newWindow?.close();
-      setMailNotice(
+      mailError(
         `PDFの表示に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
@@ -1039,9 +1040,9 @@ export default function OrdersPage() {
         requireAttachment: mailRules.requireAttachment,
       });
       setShowMailRules(false);
-      setMailNotice("取り込み設定を保存しました");
+      setMailNotice({ text: "取り込み設定を保存しました", kind: "ok" });
     } catch (err) {
-      setMailNotice(
+      mailError(
         `設定の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
@@ -1073,7 +1074,7 @@ export default function OrdersPage() {
         }
       }, 500);
     } catch (err) {
-      setMailNotice(
+      mailError(
         `メールアカウントの接続を開始できませんでした: ${err instanceof Error ? err.message : String(err)}`,
       );
       setConnectingMailProvider(null);
@@ -1086,7 +1087,7 @@ export default function OrdersPage() {
     const fallback = (ok: boolean) => (ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "zephind-oauth") {
-        setMailNotice(e.data.message || fallback(e.data.ok));
+        setMailNotice({ text: e.data.message || fallback(e.data.ok), kind: e.data.ok ? "ok" : "error" });
         setConnectingMailProvider(null);
         void queryClient.invalidateQueries({ queryKey: ["mail.accounts"] });
       }
@@ -1096,7 +1097,8 @@ export default function OrdersPage() {
     // Popup blocked: the OAuth flow ran in this tab and landed back with the result.
     const params = new URLSearchParams(window.location.search);
     if (params.has("mailOAuth") && !window.opener) {
-      setMailNotice(params.get("mailOAuthMsg") || fallback(params.get("mailOAuth") === "ok"));
+      const ok = params.get("mailOAuth") === "ok";
+      setMailNotice({ text: params.get("mailOAuthMsg") || fallback(ok), kind: ok ? "ok" : "error" });
       params.delete("mailOAuth");
       params.delete("mailOAuthMsg");
       const query = params.toString();
@@ -1121,7 +1123,7 @@ export default function OrdersPage() {
       const firstValid = rows.find((r) => !r.filtered && !r.error);
       setOpenMailId(firstValid?.id ?? rows[0]?.id ?? null);
     } catch (err) {
-      setMailNotice(
+      mailError(
         `メールの確認に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
@@ -1153,7 +1155,7 @@ export default function OrdersPage() {
         if (batch.results.every((r: any) => r.done || r.error)) break;
         offset = batch.nextOffset;
         const total = Math.max(...batch.results.map((r: any) => r.total ?? 0));
-        setMailNotice(`同期中… ${Math.min(offset, total)} / ${total}件`);
+        setMailNotice({ text: `同期中… ${Math.min(offset, total)} / ${total}件`, kind: "info" });
       }
       const results = [...totals.values()];
       // "0 listings found" and "every message failed extraction" (e.g. Rax AI
@@ -1187,9 +1189,10 @@ export default function OrdersPage() {
         }
         return parts.join(" / ");
       });
-      setMailNotice(lines.join("\n"));
+      const failed = results.some((r) => r.error || (r.messageErrors?.length ?? 0) > 0);
+      setMailNotice({ text: lines.join("\n"), kind: failed ? "error" : "ok" });
     } catch (err) {
-      setMailNotice(
+      mailError(
         `同期に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
@@ -2768,7 +2771,15 @@ export default function OrdersPage() {
                 )}
                 <button
                   type="button"
-                  onClick={() => void disconnectMailAccount({ id: account._id })}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `${account.email} との接続をやめますか？\nこのメールからの物件の取り込みが止まります。あとでもう一度つなぐこともできます。`,
+                      )
+                    ) {
+                      void disconnectMailAccount({ id: account._id });
+                    }
+                  }}
                   className="cursor-pointer text-[13px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--danger)]"
                 >
                   接続をやめる
@@ -2808,9 +2819,34 @@ export default function OrdersPage() {
 
         {/* Last sync / auth problem */}
         {mailNotice && (
-          <div className="flex items-start gap-2 border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-3 py-2 text-[13.5px] leading-relaxed text-[#7d2a24]">
-            <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
-            <p className="whitespace-pre-line">{mailNotice}</p>
+          <div
+            className={`flex items-start gap-2 border-t px-4 py-2.5 text-[13.5px] leading-relaxed ${
+              mailNotice.kind === "error"
+                ? "border-[var(--border-subtle)] bg-[var(--danger-soft)] text-[#7d2a24]"
+                : mailNotice.kind === "ok"
+                  ? "border-[var(--border-subtle)] bg-emerald-50 text-emerald-900"
+                  : "border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] text-[var(--text-secondary)]"
+            }`}
+            role={mailNotice.kind === "error" ? "alert" : "status"}
+          >
+            {mailNotice.kind === "error" ? (
+              <AlertTriangle className="mt-[2px] h-3.5 w-3.5 shrink-0" />
+            ) : mailNotice.kind === "ok" ? (
+              <CheckCircle2 className="mt-[2px] h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <Loader2 className="mt-[2px] h-3.5 w-3.5 shrink-0 animate-spin" />
+            )}
+            <p className="min-w-0 flex-1 whitespace-pre-line">{mailNotice.text}</p>
+            {mailNotice.kind !== "info" && (
+              <button
+                type="button"
+                onClick={() => setMailNotice(null)}
+                className="shrink-0 cursor-pointer opacity-60 hover:opacity-100"
+                aria-label="閉じる"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         )}
       </div>
