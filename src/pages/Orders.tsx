@@ -4465,7 +4465,7 @@ export default function OrdersPage() {
                                             listing?.structureType || listing?.structure || null,
                                             listing?.yield != null ? `利回り${listing.yield}%` : null,
                                             listing?.buildingCoverageRatio != null || listing?.floorAreaRatio != null
-                                              ? `建蔽/容積 ${listing.buildingCoverageRatio ?? "—"}%/${listing.floorAreaRatio ?? "—"}%`
+                                              ? `建ぺい率/容積率 ${listing.buildingCoverageRatio ?? "—"}%/${listing.floorAreaRatio ?? "—"}%`
                                               : null,
                                           ]
                                             .filter(Boolean)
@@ -4800,7 +4800,7 @@ export default function OrdersPage() {
                                         )}
                                         {(listing.buildingCoverageRatio != null || listing.floorAreaRatio != null) && (
                                           <div>
-<div className="text-xs text-slate-500">建蔽/容積</div>
+<div className="text-xs text-slate-500">建ぺい率/容積率</div>
 <div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildingCoverageRatio ?? "—"}% / {listing.floorAreaRatio ?? "—"}%</div>
 </div>
                                         )}
