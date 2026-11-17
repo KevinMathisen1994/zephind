@@ -2969,14 +2969,27 @@ export default function OrdersPage() {
       {/* Order Creation / Editing Form */}
       {showForm && (
         <Card className="border-2 border-[var(--brand-border)] shadow-lg rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
-          <CardHeader className="bg-[var(--bg-surface-hover)] border-b border-[var(--border-subtle)] p-5 md:p-6">
-            <CardTitle className="text-lg font-extrabold flex items-center gap-2 text-[var(--text-primary)]">
-              <SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />
-              {editingOrderId ? "物件編集" : "新規買主物件作成"}
-            </CardTitle>
-            <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              買主の希望条件を入力してください。条件に合致する物件を全14ポータルから自動抽出します。
-            </p>
+          <CardHeader className="bg-[var(--bg-surface-hover)] border-b border-[var(--border-subtle)] p-5 md:p-6 flex flex-row items-start justify-between">
+            <div>
+              <CardTitle className="text-lg font-extrabold flex items-center gap-2 text-[var(--text-primary)]">
+                <SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />
+                {editingOrderId ? "物件編集" : "新規買主物件作成"}
+              </CardTitle>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                買主の希望条件を入力してください。条件に合致する物件を全14ポータルから自動抽出します。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowForm(false);
+              }}
+              className="text-slate-400 hover:text-slate-600 rounded-lg p-1 hover:bg-slate-200/60 transition-colors cursor-pointer shrink-0"
+              aria-label="閉じる"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </CardHeader>
           <CardContent className="p-6 md:p-8 space-y-6">
             <form onSubmit={handleCreate} className="space-y-6">
@@ -3548,6 +3561,18 @@ export default function OrdersPage() {
                     : editingOrderId
                       ? "変更内容を保存"
                       : "作成"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  disabled={creating}
+                  onClick={() => {
+                    resetForm();
+                    setShowForm(false);
+                  }}
+                >
+                  キャンセル
                 </Button>
                 {done && (
                   <span className="text-sm font-bold text-[var(--brand)] flex items-center gap-1.5">
