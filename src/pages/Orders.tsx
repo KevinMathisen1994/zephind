@@ -2253,6 +2253,8 @@ export default function OrdersPage() {
   const [dealType, setDealType] = useState<"buy" | "rent">("buy");
   const [priceMin, setPriceMin] = useState("");
   const [orderName, setOrderName] = useState("");
+  // Set on a submit with an empty 案件名; cleared as soon as the user types.
+  const [orderNameError, setOrderNameError] = useState(false);
   const [priceMax, setPriceMax] = useState("");
   const [rentMin, setRentMin] = useState("");
   const [rentMax, setRentMax] = useState("");
@@ -2312,6 +2314,7 @@ export default function OrdersPage() {
     setEditingOrderId(null);
     setSaveError(null);
     setOrderName("");
+    setOrderNameError(false);
     setWards([]);
     setDealType("buy");
     setPriceMin("");
@@ -2349,6 +2352,7 @@ export default function OrdersPage() {
   const handleEditClick = (order: Doc<"orders">) => {
     setEditingOrderId(order._id);
     setOrderName(order.name || "");
+    setOrderNameError(false);
     setWards(
       order.wards && order.wards.length > 0
         ? order.wards
@@ -2443,6 +2447,11 @@ export default function OrdersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!orderName.trim()) {
+      setOrderNameError(true);
+      document.getElementById("order-name")?.focus();
+      return;
+    }
     setCreating(true);
     setSaveError(null);
     try {
@@ -2545,6 +2554,26 @@ export default function OrdersPage() {
 
   const matchedListing = (listingId: string) =>
     listings?.find((l) => l._id === listingId);
+
+  // Scraped listings unseen by any scrape for 14 days are most likely taken down.
+  // Email listings are never re-scraped, so the rule does not apply to them.
+  const isStale = (l: Doc<"listings"> | undefined) => {
+    const seen = (l as any)?.lastSeenAt;
+    return l?.source !== "email" && seen != null && Date.now() - seen > 14 * 24 * 60 * 60 * 1000;
+  };
+  /** The matches the list actually shows: no stale listings, one row per same property. Counts use this too. */
+  const shownMatches = (list: Doc<"matching">[]) => {
+    const seenKeys = new Set<string>();
+    return list.filter((m) => {
+      const l = matchedListing(m.listingId ?? "");
+      if (isStale(l)) return false;
+      if (!l?.address || !l.price || l.area == null) return true;
+      const k = `${l.address}|${l.price}|${l.area}`;
+      if (seenKeys.has(k)) return false;
+      seenKeys.add(k);
+      return true;
+    });
+  };
 
   // Top KPI metrics
   const totalOrdersCount = orders?.length ?? 0;
@@ -2921,15 +2950,31 @@ export default function OrdersPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
-                    <Label className="text-sm font-bold text-slate-700">
-                      案件名
+                    <Label htmlFor="order-name" className="text-sm font-bold text-slate-700">
+                      案件名 <span className="text-[var(--danger)]">*</span>
                     </Label>
                     <Input
+                      id="order-name"
                       placeholder="例: 山田様 渋谷区・港区 商業用地サーチ"
                       value={orderName}
-                      onChange={(e) => setOrderName(e.target.value)}
-                      className="h-11 text-base rounded-xl border-slate-200 focus:border-emerald-600"
+                      onChange={(e) => {
+                        setOrderName(e.target.value);
+                        if (e.target.value.trim()) setOrderNameError(false);
+                      }}
+                      aria-required="true"
+                      aria-invalid={orderNameError}
+                      aria-describedby={orderNameError ? "order-name-error" : undefined}
+                      className={`h-11 text-base rounded-xl ${
+                        orderNameError
+                          ? "border-[var(--danger)] bg-[var(--danger-soft)] focus:border-[var(--danger)]"
+                          : "border-slate-200 focus:border-emerald-600"
+                      }`}
                     />
+                    {orderNameError && (
+                      <p id="order-name-error" className="text-[13px] font-medium text-[var(--danger)]">
+                        案件名を入力してください。
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -3650,7 +3695,11 @@ export default function OrdersPage() {
           filteredOrders.map((order) => {
             const orderMatchList = orderMatches(order._id);
             const orderCounts = summaryByOrder.get(order._id);
-            const matchCount = orderCounts?.total ?? orderMatchList?.length ?? 0;
+            // Once every match is loaded, count what the list will show; until then the server total.
+            const matchCount =
+              orderMatchList && listings && orderMatchList.length >= (orderCounts?.total ?? 0)
+                ? shownMatches(orderMatchList).length
+                : (orderCounts?.total ?? orderMatchList?.length ?? 0);
             const recentMatchesInOrder =
               orderCounts?.new24h ??
               (orderMatchList ?? []).filter(
@@ -4110,7 +4159,7 @@ export default function OrdersPage() {
                           const scoreOf = (m: Doc<"matching">) =>
                             matchScore(m, evaluations);
                           const chips = buildListingFilters(
-                            orderMatchList,
+                            shownMatches(orderMatchList),
                             matchedListing,
                             scoreOf,
                           );
@@ -4195,8 +4244,7 @@ export default function OrdersPage() {
                       const visibleMatches = orderMatchList.filter((m) => {
                         // Not seen by any scrape for 14 days: the portal has most likely
                         // taken it down. No lastSeenAt (older rows) stays visible.
-                        const seen = (matchedListing(m.listingId ?? "") as any)?.lastSeenAt;
-                        if (seen != null && Date.now() - seen > 14 * 24 * 60 * 60 * 1000) return false;
+                        if (isStale(matchedListing(m.listingId ?? ""))) return false;
                         return passesListingFilter(
                           activeFilter,
                           m,
