@@ -193,7 +193,7 @@ async function scrapeSuumoChintai(areaCode: string, wardName: string): Promise<S
       logger.info(`[Suumo Scraper] Loading chintai page ${p} for ${wardName}...`);
 
       try {
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
       } catch {
         logger.warn(`[Suumo Scraper] Chintai page ${p} failed to load`);
         break;
@@ -205,8 +205,6 @@ async function scrapeSuumoChintai(areaCode: string, wardName: string): Promise<S
         logger.info(`[Suumo Scraper] No chintai listings on page ${p}, stopping`);
         break;
       }
-
-      await new Promise((r) => setTimeout(r, 2000));
 
       const listings = await extractChintaiListings(page);
       const newListings = listings.filter((l) => {
@@ -474,7 +472,8 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[], deal
         logger.info(`[Suumo Scraper] Loading page ${p} (bs=${bs}) for ${wardName}...`);
 
         try {
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
+          // Cards are server-rendered (scripts are blocked anyway); waiting for network quiet only cost time.
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
         } catch {
           logger.warn(`[Suumo Scraper] Page ${p} failed to load`);
           break;
@@ -493,8 +492,6 @@ export async function scrapeSuumo(areaCode: string, filterTypes?: string[], deal
           logger.info(`[Suumo Scraper] No listings on page ${p}, stopping`);
           break;
         }
-
-        await new Promise((r) => setTimeout(r, 2000));
 
         const listings = await extractListings(page);
         // Tag with property type based on category
