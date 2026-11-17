@@ -122,6 +122,7 @@ export interface OrderCriteria {
   minElevators?: number; // 最低エレベーター数
   structureTypes?: string[]; // 構造種別 (RC, SRC, S, 木造)
   layoutTypes?: string[]; // 間取りタイプ (ファミリー, etc.)
+  sources?: string[]; // 対象スクレイピングサイト (e.g. ["suumo", "homes"])
 }
 
 export interface HardFilterResult {

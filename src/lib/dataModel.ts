@@ -120,6 +120,7 @@ export interface Order extends Row {
   minElevators?: number;
   structureTypes?: string[];
   layoutTypes?: string[];
+  sources?: string[];
   customerId?: string;
   isScraping?: boolean;
   scrapingStatus?: string;

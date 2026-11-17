@@ -408,7 +408,7 @@ async function main(): Promise<number> {
   // nightly sweep but wrong for a user-initiated run: without this filter one
   // person's dispatch matched against strangers' orders, and their criteria
   // widened this sweep (e.g. an order with no type filter forced "all types").
-  const onlyOrderId = (process.env.SCRAPE_ORDER_ID || "").trim();
+  const onlyOrderId = (argValue("orderId") || process.env.SCRAPE_ORDER_ID || "").trim();
   if (onlyOrderId) {
     const before = orders.length;
     orders = orders.filter((o) => o._id === onlyOrderId);
@@ -436,12 +436,20 @@ async function main(): Promise<number> {
   }
   logger.info(`Target areas (from ${areaSource}): ${areaCodes.join(", ") || "(none)"}`);
 
+  const orderConfiguredSources =
+    onlyOrderId && orders.length === 1
+      ? ((orders[0].criteria as any)?.sources as string[] | undefined) ||
+        ((orders[0] as any).sources as string[] | undefined)
+      : undefined;
+
   const requestedSources =
     splitList(argValue("sources")).length > 0
       ? splitList(argValue("sources"))
-      : splitList(process.env.SCRAPE_SOURCES).length > 0
-        ? splitList(process.env.SCRAPE_SOURCES)
-        : KNOWN_SOURCES;
+      : orderConfiguredSources && orderConfiguredSources.length > 0
+        ? orderConfiguredSources
+        : splitList(process.env.SCRAPE_SOURCES).length > 0
+          ? splitList(process.env.SCRAPE_SOURCES)
+          : KNOWN_SOURCES;
 
   // SCRAPE_SHARD="i/n": this runner takes every n-th source (GitHub matrix job i of n).
   const [shardIdx, shardCount] = (process.env.SCRAPE_SHARD || "0/1").split("/").map(Number);

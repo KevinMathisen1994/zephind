@@ -227,6 +227,30 @@ const SOURCE_LABELS: Record<string, string> = {
   tokyotatemono: "東京建物不動産販売",
 };
 
+const SCRAPE_SOURCES_STORAGE_KEY = "zephind_selected_scrape_sources";
+
+function getInitialSelectedSources(): string[] {
+  try {
+    const saved = localStorage.getItem(SCRAPE_SOURCES_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter((s: string) => ALL_SCRAPE_SOURCES.includes(s));
+        if (valid.length > 0) return valid;
+      }
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+  return [...ALL_SCRAPE_SOURCES];
+}
+
+function getOrderSources(order: Doc<"orders"> | any): string[] {
+  if (Array.isArray(order?.sources) && order.sources.length > 0) return order.sources;
+  if (Array.isArray(order?.criteria?.sources) && order.criteria.sources.length > 0) return order.criteria.sources;
+  return [];
+}
+
 // All 23 special wards, used when an order names no area at all.
 const ALL_TOKYO_WARD_CODES = [
   "13101",
@@ -1786,9 +1810,11 @@ export default function OrdersPage() {
   const dispatchScrape = async (order: Doc<"orders">, sources: string[]) => {
     setScrapingOrderId(order._id);
     const siteLabel =
-      sources.length > 1
+      sources.length === ALL_SCRAPE_SOURCES.length
         ? "すべてのサイト (全19サイト)"
-        : SOURCE_LABELS[sources[0]] || sources[0];
+        : sources.length > 1
+          ? `選択されたサイト (${sources.length}サイト)`
+          : SOURCE_LABELS[sources[0]] || sources[0];
 
     setScrapeNotice((prev) => {
       const next = { ...prev };
@@ -2010,9 +2036,11 @@ export default function OrdersPage() {
   ) => {
     setScrapingOrderId(order._id);
     const siteLabel =
-      sources.length > 1
+      sources.length === ALL_SCRAPE_SOURCES.length
         ? "すべてのサイト (全19サイト)"
-        : SOURCE_LABELS[sources[0]] || sources[0];
+        : sources.length > 1
+          ? `選択されたサイト (${sources.length}サイト)`
+          : SOURCE_LABELS[sources[0]] || sources[0];
     setScrapeNotice((prev) => {
       const next = { ...prev };
       delete next[order._id];
@@ -2087,10 +2115,16 @@ export default function OrdersPage() {
   };
 
   const handleScrapeOrder = (order: Doc<"orders">) => {
-    // "all" is the default selection, so the single 取得 button covers both the
-    // every-portal case and a single-portal case.
+    // "all" uses the order's configured sources (or all 19 portals if none specified),
+    // while picking a specific portal scopes the scrape to just that portal.
+    const orderSources = getOrderSources(order);
     const chosen = scrapeSource[order._id] || "all";
-    const sources = chosen === "all" ? ALL_SCRAPE_SOURCES : [chosen];
+    const sources =
+      chosen === "all"
+        ? orderSources.length > 0
+          ? orderSources
+          : ALL_SCRAPE_SOURCES
+        : [chosen];
     return runner === "local"
       ? dispatchLocalScrape(order, sources)
       : dispatchScrape(order, sources);
@@ -2283,6 +2317,40 @@ export default function OrdersPage() {
   const [minElevators, setMinElevators] = useState("");
   const [structureTypes, setStructureTypes] = useState<string[]>([]);
   const [layoutTypes, setLayoutTypes] = useState<string[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>(getInitialSelectedSources);
+
+  const toggleSource = (source: string) => {
+    setSelectedSources((prev) => {
+      const next = prev.includes(source)
+        ? prev.filter((s) => s !== source)
+        : [...prev, source];
+      try {
+        localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore storage write failures */
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllSources = () => {
+    setSelectedSources([...ALL_SCRAPE_SOURCES]);
+    try {
+      localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify(ALL_SCRAPE_SOURCES));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDeselectAllSources = () => {
+    setSelectedSources([]);
+    try {
+      localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify([]));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const [creating, setCreating] = useState(false);
   const [done, setDone] = useState(false);
   // A failed save used to go to console.error only, so pressing 作成 looked like
@@ -2344,6 +2412,7 @@ export default function OrdersPage() {
     setMinElevators("");
     setStructureTypes([]);
     setLayoutTypes([]);
+    setSelectedSources(getInitialSelectedSources());
     setEditingOrderId(null);
     setOrderStatus("pending");
     setSelectedCustomerId("");
@@ -2428,6 +2497,12 @@ export default function OrdersPage() {
     );
     setStructureTypes(order.structureTypes || []);
     setLayoutTypes(order.layoutTypes || []);
+    const existingSources = getOrderSources(order);
+    if (existingSources.length > 0) {
+      setSelectedSources(existingSources);
+    } else {
+      setSelectedSources(getInitialSelectedSources());
+    }
     setOrderStatus(order.status || "pending");
     setSelectedCustomerId(order.customerId || "");
     setShowForm(true);
@@ -2451,6 +2526,15 @@ export default function OrdersPage() {
       setOrderNameError(true);
       document.getElementById("order-name")?.focus();
       return;
+    }
+    if (selectedSources.length === 0) {
+      setSaveError("スクレイピング対象サイトを少なくとも1つ選択してください。");
+      return;
+    }
+    try {
+      localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify(selectedSources));
+    } catch {
+      /* ignore */
     }
     setCreating(true);
     setSaveError(null);
@@ -2481,6 +2565,7 @@ export default function OrdersPage() {
           walkMinutes: nonNegNum(walkMinutes),
           minBuildingCoverageRatio: nonNegNum(minBuildingCoverageRatio),
           minFloorAreaRatio: nonNegNum(minFloorAreaRatio),
+          sources: selectedSources,
         },
         propertyTypes: propertyTypes.length > 0 ? propertyTypes : undefined,
         // Sent as `false` rather than undefined when unticked: an edit that turns
@@ -3385,6 +3470,71 @@ export default function OrdersPage() {
                 </div>
               </div>
 
+              {/* Scraping Targets Selection */}
+              <div className="space-y-4 pt-4 border-t border-slate-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-100">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm font-bold text-slate-800">
+                        スクレイピング対象Webサイト
+                      </Label>
+                      <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                        {selectedSources.length} / {ALL_SCRAPE_SOURCES.length} 選択中
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      自動検索・スクレイピングを実行する対象のポータルサイトを選択してください。
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllSources}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-800 px-3 py-1.5 rounded-xl hover:bg-emerald-50 transition-colors cursor-pointer border border-emerald-200 bg-white"
+                    >
+                      全選択
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllSources}
+                      className="text-xs font-bold text-slate-600 hover:text-slate-800 px-3 py-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer border border-slate-200 bg-white"
+                    >
+                      全解除
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
+                  {ALL_SCRAPE_SOURCES.map((src) => {
+                    const isSelected = selectedSources.includes(src);
+                    return (
+                      <label
+                        key={src}
+                        className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all duration-150 select-none cursor-pointer ${
+                          isSelected
+                            ? "bg-emerald-50 text-emerald-950 border-emerald-300 shadow-2xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSource(src)}
+                          className="w-4 h-4 accent-emerald-700 cursor-pointer rounded shrink-0"
+                        />
+                        <span className="truncate">{SOURCE_LABELS[src] || src}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {selectedSources.length === 0 && (
+                  <p className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5">
+                    ※ スクレイピング対象サイトが選択されていません。少なくとも1つのサイトを選択してください。
+                  </p>
+                )}
+              </div>
+
               {/* Form Buttons */}
               {saveError && (
                 <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-bold whitespace-pre-wrap leading-relaxed">
@@ -3790,6 +3940,12 @@ export default function OrdersPage() {
                       {wardSummary}
                       {wardSummary ? " ・ " : ""}
                       {priceSummary}
+                      {(() => {
+                        const ordSources = getOrderSources(order);
+                        return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
+                          ? ` ・ 対象: ${ordSources.length}サイト`
+                          : "";
+                      })()}
                     </span>
                     {isScrapingNow && localRunOrderId !== order._id && (
                       <span className="mt-2 block max-w-md text-[13.5px] font-semibold">
@@ -3877,6 +4033,12 @@ export default function OrdersPage() {
                             ? `専有面積 ${fmtRange(order.buildingSizeMin, order.buildingSizeMax, "㎡")}`
                             : null,
                           detailCustomer ? `顧客: ${detailCustomer.name}` : null,
+                          (() => {
+                            const ordSources = getOrderSources(order);
+                            return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
+                              ? `対象サイト: ${ordSources.map((s) => SOURCE_LABELS[s] || s).join("・")}`
+                              : null;
+                          })(),
                         ]
                           .filter(Boolean)
                           .join(" ・ ")}
@@ -3966,33 +4128,19 @@ export default function OrdersPage() {
                                 }))
                               }
                             >
-                              {/* Default. Scraping every portal is the normal
-                                  action; picking one is the exception, so it
-                                  leads the list and is the fallback value. */}
-                              <option value="all">すべてのサイト</option>
-                              <option value="athome">At Home</option>
-                              <option value="suumo">SUUMO</option>
-                              <option value="homes">LIFULL HOME'S</option>
-                              <option value="hatomark">鳩マーク</option>
-                              <option value="kenbiya">健美家</option>
-                              <option value="rakuten">楽天</option>
-                              <option value="nomu">ノムコム</option>
-                              <option value="nomu_pro">ノムコム・プロ</option>
-                              <option value="mitsui">三井のリハウス</option>
-                              <option value="stepon">住友不動産ステップ</option>
-                              <option value="tokyu">東急リバブル</option>
-                              <option value="mizuho">みずほ不動産販売</option>
-                              <option value="mitsubishi_ufj">
-                                三菱UFJ不動産販売
+                              <option value="all">
+                                {(() => {
+                                  const ordSources = getOrderSources(order);
+                                  return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
+                                    ? `設定されたサイト (${ordSources.length}サイト)`
+                                    : "すべてのサイト";
+                                })()}
                               </option>
-                              <option value="odakyu">小田急不動産仲介</option>
-                              <option value="keio">京王不動産仲介</option>
-                              <option value="asahi">朝日住宅</option>
-                              <option value="haseko">長谷工の仲介</option>
-                              <option value="daikyo">大京穴吹不動産</option>
-                              <option value="tokyotatemono">
-                                東京建物不動産販売
-                              </option>
+                              {ALL_SCRAPE_SOURCES.map((src) => (
+                                <option key={src} value={src}>
+                                  {SOURCE_LABELS[src] || src}
+                                </option>
+                              ))}
                             </select>
                             <Button
                               onClick={() => handleScrapeOrder(order)}

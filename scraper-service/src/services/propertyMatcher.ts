@@ -188,6 +188,19 @@ function matchesOrder(
     return [false, "取引種別不一致（買う/借りる）"];
   }
 
+  // Source gate — if the order has specific sources configured, reject any listing
+  // from a source that is not in that list.
+  if (
+    criteria.sources &&
+    criteria.sources.length > 0 &&
+    listing.source &&
+    listing.source !== "email" &&
+    !criteria.sources.includes(listing.source)
+  ) {
+    incrementReason(reasons, "取得サイト対象外");
+    return [false, "取得サイト対象外"];
+  }
+
   // Location filter — supports both 23 Wards (区) and Cities/Towns/Villages (市/町/村)
   const targetLocations =
     criteria.wards && criteria.wards.length > 0
@@ -554,5 +567,6 @@ export function toCriteria(order: Record<string, any>): OrderCriteria {
     minElevators: pick<number>("minElevators"),
     structureTypes: pick<string[]>("structureTypes"),
     layoutTypes: pick<string[]>("layoutTypes"),
+    sources: pick<string[]>("sources"),
   };
 }

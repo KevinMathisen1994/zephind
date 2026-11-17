@@ -553,9 +553,12 @@ export async function scrapeAtHome(areaCode: string, filterTypes?: string[], dea
       } else {
         try { await page.waitForSelector(cardSelector, { timeout: 15000 }); } catch { logger.warn(`[At Home Scraper] No card found on page ${p}, assuming end`); break; }
       }
-      // Card photos lazy-load on intersection; scroll through so each card's src is real.
-      await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += 600) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 150)); } });
-      await new Promise(r => setTimeout(r, 2000));
+      // Card photos lazy-load on intersection: scroll a screen at a time, then wait only until the placeholders are gone.
+      await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += window.innerHeight) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 60)); } });
+      await page.waitForFunction(
+        () => !Array.from(document.querySelectorAll(".card-box-image-slide .swiper-slide-active img, .area-inner__left-image--top img")).some((i) => /loading_g/.test(i.getAttribute("src") || "")),
+        { timeout: 2000 },
+      ).catch(() => {});
 
       const { listings, detailUrls } = await extractListingsFromPage(page, wardName, allCategories[cat]);
       if (listings.length === 0) { logger.info(`[At Home Scraper] Page ${p}: empty, stopping`); break; }
