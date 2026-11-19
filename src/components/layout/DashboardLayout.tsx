@@ -1,11 +1,20 @@
-import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import DashboardNav from "./DashboardNav";
 import OnboardingTour from "../OnboardingTour";
+import { AlertSettingsModal } from "../AlertSettingsModal";
 import { Menu, X } from "lucide-react";
 
 export default function DashboardLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    const handleOpen = () => setAlertSettingsOpen(true);
+    window.addEventListener("zephind:open-alert-settings", handleOpen);
+    return () => window.removeEventListener("zephind:open-alert-settings", handleOpen);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-page)] font-sans text-[var(--text-primary)] antialiased">
@@ -49,9 +58,15 @@ export default function DashboardLayout() {
 
       {/* Main content */}
       <main className="app-bg min-w-0 flex-1 overflow-y-auto pt-14 lg:pt-0">
-        <Outlet />
+        <div key={location.pathname} className="page-transition min-h-full">
+          <Outlet />
+        </div>
       </main>
       <OnboardingTour />
+      <AlertSettingsModal
+        isOpen={alertSettingsOpen}
+        onClose={() => setAlertSettingsOpen(false)}
+      />
     </div>
   );
 }

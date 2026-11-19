@@ -3,7 +3,7 @@ import { useApiQuery as useQuery } from "../../hooks/useApi";
 import { api } from "../../lib/api";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import { isClerkEnabled } from "../../Providers";
-import { LogOut, Plus } from "lucide-react";
+import { LogOut, Plus, Bell } from "lucide-react";
 
 const navSections = [
   {
@@ -137,9 +137,9 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
                   onClick={onNavClick}
                   title={item.desc}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 transition-colors duration-150 ${
+                    `flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.98] ${
                       isActive
-                        ? "bg-[#262b27] text-white"
+                        ? "bg-[#262b27] text-white shadow-xs"
                         : "text-[#b4bab5] hover:bg-white/[0.05] hover:text-white"
                     }`
                   }
@@ -154,6 +154,15 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
           </div>
         ))}
       </nav>
+
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event("zephind:open-alert-settings"))}
+        className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-left text-[12.5px] text-indigo-300 hover:text-white hover:bg-white/[0.06] transition-colors font-medium"
+      >
+        <Bell className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+        <span>即時通知設定 (LINE/Mail)</span>
+      </button>
 
       <button
         type="button"

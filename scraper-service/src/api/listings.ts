@@ -1,6 +1,7 @@
 import { Router, type Request } from "express";
 import { db, type Doc } from "../db";
 import { requireUserId } from "../auth/authz";
+import { attachDealScoreFallback } from "../lib/dealScore";
 import { route } from "./handler";
 
 /**
@@ -33,6 +34,7 @@ listingsRouter.get("/", route(async (req) => {
   const ward = typeof req.query.ward === "string" ? req.query.ward : undefined;
   const priceMin = num(req.query.priceMin);
   const priceMax = num(req.query.priceMax);
+  const sort = typeof req.query.sort === "string" ? req.query.sort : undefined;
   const limit = Math.min(num(req.query.limit) || 1000, 8000);
 
   let q = db.raw.from("listings").select("*");
@@ -42,29 +44,30 @@ listingsRouter.get("/", route(async (req) => {
   // row ceiling from being spent on rows that are filtered out anyway.
   if (priceMin != null) q = q.or(`price.is.null,price.gte.${priceMin}`);
   if (priceMax != null) q = q.or(`price.is.null,price.lte.${priceMax}`);
+  if (sort === "dealScore") q = q.order("dealScore", { ascending: false, nullsFirst: false });
   const { data, error } = await q.limit(limit);
   if (error) throw new Error(`list listings: ${error.message}`);
   // shortcut: filtered after the limit, so other users' email rows can use up part of it; move into the query if that matters.
-  return (data ?? []).filter(visibleTo(req));
+  return attachDealScoreFallback((data ?? []).filter(visibleTo(req)));
 }));
 
 listingsRouter.post("/by-ids", route(async (req) => {
   const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (ids.length === 0) return [];
   const rows = await db.getMany("listings", ids);
-  return rows.filter(visibleTo(req));
+  return attachDealScoreFallback(rows.filter(visibleTo(req)));
 }));
 
 listingsRouter.get("/by-url", route(async (req) => {
   const url = typeof req.query.url === "string" ? req.query.url : "";
   if (!url) throw new Error("url is required");
   const row = await db.first("listings", { where: { url } });
-  return visibleTo(req)(row) ? row : null;
+  return visibleTo(req)(row) ? attachDealScoreFallback([row])[0] : null;
 }));
 
 listingsRouter.get("/:id", route(async (req) => {
   const row = await db.get("listings", req.params.id);
-  return visibleTo(req)(row) ? row : null;
+  return visibleTo(req)(row) ? attachDealScoreFallback([row])[0] : null;
 }));
 
 listingsRouter.post("/", route(async (req) => {

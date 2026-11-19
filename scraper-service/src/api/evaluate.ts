@@ -14,6 +14,7 @@ import { computeMatchScore, mlitTypeForListing, wardCityCode } from "../lib/scor
 import {
   CACHE_TTL_MS, getMlitCache, getPlacesCache, saveMlitCache, savePlacesCache,
 } from "../lib/marketCache";
+import { dispatchHotMatchAlerts, type AlertNotificationItem } from "../services/alertNotifier";
 
 /**
  * The Rax AI gateway sometimes streams SSE ("data: {...}\n\n" chunks) even when
@@ -835,6 +836,36 @@ export async function evaluateMatchIdsServer(matchIds: string[]): Promise<number
       const prepared = await Promise.all(chunk.map((args) => prepareListingInternal(args)));
       const results = await gradePrepared(prepared);
       evaluatedCount += results.filter((r) => r.score != null).length;
+
+      // Dispatch automated alerts for hot deals (Score >= 80 or price drop)
+      const alertItems: AlertNotificationItem[] = [];
+      for (let j = 0; j < chunk.length; j++) {
+        const itemArgs = chunk[j];
+        const res = results[j];
+        if (res && res.score != null) {
+          alertItems.push({
+            matchId: itemArgs.matchId,
+            title: itemArgs.title || itemArgs.address,
+            address: itemArgs.address,
+            price: itemArgs.price,
+            rent: itemArgs.rent,
+            yield: itemArgs.yield,
+            score: res.score,
+            scoreDetail: res.scoreDetail,
+            ward: itemArgs.ward,
+            station: itemArgs.station,
+            walkMinutes: itemArgs.walkMinutes,
+            orderName: itemArgs.orderCriteria?.orderName,
+            isPriceDrop: Boolean(itemArgs.priceDropped),
+            priceDropPercent: itemArgs.priceDropPct,
+          });
+        }
+      }
+      if (alertItems.length > 0) {
+        void dispatchHotMatchAlerts(alertItems).catch((err) => {
+          console.error("[Server evaluate] dispatchHotMatchAlerts failed:", err);
+        });
+      }
     } catch (chunkErr) {
       console.error(`[Server evaluate] batch error for chunk ${i}-${i + chunk.length}:`, chunkErr);
     }

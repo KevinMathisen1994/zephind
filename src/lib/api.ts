@@ -150,6 +150,18 @@ export const api = {
     }),
   },
 
+  alertSettings: {
+    get: endpoint({ method: "GET", key: "alertSettings", path: () => "/api/alerts/settings" }),
+    save: endpoint({
+      method: "PUT", key: "alertSettings.save", path: () => "/api/alerts/settings",
+      body: (a) => a, invalidates: ["alertSettings"],
+    }),
+    sendTest: endpoint({
+      method: "POST", key: "alertSettings.test", path: () => "/api/alerts/test",
+      body: (a) => a,
+    }),
+  },
+
   scraperHealth: {
     list: endpoint({ method: "GET", key: "scraperHealth", path: () => "/api/scraper-health" }),
     record: endpoint({

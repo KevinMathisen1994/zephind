@@ -16,6 +16,7 @@ import { proposalsRouter } from "./api/proposals";
 import { savedListingsRouter } from "./api/savedListings";
 import { scrapeTriggerRouter } from "./api/scrapeTrigger";
 import { scraperHealthRouter } from "./api/scraperHealth";
+import { alertSettingsRouter } from "./api/alertSettings";
 
 /**
  * The application API without the scrapers (no Puppeteer), shared by the Node
@@ -66,6 +67,7 @@ export function createApiApp() {
   app.use("/api/evaluate", evaluateRouter);
   app.use("/api/mail", mailRouter);
   app.use("/api/scraper-health", scraperHealthRouter);
+  app.use("/api/alerts", alertSettingsRouter);
   app.use("/api/scrape-trigger", scrapeTriggerRouter);
   // Machine-to-machine, guarded by SCRAPER_INGEST_SECRET rather than Clerk — the
   // scheduled runner has no browser session.

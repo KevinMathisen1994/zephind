@@ -17,6 +17,14 @@ interface Row {
   _creationTime: number;
 }
 
+export interface DealSignal {
+  key: string;
+  label: string;
+  value: number;
+  weight: number;
+  reason: string;
+}
+
 export interface Listing extends Row {
   address?: string;
   ward?: string;
@@ -81,6 +89,10 @@ export interface Listing extends Row {
   /** Every label/value pair from the portal detail page, e.g. { 管理費: "15,910円/月" }. */
   specs?: Record<string, string>;
   emailAttachments?: { id?: string; filename: string; mimeType: string; size: number }[];
+  dealScore?: number;
+  dealSignals?: DealSignal[];
+  dealFlags?: string[];
+  dealScoredAt?: number;
 }
 
 export interface Order extends Row {
@@ -138,6 +150,10 @@ export interface Matching extends Row {
   status?: string;
   evaluation?: string;
   scoreDetail?: Record<string, unknown> | null;
+  dealScore?: number;
+  dealSignals?: DealSignal[];
+  dealFlags?: string[];
+  dealScoredAt?: number;
 }
 
 export interface Customer extends Row {
@@ -210,6 +226,17 @@ export interface EmailSettings extends Row {
   updatedAt?: number;
 }
 
+export interface AlertSettings extends Row {
+  userId: string;
+  webhookUrl?: string;
+  emailAddress?: string;
+  minScore?: number;
+  notifyHighScores?: boolean;
+  notifyPriceDrops?: boolean;
+  enabled?: boolean;
+  updatedAt?: number;
+}
+
 interface TableMap {
   listings: Listing;
   orders: Order;
@@ -219,6 +246,7 @@ interface TableMap {
   savedListings: SavedListing;
   scraperHealth: ScraperHealth;
   emailSettings: EmailSettings;
+  alertSettings: AlertSettings;
 }
 
 /** Doc<"orders"> etc., same spelling the Convex-generated type had. */

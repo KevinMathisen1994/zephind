@@ -2,6 +2,7 @@ import { logger } from "../logger";
 import { syncAllAccounts } from "../services/mailIngest";
 import { evaluateUnevaluatedMatches } from "../api/evaluate";
 import { backfillSpecs } from "../lib/listingSpecs";
+import { scoreListingsBatch } from "../lib/dealScore";
 
 /**
  * Scheduled mailbox sync and server-side match evaluation. Ported from convex/crons.js.
@@ -18,6 +19,8 @@ import { backfillSpecs } from "../lib/listingSpecs";
  * sync, hence MAIL_SYNC_ENABLED for the replicas that should not run it.
  */
 const INTERVAL_MS = 15 * 60 * 1000;
+const DEAL_SCORE_DAILY_MS = 24 * 60 * 60 * 1000;
+let lastDailyDealScoreAt = 0;
 
 export function startCrons() {
   if (process.env.MAIL_SYNC_ENABLED === "false") {
@@ -66,5 +69,16 @@ export async function runBackgroundTasks() {
     }
   } catch (e) {
     logger.error("[cron] server auto-evaluation failed: " + ((e as Error).stack || e));
+  }
+
+  try {
+    const forceAllActive = Date.now() - lastDailyDealScoreAt >= DEAL_SCORE_DAILY_MS;
+    const summary = await scoreListingsBatch({ forceAllActive });
+    if (forceAllActive) lastDailyDealScoreAt = Date.now();
+    if (summary.scoredCount > 0) {
+      logger.info(`[cron] dealScore computed for ${summary.scoredCount} listing(s)`);
+    }
+  } catch (e) {
+    logger.error("[cron] dealScore batch failed: " + ((e as Error).stack || e));
   }
 }

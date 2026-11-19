@@ -28,6 +28,7 @@ import { route } from "./handler";
 import { runBackgroundTasks } from "../jobs/cron";
 import { evaluateMatchIdsServer } from "./evaluate";
 import { backfillSpecs, enrichListingSpecs } from "../lib/listingSpecs";
+import { scoreListingsBatch } from "../lib/dealScore";
 import { parseBuildYear } from "../services/propertyDetail";
 
 /**
@@ -329,6 +330,7 @@ ingestRouter.post("/scrape", route(async (req) => {
 
   // url -> listing _id, for resolving the match pairs below without re-querying.
   const listingIdByUrl = new Map<string, string>();
+  const touchedListingIds = new Set<string>();
 
   const docs: Record<string, any>[] = [];
   const noUrlDocs: Record<string, any>[] = [];
@@ -408,6 +410,7 @@ ingestRouter.post("/scrape", route(async (req) => {
 
         try {
           await db.patch("listings", existing._id, patchData);
+          touchedListingIds.add(existing._id);
           logger.info(`[Price change] ${d.url}: ${prevPrice}万 -> ${d.price}万 (${isDrop ? `-${dropPct}% drop` : "increase"})`);
 
           if (isDrop) {
@@ -464,6 +467,7 @@ ingestRouter.post("/scrape", route(async (req) => {
       const inserted = await insertListings(fresh);
       for (const row of inserted) {
         if (row.url) listingIdByUrl.set(row.url, row._id);
+        touchedListingIds.add(row._id);
       }
       listingsInserted += inserted.length;
       // Detail-page spec table for the new listings only; runs after we respond.
@@ -483,8 +487,15 @@ ingestRouter.post("/scrape", route(async (req) => {
       listingsSkipped++;
       continue;
     }
-    await insertListings([doc]);
+    const inserted = await insertListings([doc]);
+    for (const row of inserted) touchedListingIds.add(row._id);
     listingsInserted++;
+  }
+
+  if (touchedListingIds.size > 0) {
+    void scoreListingsBatch({ listingIds: [...touchedListingIds] }).catch((err) => {
+      logger.warn(`[ingest] dealScore batch failed: ${err}`);
+    });
   }
 
   // Resolve orders and existing matches in bulk, for the same reason as above.

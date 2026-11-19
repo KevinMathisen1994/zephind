@@ -8,6 +8,8 @@
  * directly.
  */
 import { db, type Doc } from "../db";
+import { scoreListingsBatch } from "./dealScore";
+import { dispatchHotMatchAlerts } from "../services/alertNotifier";
 
 // Mirrors the PROVIDERS map in ../services/mailIngest.ts (label + which env
 // vars must be set).
@@ -243,6 +245,33 @@ export async function saveEmailListing(args: {
       matchesCreated = toInsert.length;
     }
   }
+
+  if (!existing) {
+    void scoreListingsBatch({ listingIds: [listingId] })
+      .then(async (summary) => {
+        const hit = summary.results[0];
+        if (!hit || hit.result.score < 60) return;
+        const l = hit.listing;
+        await dispatchHotMatchAlerts([
+          {
+            userId: args.userId,
+            listingId,
+            title: l.title || l.address || args.emailSubject,
+            address: l.address,
+            price: l.price,
+            yield: l.yield,
+            score: hit.result.score,
+            ward: l.ward,
+            station: l.station,
+            walkMinutes: l.walkMinutes,
+            source: "メール直接紹介",
+            orderName: hit.result.signals.map((s) => s.reason).slice(0, 2).join(" / ") || "業者メール速報",
+          },
+        ]);
+      })
+      .catch(() => {});
+  }
+
   return { listingId, matchesCreated };
 }
 

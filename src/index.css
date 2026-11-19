@@ -731,8 +731,119 @@
 .tour-card { animation: tour-pop 0.3s ease-out both; }
 @keyframes tour-pop { from { opacity: 0; margin-top: 8px; } to { opacity: 1; margin-top: 0; } }
 
-.listing-modal { animation: modal-in 0.22s ease-out both; }
-@keyframes modal-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+/* ── High-End Fluid Transitions & Motion ────────────────────────── */
+@keyframes page-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slide-in-right {
+  0% {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-left {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes modal-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(32px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modal-exit {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+}
+
+@keyframes expand-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-transition {
+  animation: page-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.view-slide-right {
+  animation: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.view-slide-left {
+  animation: slide-in-left 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.listing-modal-enter {
+  animation: modal-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.listing-modal-exit {
+  animation: modal-exit 0.22s cubic-bezier(0.32, 0, 0.67, 0) forwards;
+  will-change: opacity, transform;
+  pointer-events: none;
+}
+
+.smooth-expand {
+  animation: expand-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition,
+  .view-slide-right,
+  .view-slide-left,
+  .listing-modal-enter,
+  .listing-modal-exit,
+  .smooth-expand {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+.listing-modal {
+  animation: modal-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 
 /* White fill, Google-color border bands */
 .gmaps-btn {

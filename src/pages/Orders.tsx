@@ -60,6 +60,7 @@ import {
   Compass,
   ShieldCheck,
   ArrowLeft,
+  Bell,
 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -69,6 +70,13 @@ import {
   type ComparisonListing,
 } from "../components/PropertyComparisonModal";
 import { LineProposalModal } from "../components/LineProposalModal";
+import { InvestorRoiSimulator } from "../components/InvestorRoiSimulator";
+import { AlertSettingsModal } from "../components/AlertSettingsModal";
+import {
+  DealScoreBadge,
+  getListingDealScore,
+  isNegotiationCandidate,
+} from "../components/DealScoreBadge";
 import TokyoPropertyMap, { type MapListingItem } from "../components/TokyoPropertyMap";
 import { PropertyHazardModal } from "../components/PropertyHazardModal";
 import {
@@ -384,6 +392,7 @@ function NarrativeView({ text }: { text: string }) {
  */
 const SORT_OPTIONS = [
   { key: "newest", label: "掲載が新しい順" },
+  { key: "dealScore", label: "お買い得順" },
   { key: "score", label: "評価スコア順" },
   { key: "oldest", label: "掲載が古い順" },
   { key: "foundNewest", label: "取得日時が新しい順" },
@@ -427,6 +436,14 @@ function isFoundToday(match: Doc<"matching"> | undefined): boolean {
 
 const BASE_FILTERS: ListingFilter[] = [
   {
+    key: "highDealScore",
+    label: "お買い得 70点以上",
+    test: (m, listing) => {
+      const s = getListingDealScore(listing, m);
+      return s !== undefined && s >= 70;
+    },
+  },
+  {
     key: "recentMatch",
     label: "本日の新着",
     test: (m) => isFoundToday(m),
@@ -435,6 +452,11 @@ const BASE_FILTERS: ListingFilter[] = [
     key: "highScore",
     label: "高評価 80点以上",
     test: (_m, _l, score) => score !== undefined && score >= 80,
+  },
+  {
+    key: "negotiationCandidate",
+    label: "値下げ交渉候補",
+    test: (m, listing) => isNegotiationCandidate(listing, m),
   },
   {
     key: "unevaluated",
@@ -864,7 +886,7 @@ function EmailListingDetails({
             )}
           </button>
           {showBody && (
-            <pre className="mt-2 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
+            <pre className="smooth-expand mt-2 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
               {bodyText}
             </pre>
           )}
@@ -1312,13 +1334,26 @@ export default function OrdersPage() {
   }, [getRecentRuns]);
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
+  const [closingMatchId, setClosingMatchId] = useState<string | null>(null);
   // AI reports stay collapsed until asked for.
   const [openReports, setOpenReports] = useState<Set<string>>(new Set());
   // 物件詳細 spec tables start collapsed to a faded preview.
   const [openSpecs, setOpenSpecs] = useState<Set<string>>(new Set());
+
+  const handleCloseExpanded = () => {
+    if (!expandedMatch) return;
+    setClosingMatchId(expandedMatch);
+    setTimeout(() => {
+      setExpandedMatch(null);
+      setClosingMatchId(null);
+    }, 200);
+  };
+
   useEffect(() => {
     if (!expandedMatch) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpandedMatch(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleCloseExpanded();
+    };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -1452,6 +1487,7 @@ export default function OrdersPage() {
     Doc<"orders"> | null
   >(null);
   const [hazardModalListing, setHazardModalListing] = useState<any | null>(null);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
   const [scoreDetails, setScoreDetails] = useState<
@@ -1523,7 +1559,12 @@ export default function OrdersPage() {
   >({});
 
   const toggleExpand = (id: string) => {
-    setExpandedMatch(expandedMatch === id ? null : id);
+    if (expandedMatch === id) {
+      handleCloseExpanded();
+    } else {
+      setClosingMatchId(null);
+      setExpandedMatch(id);
+    }
   };
 
   const handleEvaluate = async (
@@ -2774,7 +2815,7 @@ export default function OrdersPage() {
   }, [routeOrderId]);
 
   return (
-    <div className="page-shell space-y-5">
+    <div key={isDetailView ? `detail-${routeOrderId}` : "dashboard-view"} className="page-shell space-y-5 animate-in fade-in duration-200">
       {/* ── Page Header ── */}
       {isDetailView ? (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -2796,16 +2837,26 @@ export default function OrdersPage() {
               買主の希望条件ごとに、全14ポータルの検索と物件評価をまとめて管理します
             </p>
           </div>
-          <Button
-            onClick={() => {
-              if (showForm) resetForm();
-              setShowForm(!showForm);
-            }}
-            variant={showForm ? "outline" : "default"}
-          >
-            {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            {showForm ? "キャンセル" : "新規作成"}
-          </Button>
+          <div className="flex items-center gap-2.5">
+            <Button
+              onClick={() => setIsAlertModalOpen(true)}
+              variant="outline"
+              className="gap-2 border-indigo-200 bg-indigo-50/70 text-indigo-900 hover:bg-indigo-100 shadow-2xs font-bold text-xs h-9 px-3.5"
+            >
+              <Bell className="h-3.5 w-3.5 text-indigo-600" />
+              <span>お宝物件 即時通知</span>
+            </Button>
+            <Button
+              onClick={() => {
+                if (showForm) resetForm();
+                setShowForm(!showForm);
+              }}
+              variant={showForm ? "outline" : "default"}
+            >
+              {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {showForm ? "キャンセル" : "新規作成"}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -3924,7 +3975,7 @@ export default function OrdersPage() {
                   key={order._id}
                   type="button"
                   onClick={() => navigate(`/orders/${order._id}`)}
-                  className="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)]"
+                  className="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 text-left transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)] hover:shadow-xs active:scale-[0.99]"
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${
@@ -3991,7 +4042,7 @@ export default function OrdersPage() {
                     </span>
                   </span>
 
-                  <ChevronRight className="h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--brand)]" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:translate-x-1 group-hover:text-[var(--brand)]" />
                 </button>
               );
             }
@@ -4338,8 +4389,31 @@ export default function OrdersPage() {
                           );
                           if (chips.length === 0) return null;
                           const active = listFilter[order._id] ?? "all";
+                          const isDealSort = (sortKey[order._id] || "newest") === "dealScore";
                           return (
                             <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSortKey((prev) => ({
+                                    ...prev,
+                                    [order._id]: isDealSort ? "newest" : "dealScore",
+                                  }));
+                                  setCurrentPage((prev) => ({
+                                    ...prev,
+                                    [order._id]: 1,
+                                  }));
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all flex items-center gap-1.5 ${
+                                  isDealSort
+                                    ? "bg-amber-500 text-white border-amber-600 shadow-sm"
+                                    : "border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100/80 hover:border-amber-300"
+                                }`}
+                                title={isDealSort ? "お買い得順を解除" : "お買い得順に並び替え"}
+                              >
+                                <Sparkles className="w-3.5 h-3.5 fill-current" />
+                                <span>お買い得順</span>
+                              </button>
                               {chips.map((chip) => {
                                 const isActive = active === chip.key;
                                 return (
@@ -4460,6 +4534,14 @@ export default function OrdersPage() {
                       function compareMatches(a: Doc<"matching">, b: Doc<"matching">): number {
                         const la = matchedListing(a.listingId ?? "");
                         const lb = matchedListing(b.listingId ?? "");
+                        // When explicitly ordering by deal score, sort purely by dealScore descending
+                        // so lower-scored emails do not displace higher-scored properties.
+                        if (activeSort === "dealScore") {
+                          const scoreA = getListingDealScore(la, a);
+                          const scoreB = getListingDealScore(lb, b);
+                          const diff = (scoreB ?? -LAST) - (scoreA ?? -LAST);
+                          if (diff !== 0) return diff;
+                        }
                         // A broker emailed this directly — surface it ahead of
                         // everything scraped off a public portal, regardless
                         // of whatever sort the user picked.
@@ -4486,6 +4568,11 @@ export default function OrdersPage() {
                             return (
                               (lb?._creationTime ?? -LAST) -
                               (la?._creationTime ?? -LAST)
+                            );
+                          case "dealScore":
+                            return (
+                              (getListingDealScore(lb, b) ?? -LAST) -
+                              (getListingDealScore(la, a) ?? -LAST)
                             );
                           case "score":
                           default:
@@ -4769,6 +4856,9 @@ export default function OrdersPage() {
                                       </span>
                                     )}
 
+                                    <div className="basis-full h-0" />
+                                    <DealScoreBadge listing={listing} match={m} />
+
                                   </div>
                                   </div>
 
@@ -4832,9 +4922,11 @@ export default function OrdersPage() {
                                 </div>
 
                                 {/* Expanded Details */}
-                                {isExpanded && listing && createPortal(
+                                {(isExpanded || closingMatchId === m._id) && listing && createPortal(
                                   <div
-                                    className="listing-modal fixed inset-0 z-[80] flex flex-col overflow-y-auto bg-[var(--bg-page)]"
+                                    className={`fixed inset-0 z-[80] flex flex-col overflow-y-auto bg-[var(--bg-page)] ${
+                                      closingMatchId === m._id ? "listing-modal-exit" : "listing-modal-enter"
+                                    }`}
                                     role="dialog"
                                     aria-modal="true"
                                     aria-label={listing.address || "物件詳細"}
@@ -4843,11 +4935,11 @@ export default function OrdersPage() {
                                       <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3.5">
                                         <button
                                           type="button"
-                                          onClick={() => setExpandedMatch(null)}
-                                          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-medium text-slate-800 transition-colors hover:bg-[#e8e7e2]"
+                                          onClick={handleCloseExpanded}
+                                          className="group inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-semibold text-slate-800 transition-all duration-150 hover:bg-[#e4e2dc] hover:shadow-2xs active:scale-[0.98]"
                                           title="一覧に戻る (Esc)"
                                         >
-                                          <ArrowLeft className="h-4 w-4" />
+                                          <ArrowLeft className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5" />
                                           一覧に戻る
                                         </button>
                                         {extractedScore !== undefined && (
@@ -4878,6 +4970,9 @@ export default function OrdersPage() {
                                           <span className="ml-1.5 text-[13px] text-slate-600">円</span>
                                         </div>
                                       ) : null}
+                                    </div>
+                                    <div className="mt-3">
+                                      <DealScoreBadge listing={listing} match={m} />
                                     </div>
                                     {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
                                     {(listing.station ||
@@ -5001,12 +5096,12 @@ export default function OrdersPage() {
                                             type="button"
                                             onClick={toggleSpecs}
                                             aria-expanded={specsOpen}
-                                            className="mb-2 flex w-full cursor-pointer items-center justify-between text-[14.5px] font-bold text-slate-900"
+                                            className="group mb-2 flex w-full cursor-pointer items-center justify-between text-[14.5px] font-bold text-slate-900"
                                           >
                                             <span>物件詳細 <span className="ml-1 text-[13px] font-medium text-slate-500">{rows.length}項目</span></span>
-                                            <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${specsOpen ? "rotate-180" : ""}`} />
+                                            <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "rotate-180" : ""}`} />
                                           </button>
-                                          <div className={specsOpen ? "" : "relative max-h-36 overflow-hidden"}>
+                                          <div className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "max-h-[3000px] opacity-100" : "relative max-h-36 overflow-hidden"}`}>
                                           <dl className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
                                             {rows.map(([k, v]) => (
                                               <div
@@ -5096,6 +5191,16 @@ export default function OrdersPage() {
                                         </a>
                                       )}
                                     </div>
+
+                                    {/* ── Investor ROI & Cash Flow Simulator (Expandable Card) ── */}
+                                    {listing && (
+                                      <InvestorRoiSimulator
+                                        listing={{ ...listing, _id: m.listingId }}
+                                        orderName={order.name}
+                                        defaultExpanded={false}
+                                        className="mt-3.5"
+                                      />
+                                    )}
 
                                     {/* Email Source Details & PDF Attachments */}
                                     {(listing.source === "email" ||
@@ -5192,7 +5297,7 @@ export default function OrdersPage() {
                                               </div>
 
                                               {reportOpen && (
-                                              <div className="space-y-8 rounded-xl border border-[var(--border-subtle)] bg-white p-6">
+                                              <div className="smooth-expand space-y-8 rounded-xl border border-[var(--border-subtle)] bg-white p-6">
                                               <div className="grid gap-8 md:grid-cols-[13rem_1fr]">
                                                 <div>
                                                   <div className="text-sm text-slate-500">総合投資スコア</div>
@@ -5803,6 +5908,12 @@ export default function OrdersPage() {
         />
       )}
 
+      {/* Hot Matches Immediate Alert Notification Settings Modal */}
+      <AlertSettingsModal
+        isOpen={isAlertModalOpen}
+        onClose={() => setIsAlertModalOpen(false)}
+      />
+
       {showMailRules && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -6039,7 +6150,7 @@ export default function OrdersPage() {
                         </button>
 
                         {open && (
-                          <div className="px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
+                          <div className="smooth-expand px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
                             {m.error && (
                               <p className="text-xs font-semibold text-red-700">{m.error}</p>
                             )}

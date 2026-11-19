@@ -1,0 +1,363 @@
+import { useState, useEffect } from "react";
+import {
+  X,
+  Bell,
+  Check,
+  Send,
+  Loader2,
+  Sparkles,
+  Smartphone,
+  Mail,
+  Sliders,
+  AlertCircle,
+  TrendingDown,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
+import { api } from "../lib/api";
+
+interface AlertSettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps) {
+  const currentSettings = useQuery(api.alertSettings.get);
+  const saveSettings = useMutation(api.alertSettings.save);
+  const sendTest = useMutation(api.alertSettings.sendTest);
+
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [emailAddress, setEmailAddress] = useState("");
+  const [minScore, setMinScore] = useState(80);
+  const [notifyHighScores, setNotifyHighScores] = useState(true);
+  const [notifyPriceDrops, setNotifyPriceDrops] = useState(true);
+  const [enabled, setEnabled] = useState(true);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
+
+  // Sync state when settings are loaded from backend
+  useEffect(() => {
+    if (currentSettings) {
+      setWebhookUrl(currentSettings.webhookUrl || "");
+      setEmailAddress(currentSettings.emailAddress || "");
+      setMinScore(currentSettings.minScore ?? 80);
+      setNotifyHighScores(currentSettings.notifyHighScores !== false);
+      setNotifyPriceDrops(currentSettings.notifyPriceDrops !== false);
+      setEnabled(currentSettings.enabled !== false);
+    }
+  }, [currentSettings]);
+
+  if (!isOpen) return null;
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await saveSettings({
+        webhookUrl: webhookUrl.trim(),
+        emailAddress: emailAddress.trim(),
+        minScore,
+        notifyHighScores,
+        notifyPriceDrops,
+        enabled,
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    } catch (err: any) {
+      alert(`保存に失敗しました: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSendTest = async () => {
+    if (!webhookUrl.trim() && !emailAddress.trim()) {
+      alert("Webhook URLまたは通知先メールアドレスを入力してください。");
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      await sendTest({
+        webhookUrl: webhookUrl.trim(),
+        emailAddress: emailAddress.trim(),
+        minScore,
+      });
+      setTestResult({
+        success: true,
+        message: "テスト通知の送信に成功しました！通知先をご確認ください。",
+      });
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: `テスト送信に失敗しました: ${err.message}`,
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Modal Top Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30">
+              <Bell className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black tracking-tight text-white">
+                  お宝物件 即時通知設定
+                </h2>
+                <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-xs font-bold">
+                  Hot Deals Alert
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                高スコア物件や大幅値下げ物件がスクレイピングされた瞬間に自動通知
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Modal Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+          {/* Master Enabled Banner */}
+          <div className="flex items-center justify-between p-4 rounded-xl border border-indigo-100 bg-indigo-50/50">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-900">
+                  即時アラート通知システム
+                </div>
+                <div className="text-xs text-slate-500">
+                  バックグラウンド取得時に条件を満たす優良物件を自動で配信します
+                </div>
+              </div>
+            </div>
+
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+
+          {/* Delivery Channels */}
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
+            <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
+              <Smartphone className="h-4 w-4 text-emerald-600" />
+              通知先の設定 (LINE / Webhook / メール)
+            </h3>
+
+            {/* Webhook / LINE Notify Token */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  LINE Notify トークン または Webhook URL
+                </label>
+                <span className="text-[11px] text-slate-400">
+                  LINE / Discord / Slack 対応
+                </span>
+              </div>
+              <input
+                type="text"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="例: LINE Notifyトークン または Discord/SlackのWebhook URL"
+                className="w-full h-10 px-3 text-xs font-medium rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition-colors"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                ※ LINE Notifyのアクセストークンをそのまま貼り付けるか、Discord / SlackのIncoming Webhook URLを入力してください。
+              </p>
+            </div>
+
+            {/* Email Address */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                通知先メールアドレス（任意）
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <input
+                  type="email"
+                  value={emailAddress}
+                  onChange={(e) => setEmailAddress(e.target.value)}
+                  placeholder="broker@example.com"
+                  className="w-full h-10 pl-9 pr-3 text-xs font-medium rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition-colors"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Alert Conditions & Trigger Filters */}
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
+            <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
+              <Sliders className="h-4 w-4 text-indigo-600" />
+              通知トリガー条件
+            </h3>
+
+            {/* Minimum AI Score Threshold */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700">
+                  通知を発動する最低AIスコア基準
+                </span>
+                <span className="text-sm font-black text-indigo-600 font-data">
+                  {minScore}点 以上
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                {[70, 75, 80, 85, 90].map((score) => (
+                  <button
+                    key={score}
+                    type="button"
+                    onClick={() => setMinScore(score)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                      minScore === score
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {score}点{score === 80 ? " (推奨)" : ""}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                80点以上は相場比割安・高利回り・駅徒歩などの総合指標が極めて優秀なお宝物件です。
+              </p>
+            </div>
+
+            {/* Checkboxes for notification events */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-100">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifyHighScores}
+                  onChange={(e) => setNotifyHighScores(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800">
+                    高スコア新着物件の通知 ({minScore}点以上)
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    条件に合致し、AIスコアが基準値を超えた新着物件を即座に通知します。
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifyPriceDrops}
+                  onChange={(e) => setNotifyPriceDrops(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <TrendingDown className="h-3.5 w-3.5 text-rose-600" />
+                    大幅値下げ物件の通知
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    価格改定（値下げ）が行われた売り急ぎ物件を優先的に通知します。
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Test Status Feedback */}
+          {testResult && (
+            <div
+              className={`p-3.5 rounded-xl border text-xs font-bold flex items-start gap-2.5 ${
+                testResult.success
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : "bg-rose-50 border-rose-200 text-rose-800"
+              }`}
+            >
+              {testResult.success ? (
+                <Check className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+              )}
+              <div>{testResult.message}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer Actions */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-white">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleSendTest}
+            disabled={isTesting || (!webhookUrl.trim() && !emailAddress.trim())}
+            className="h-10 gap-2 rounded-xl text-xs font-bold border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            {isTesting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4 text-indigo-600" />
+            )}
+            テスト通知を送信
+          </Button>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              className="h-10 rounded-xl text-xs font-bold border-slate-200 text-slate-600"
+            >
+              閉じる
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="h-10 gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm shadow-indigo-600/30 min-w-[100px]"
+            >
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : saveSuccess ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  保存完了
+                </>
+              ) : (
+                "設定を保存"
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

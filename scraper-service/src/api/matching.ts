@@ -1,13 +1,44 @@
 import { Router } from "express";
-import { db } from "../db";
+import { db, type Doc } from "../db";
 import { HttpError, listOwned, requireOwned, requireUserId } from "../auth/authz";
+import { getCachedDealScore } from "../lib/dealScore";
 import { route } from "./handler";
 
 /** Ported from convex/matching.js. */
 export const matchingRouter = Router();
 
+async function attachDealFields(matches: Doc[]): Promise<Doc[]> {
+  const listingIds = [...new Set(matches.map((m) => m.listingId).filter((id): id is string => Boolean(id)))];
+  if (listingIds.length === 0) return matches;
+
+  const byId = new Map<string, Record<string, any>>();
+  try {
+    const rows = await db.selectIn(
+      "listings",
+      "_id,dealScore,dealSignals,dealFlags,dealScoredAt",
+      "_id",
+      listingIds,
+    );
+    for (const r of rows) byId.set(r._id, r);
+  } catch {
+    // Migration 0014 may not exist in older deployments; fall back to memory cache.
+  }
+
+  return matches.map((m) => {
+    const l = m.listingId ? byId.get(m.listingId) ?? getCachedDealScore(m.listingId) : null;
+    if (!l || l.dealScore == null) return m;
+    return {
+      ...m,
+      dealScore: l.dealScore,
+      dealSignals: l.dealSignals ?? [],
+      dealFlags: l.dealFlags ?? [],
+      dealScoredAt: l.dealScoredAt,
+    };
+  });
+}
+
 // Lists are the newest 1000 rows (PostgREST max-rows); counts come from /summary.
-matchingRouter.get("/", route(async (req) => listOwned(req, "matching")));
+matchingRouter.get("/", route(async (req) => attachDealFields(await listOwned(req, "matching"))));
 
 /** Per-order totals: { orderId, total, new24h, high, new24hHigh }[]. */
 matchingRouter.get("/summary", route(async (req) => {
@@ -30,15 +61,19 @@ matchingRouter.get("/by-order/:orderId", route(async (req) => {
   // Second filter on the match's own userId: matching.orderId is a plain string
   // column, so owning the order alone would not stop a legacy or mis-owned row
   // from leaking through.
-  return db.list("matching", {
-    where: { orderId: req.params.orderId, userId },
-    order: { by: "_creationTime", desc: true },
-  });
+  return attachDealFields(
+    await db.list("matching", {
+      where: { orderId: req.params.orderId, userId },
+      order: { by: "_creationTime", desc: true },
+    }),
+  );
 }));
 
 matchingRouter.get("/by-listing/:listingId", route(async (req) => {
   const userId = requireUserId(req);
-  return db.list("matching", { where: { listingId: req.params.listingId, userId } });
+  return attachDealFields(
+    await db.list("matching", { where: { listingId: req.params.listingId, userId } }),
+  );
 }));
 
 matchingRouter.post("/", route(async (req) => {
