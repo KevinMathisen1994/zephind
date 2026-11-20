@@ -60,7 +60,6 @@ import {
   Compass,
   ShieldCheck,
   ArrowLeft,
-  Bell,
 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -70,14 +69,16 @@ import {
   type ComparisonListing,
 } from "../components/PropertyComparisonModal";
 import { LineProposalModal } from "../components/LineProposalModal";
-import { InvestorRoiSimulator } from "../components/InvestorRoiSimulator";
-import { AlertSettingsModal } from "../components/AlertSettingsModal";
+// import { InvestorRoiSimulator } from "../components/InvestorRoiSimulator";
+// import { AlertSettingsModal } from "../components/AlertSettingsModal";
 import {
   DealScoreBadge,
   getListingDealScore,
   isNegotiationCandidate,
 } from "../components/DealScoreBadge";
-import TokyoPropertyMap, { type MapListingItem } from "../components/TokyoPropertyMap";
+import TokyoPropertyMap, {
+  type MapListingItem,
+} from "../components/TokyoPropertyMap";
 import { PropertyHazardModal } from "../components/PropertyHazardModal";
 import {
   resolveListingCoordinates,
@@ -95,7 +96,13 @@ const GMAPS_KEY = import.meta.env
  * hidden there and the runner is pinned to GitHub Actions.
  */
 /** Score pill, coloured by band so strong and weak listings read at a glance. */
-function ScoreChip({ score, small = false }: { score: number; small?: boolean }) {
+function ScoreChip({
+  score,
+  small = false,
+}: {
+  score: number;
+  small?: boolean;
+}) {
   const tone =
     score >= 80
       ? "bg-[var(--brand)] text-white"
@@ -110,7 +117,11 @@ function ScoreChip({ score, small = false }: { score: number; small?: boolean })
       title="評価スコア（100点満点）"
     >
       <span className="text-[12.5px] font-bold">評価</span>
-      <span className={`font-data font-bold leading-none ${small ? "text-[14px]" : "text-[20px]"}`}>{score}</span>
+      <span
+        className={`font-data font-bold leading-none ${small ? "text-[14px]" : "text-[20px]"}`}
+      >
+        {score}
+      </span>
       <span className="text-[12.5px] font-bold">点</span>
     </span>
   );
@@ -148,7 +159,12 @@ type InspectedMail = {
   from?: string;
   receivedAt?: number;
   bodyText?: string;
-  attachments?: { id?: string; filename: string; mimeType: string; size: number }[];
+  attachments?: {
+    id?: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+  }[];
   pdfTexts?: string[];
   listings?: Record<string, unknown>[];
   needsLlm?: boolean;
@@ -243,7 +259,9 @@ function getInitialSelectedSources(): string[] {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const valid = parsed.filter((s: string) => ALL_SCRAPE_SOURCES.includes(s));
+        const valid = parsed.filter((s: string) =>
+          ALL_SCRAPE_SOURCES.includes(s),
+        );
         if (valid.length > 0) return valid;
       }
     }
@@ -254,8 +272,13 @@ function getInitialSelectedSources(): string[] {
 }
 
 function getOrderSources(order: Doc<"orders"> | any): string[] {
-  if (Array.isArray(order?.sources) && order.sources.length > 0) return order.sources;
-  if (Array.isArray(order?.criteria?.sources) && order.criteria.sources.length > 0) return order.criteria.sources;
+  if (Array.isArray(order?.sources) && order.sources.length > 0)
+    return order.sources;
+  if (
+    Array.isArray(order?.criteria?.sources) &&
+    order.criteria.sources.length > 0
+  )
+    return order.criteria.sources;
   return [];
 }
 
@@ -346,9 +369,9 @@ const INCOME_TYPES = ["マンション", "一棟マンション", "アパート"
 /** Renders the AI narrative: 【要約】 callout, ①〜④ headings, "- " bullets, **bold**. */
 function NarrativeView({ text }: { text: string }) {
   const inline = (t: string) =>
-    t.split(/\*\*(.+?)\*\*/g).map((part, i) =>
-      i % 2 ? <strong key={i}>{part}</strong> : part,
-    );
+    t
+      .split(/\*\*(.+?)\*\*/g)
+      .map((part, i) => (i % 2 ? <strong key={i}>{part}</strong> : part));
   return (
     <div className="max-w-[80ch] space-y-1.5 border-t border-slate-100 pt-5 text-[15px] leading-[1.8]">
       {text.split("\n").map((raw, i) => {
@@ -356,7 +379,10 @@ function NarrativeView({ text }: { text: string }) {
         if (!line) return null;
         if (line.startsWith("【要約】"))
           return (
-            <div key={i} className="mb-3 rounded-md bg-stone-100 px-4 py-3 font-medium">
+            <div
+              key={i}
+              className="mb-3 rounded-md bg-stone-100 px-4 py-3 font-medium"
+            >
               {inline(line.replace("【要約】", "").trim())}
             </div>
           );
@@ -424,14 +450,20 @@ type ListingFilter = {
 };
 
 /** First non-empty value of these detail-page spec labels; covers multi-unit text like "101.64㎡・115.61㎡". */
-function specText(listing: Doc<"listings">, ...labels: string[]): string | undefined {
+function specText(
+  listing: Doc<"listings">,
+  ...labels: string[]
+): string | undefined {
   const specs = (listing.specs ?? {}) as Record<string, string>;
   return labels.map((l) => specs[l]).find(Boolean);
 }
 
 /** Matched to the order in the last 24h: the one meaning of 新着 in this UI. */
 function isFoundToday(match: Doc<"matching"> | undefined): boolean {
-  return match?._creationTime != null && Date.now() - match._creationTime <= 24 * 60 * 60 * 1000;
+  return (
+    match?._creationTime != null &&
+    Date.now() - match._creationTime <= 24 * 60 * 60 * 1000
+  );
 }
 
 const BASE_FILTERS: ListingFilter[] = [
@@ -611,33 +643,54 @@ type ScrapeProgress = {
 
 /** Combined progress of the order's current run, or null before any shard reports. */
 function scrapeProgressSummary(order: Doc<"orders">) {
-  const p = (order as { scrapeProgress?: ScrapeProgress | null }).scrapeProgress;
+  const p = (order as { scrapeProgress?: ScrapeProgress | null })
+    .scrapeProgress;
   if (!p?.shards) return null;
-  if (order.scrapeRunId != null && p.runId !== String(order.scrapeRunId)) return null;
+  if (order.scrapeRunId != null && p.runId !== String(order.scrapeRunId))
+    return null;
   const shards = Object.values(p.shards);
   if (shards.length === 0) return null;
   const done = shards.reduce((n, s) => n + s.done, 0);
   const total = Math.max(...shards.map((s) => s.globalTotal));
   const elapsed = Date.now() - Math.min(...shards.map((s) => s.startedAt));
   // Linear extrapolation; the slowest site (usually athome) makes this optimistic near the end.
-  const etaMin = done > 0 && done < total ? Math.ceil(((elapsed / done) * (total - done)) / 60000) : null;
+  const etaMin =
+    done > 0 && done < total
+      ? Math.ceil(((elapsed / done) * (total - done)) / 60000)
+      : null;
   return { done, total, active: shards.flatMap((s) => s.active), etaMin };
 }
 
-function ScrapeProgressLine({ order, showSites = false }: { order: Doc<"orders">; showSites?: boolean }) {
+function ScrapeProgressLine({
+  order,
+  showSites = false,
+}: {
+  order: Doc<"orders">;
+  showSites?: boolean;
+}) {
   const s = scrapeProgressSummary(order);
   if (!s) {
-    return <span className="text-emerald-800">準備中です（1〜2分ほどかかります）</span>;
+    return (
+      <span className="text-emerald-800">
+        準備中です（1〜2分ほどかかります）
+      </span>
+    );
   }
   const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
   const sites =
-    s.active.length > 2 ? `${s.active.slice(0, 2).join("、")} ほか${s.active.length - 2}サイト` : s.active.join("、");
+    s.active.length > 2
+      ? `${s.active.slice(0, 2).join("、")} ほか${s.active.length - 2}サイト`
+      : s.active.join("、");
   return (
     <span className="flex w-full flex-col gap-1.5">
       <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-emerald-900">
         <span className="font-semibold">{pct}% 完了</span>
         <span>
-          {s.etaMin != null ? `残り約${s.etaMin}分` : s.done >= s.total ? "まもなく完了" : "残り時間を計算中"}
+          {s.etaMin != null
+            ? `残り約${s.etaMin}分`
+            : s.done >= s.total
+              ? "まもなく完了"
+              : "残り時間を計算中"}
         </span>
       </span>
       <span
@@ -647,9 +700,16 @@ function ScrapeProgressLine({ order, showSites = false }: { order: Doc<"orders">
         aria-valuemin={0}
         aria-valuemax={100}
       >
-        <span className="block h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+        <span
+          className="block h-full bg-emerald-500 transition-all"
+          style={{ width: `${pct}%` }}
+        />
       </span>
-      {showSites && sites && <span className="text-[13px] text-emerald-700">確認中のサイト: {sites}</span>}
+      {showSites && sites && (
+        <span className="text-[13px] text-emerald-700">
+          確認中のサイト: {sites}
+        </span>
+      )}
     </span>
   );
 }
@@ -715,7 +775,12 @@ function EmailListingDetails({
   handleOpenAttachment: (
     provider: string,
     messageId: string,
-    attachment: { id?: string; filename: string; mimeType: string; size?: number },
+    attachment: {
+      id?: string;
+      filename: string;
+      mimeType: string;
+      size?: number;
+    },
   ) => Promise<void>;
   openingAttachmentId: string | null;
 }) {
@@ -725,11 +790,19 @@ function EmailListingDetails({
     messageId: string;
     subject: string;
     bodyText: string;
-    attachments: Array<{ id?: string; filename: string; mimeType: string; size: number }>;
+    attachments: Array<{
+      id?: string;
+      filename: string;
+      mimeType: string;
+      size: number;
+    }>;
     from?: string;
     receivedAt?: number;
   } | null>(() => {
-    if (listing?.emailSubject !== undefined && listing?.emailAttachments !== undefined) {
+    if (
+      listing?.emailSubject !== undefined &&
+      listing?.emailAttachments !== undefined
+    ) {
       const parts = (listing.url || "").split(":");
       return {
         provider: parts[1] || "gmail",
@@ -747,7 +820,11 @@ function EmailListingDetails({
   const [showBody, setShowBody] = useState(false);
 
   useEffect(() => {
-    if (!details && listing?._id && (listing?.source === "email" || listing?.url?.startsWith("email:"))) {
+    if (
+      !details &&
+      listing?._id &&
+      (listing?.source === "email" || listing?.url?.startsWith("email:"))
+    ) {
       setLoading(true);
       getEmailDetails({ listingId: listing._id })
         .then((res) => {
@@ -762,8 +839,10 @@ function EmailListingDetails({
     }
   }, [listing?._id, listing?.source, details, getEmailDetails]);
 
-  const provider = details?.provider || (listing?.url || "").split(":")[1] || "gmail";
-  const messageId = details?.messageId || (listing?.url || "").split(":")[2] || "";
+  const provider =
+    details?.provider || (listing?.url || "").split(":")[1] || "gmail";
+  const messageId =
+    details?.messageId || (listing?.url || "").split(":")[2] || "";
   const subject = details?.subject ?? listing?.emailSubject;
   const from = details?.from ?? listing?.emailFrom;
   const receivedAt = details?.receivedAt ?? listing?.emailReceivedAt;
@@ -834,7 +913,11 @@ function EmailListingDetails({
                     void handleOpenAttachment(provider, messageId, a)
                   }
                   className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-white hover:border-amber-400 hover:bg-amber-50/70 transition-all text-left shadow-2xs cursor-pointer"
-                  title={a.id ? "クリックして別タブで開く" : "添付ファイルIDがありません"}
+                  title={
+                    a.id
+                      ? "クリックして別タブで開く"
+                      : "添付ファイルIDがありません"
+                  }
                 >
                   {isOpening ? (
                     <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
@@ -850,7 +933,11 @@ function EmailListingDetails({
                       {a.filename || "(添付ファイル)"}
                     </span>
                     <span className="block text-[13.5px] text-slate-500">
-                      {a.size ? `${Math.round(a.size / 1024)}KB` : isPdf ? "PDF文書" : a.mimeType}
+                      {a.size
+                        ? `${Math.round(a.size / 1024)}KB`
+                        : isPdf
+                          ? "PDF文書"
+                          : a.mimeType}
                     </span>
                   </div>
                   <ExternalLink className="w-3.5 h-3.5 text-amber-700 opacity-60 group-hover:opacity-100 shrink-0 ml-1" />
@@ -980,14 +1067,19 @@ export default function OrdersPage() {
     string | null
   >(null);
   const [syncingMail, setSyncingMail] = useState(false);
-  const [mailNotice, setMailNotice] = useState<{ text: string; kind: "ok" | "info" | "error" } | null>(null);
+  const [mailNotice, setMailNotice] = useState<{
+    text: string;
+    kind: "ok" | "info" | "error";
+  } | null>(null);
   const mailError = (text: string) => setMailNotice({ text, kind: "error" });
 
   // TEMPORARY: inspector for what the mail sync actually saw. A sync only
   // reports counts, so "物件情報は見つかりませんでした" cannot be told apart from a
   const inspectRecentMail = useAction(api.mailIngest.inspectRecentMail);
   const getAttachmentData = useAction(api.mailIngest.getAttachmentData);
-  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(
+    null,
+  );
   const [inspecting, setInspecting] = useState(false);
   const [inspected, setInspected] = useState<InspectedMail[] | null>(null);
   const [openMailId, setOpenMailId] = useState<string | null>(null);
@@ -1025,7 +1117,9 @@ export default function OrdersPage() {
         for (let i = 0; i < byteCharacters.length; i++) {
           byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-        const blob = new Blob([byteNumbers], { type: res.mimeType || "application/pdf" });
+        const blob = new Blob([byteNumbers], {
+          type: res.mimeType || "application/pdf",
+        });
         const blobUrl = URL.createObjectURL(blob);
         if (newWindow && !newWindow.closed) {
           newWindow.location.href = blobUrl;
@@ -1077,7 +1171,11 @@ export default function OrdersPage() {
   const handleSaveMailRules = async () => {
     setSavingMailRules(true);
     try {
-      const lines = (v: string) => v.split("\n").map((x) => x.trim()).filter(Boolean);
+      const lines = (v: string) =>
+        v
+          .split("\n")
+          .map((x) => x.trim())
+          .filter(Boolean);
       await saveIngestSettings({
         requiredKeywords: lines(mailRules.requiredKeywords),
         blockedKeywords: lines(mailRules.blockedKeywords),
@@ -1105,7 +1203,11 @@ export default function OrdersPage() {
         provider,
         redirectTo: window.location.href,
       });
-      const popup = window.open(url, "zephind-mail-oauth", "width=520,height=680");
+      const popup = window.open(
+        url,
+        "zephind-mail-oauth",
+        "width=520,height=680",
+      );
       if (!popup) {
         // Whole tab navigates to Google; leave the spinner on until it does.
         window.location.assign(url);
@@ -1130,10 +1232,14 @@ export default function OrdersPage() {
   // The OAuth popup posts back here on completion. Accounts are a REST query now,
   // so they must be refetched explicitly or the new account (and the sync button) stays hidden.
   useEffect(() => {
-    const fallback = (ok: boolean) => (ok ? "メールアカウントを接続しました。" : "接続に失敗しました。");
+    const fallback = (ok: boolean) =>
+      ok ? "メールアカウントを接続しました。" : "接続に失敗しました。";
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "zephind-oauth") {
-        setMailNotice({ text: e.data.message || fallback(e.data.ok), kind: e.data.ok ? "ok" : "error" });
+        setMailNotice({
+          text: e.data.message || fallback(e.data.ok),
+          kind: e.data.ok ? "ok" : "error",
+        });
         setConnectingMailProvider(null);
         void queryClient.invalidateQueries({ queryKey: ["mail.accounts"] });
       }
@@ -1144,11 +1250,20 @@ export default function OrdersPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.has("mailOAuth") && !window.opener) {
       const ok = params.get("mailOAuth") === "ok";
-      setMailNotice({ text: params.get("mailOAuthMsg") || fallback(ok), kind: ok ? "ok" : "error" });
+      setMailNotice({
+        text: params.get("mailOAuthMsg") || fallback(ok),
+        kind: ok ? "ok" : "error",
+      });
       params.delete("mailOAuth");
       params.delete("mailOAuthMsg");
       const query = params.toString();
-      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname +
+          (query ? `?${query}` : "") +
+          window.location.hash,
+      );
     }
     return () => window.removeEventListener("message", onMessage);
   }, [queryClient]);
@@ -1185,23 +1300,40 @@ export default function OrdersPage() {
       const totals = new Map<string, any>();
       let offset = 0;
       for (;;) {
-        const batch = await syncMailNow({ fullSync: true, daysBack: 90, offset });
+        const batch = await syncMailNow({
+          fullSync: true,
+          daysBack: 90,
+          offset,
+        });
         for (const r of batch.results) {
           const t = totals.get(r.provider);
-          totals.set(r.provider, t ? {
-            ...r,
-            error: r.error ?? t.error,
-            synced: (t.synced ?? 0) + (r.synced ?? 0),
-            listingsFound: (t.listingsFound ?? 0) + (r.listingsFound ?? 0),
-            filteredOut: (t.filteredOut ?? 0) + (r.filteredOut ?? 0),
-            alreadyProcessed: (t.alreadyProcessed ?? 0) + (r.alreadyProcessed ?? 0),
-            messageErrors: [...(t.messageErrors ?? []), ...(r.messageErrors ?? [])],
-          } : r);
+          totals.set(
+            r.provider,
+            t
+              ? {
+                  ...r,
+                  error: r.error ?? t.error,
+                  synced: (t.synced ?? 0) + (r.synced ?? 0),
+                  listingsFound:
+                    (t.listingsFound ?? 0) + (r.listingsFound ?? 0),
+                  filteredOut: (t.filteredOut ?? 0) + (r.filteredOut ?? 0),
+                  alreadyProcessed:
+                    (t.alreadyProcessed ?? 0) + (r.alreadyProcessed ?? 0),
+                  messageErrors: [
+                    ...(t.messageErrors ?? []),
+                    ...(r.messageErrors ?? []),
+                  ],
+                }
+              : r,
+          );
         }
         if (batch.results.every((r: any) => r.done || r.error)) break;
         offset = batch.nextOffset;
         const total = Math.max(...batch.results.map((r: any) => r.total ?? 0));
-        setMailNotice({ text: `同期中… ${Math.min(offset, total)} / ${total}件`, kind: "info" });
+        setMailNotice({
+          text: `同期中… ${Math.min(offset, total)} / ${total}件`,
+          kind: "info",
+        });
       }
       const results = [...totals.values()];
       // "0 listings found" and "every message failed extraction" (e.g. Rax AI
@@ -1223,7 +1355,9 @@ export default function OrdersPage() {
           parts.push(`${r.alreadyProcessed}件は処理済み`);
         }
         if ((r.messageErrors?.length ?? 0) > 0) {
-          parts.push(`${r.messageErrors.length}件でエラー: ${r.messageErrors[0]}`);
+          parts.push(
+            `${r.messageErrors.length}件でエラー: ${r.messageErrors[0]}`,
+          );
         }
         if (
           (r.synced ?? 0) > 0 &&
@@ -1235,7 +1369,9 @@ export default function OrdersPage() {
         }
         return parts.join(" / ");
       });
-      const failed = results.some((r) => r.error || (r.messageErrors?.length ?? 0) > 0);
+      const failed = results.some(
+        (r) => r.error || (r.messageErrors?.length ?? 0) > 0,
+      );
       setMailNotice({ text: lines.join("\n"), kind: failed ? "error" : "ok" });
     } catch (err) {
       mailError(
@@ -1379,7 +1515,9 @@ export default function OrdersPage() {
   const [viewMode, setViewMode] = useState<"list" | "map" | "split">("list");
   // A left-over map/split selection from the dashboard must not leak into the
   // order page, where there is no map to show.
-  const effectiveView: "list" | "map" | "split" = isDetailView ? "list" : viewMode;
+  const effectiveView: "list" | "map" | "split" = isDetailView
+    ? "list"
+    : viewMode;
 
   // Map listings formatted for TokyoPropertyMap
   const mapListings: MapListingItem[] = useMemo(() => {
@@ -1416,7 +1554,8 @@ export default function OrdersPage() {
   // Open the order that holds this listing, with the listing expanded.
   const handleScrollToListing = (listing: MapListingItem) => {
     const listingId = listing._id || listing.id;
-    if (listingId) navigate(`/orders?focusListing=${encodeURIComponent(listingId)}`);
+    if (listingId)
+      navigate(`/orders?focusListing=${encodeURIComponent(listingId)}`);
   };
 
   // /orders?focusListing=<id> (from the map page): find the order, go to its
@@ -1436,9 +1575,12 @@ export default function OrdersPage() {
     if (!routeOrderId) {
       const orderId = focusMatches[0]?.orderId;
       if (!orderId) return clearParam(); // not matched to any of this user's orders
-      navigate(`/orders/${orderId}?focusListing=${encodeURIComponent(focusParam)}`, {
-        replace: true,
-      });
+      navigate(
+        `/orders/${orderId}?focusListing=${encodeURIComponent(focusParam)}`,
+        {
+          replace: true,
+        },
+      );
       return;
     }
     const target = matches?.find((m) => m.listingId === focusParam);
@@ -1455,9 +1597,19 @@ export default function OrdersPage() {
         if (fp) setCurrentPage((prev) => ({ ...prev, [fp.orderId]: fp.page }));
         setFocusListingId(null);
         el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("ring-4", "ring-emerald-500", "scale-[1.01]", "shadow-lg");
+        el.classList.add(
+          "ring-4",
+          "ring-emerald-500",
+          "scale-[1.01]",
+          "shadow-lg",
+        );
         setTimeout(() => {
-          el.classList.remove("ring-4", "ring-emerald-500", "scale-[1.01]", "shadow-lg");
+          el.classList.remove(
+            "ring-4",
+            "ring-emerald-500",
+            "scale-[1.01]",
+            "shadow-lg",
+          );
         }, 2500);
       }, 400);
     }
@@ -1483,11 +1635,12 @@ export default function OrdersPage() {
   const [lineProposalListings, setLineProposalListings] = useState<
     ComparisonListing[] | null
   >(null);
-  const [lineProposalOrder, setLineProposalOrder] = useState<
-    Doc<"orders"> | null
-  >(null);
-  const [hazardModalListing, setHazardModalListing] = useState<any | null>(null);
-  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+  const [lineProposalOrder, setLineProposalOrder] =
+    useState<Doc<"orders"> | null>(null);
+  const [hazardModalListing, setHazardModalListing] = useState<any | null>(
+    null,
+  );
+  // const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, string>>({});
   const [scoreDetails, setScoreDetails] = useState<
@@ -1539,7 +1692,9 @@ export default function OrdersPage() {
   const [sortKey, setSortKey] = useState<Record<string, SortKey>>({});
   // Row order per order, kept until the sort, filter or match set changes. Without it
   // a re-evaluation changes a listing's score and the list re-sorts under the user.
-  const frozenOrder = useRef<Record<string, { sig: string; ids: string[] }>>({});
+  const frozenOrder = useRef<Record<string, { sig: string; ids: string[] }>>(
+    {},
+  );
   /** Per-order quick filter; absent means すべて. */
   const [listFilter, setListFilter] = useState<Record<string, string>>({});
   const [, setEvalProgress] = useState<
@@ -1743,44 +1898,47 @@ export default function OrdersPage() {
         const items = chunk.flatMap((m) => {
           const listing = listings?.find((l) => l._id === m.listingId);
           if (!listing) return [];
-          return [{
-            matchId: m._id,
-            address: listing.address,
-            ward: listing.ward,
-            price: listing.price,
-            landSize: listing.landSize,
-            area: listing.area,
-            buildingCoverageRatio: listing.buildingCoverageRatio,
-            floorAreaRatio: listing.floorAreaRatio,
-            walkMinutes: listing.walkMinutes,
-            station: listing.station,
-            buildYear: listing.buildYear,
-            roadWidth: listing.roadWidth,
-            frontage: listing.frontage,
-            rooms: listing.rooms,
-            layout: listing.layout,
-            propertyType: listing.propertyType,
-            description: listing.description,
-            yield: listing.yield || listing.grossYield || listing.netYield,
-            structure: listing.structure || listing.buildingStructure,
-            floor: listing.floor,
-            totalUnits: listing.totalUnits,
-            elevators: listing.elevators,
-            previousPrice: listing.previousPrice,
-            initialPrice: listing.initialPrice,
-            priceDropPct: listing.priceDropPct,
-            priceDropped: listing.priceDropped,
-            dealType: listing.dealType,
-            rent: listing.rent,
-            managementFee: listing.managementFee,
-            deposit: listing.deposit,
-            keyMoney: listing.keyMoney,
-            petsAllowed: listing.petsAllowed,
-            orderCriteria,
-          }];
+          return [
+            {
+              matchId: m._id,
+              address: listing.address,
+              ward: listing.ward,
+              price: listing.price,
+              landSize: listing.landSize,
+              area: listing.area,
+              buildingCoverageRatio: listing.buildingCoverageRatio,
+              floorAreaRatio: listing.floorAreaRatio,
+              walkMinutes: listing.walkMinutes,
+              station: listing.station,
+              buildYear: listing.buildYear,
+              roadWidth: listing.roadWidth,
+              frontage: listing.frontage,
+              rooms: listing.rooms,
+              layout: listing.layout,
+              propertyType: listing.propertyType,
+              description: listing.description,
+              yield: listing.yield || listing.grossYield || listing.netYield,
+              structure: listing.structure || listing.buildingStructure,
+              floor: listing.floor,
+              totalUnits: listing.totalUnits,
+              elevators: listing.elevators,
+              previousPrice: listing.previousPrice,
+              initialPrice: listing.initialPrice,
+              priceDropPct: listing.priceDropPct,
+              priceDropped: listing.priceDropped,
+              dealType: listing.dealType,
+              rent: listing.rent,
+              managementFee: listing.managementFee,
+              deposit: listing.deposit,
+              keyMoney: listing.keyMoney,
+              petsAllowed: listing.petsAllowed,
+              orderCriteria,
+            },
+          ];
         });
         try {
-          const { results = [], error } = (await evaluateBatch({ items })) ?? {};
+          const { results = [], error } =
+            (await evaluateBatch({ items })) ?? {};
           if (error) console.error("Batch evaluation error", error);
           for (const result of results) {
             if (!result?.matchId) continue;
@@ -1798,7 +1956,11 @@ export default function OrdersPage() {
             }
           }
         } catch (err) {
-          console.error("Evaluation error for batch", items.map((x) => x.matchId), err);
+          console.error(
+            "Evaluation error for batch",
+            items.map((x) => x.matchId),
+            err,
+          );
         }
 
         setEvalProgress((prev) => ({
@@ -1944,8 +2106,13 @@ export default function OrdersPage() {
         if (status.running) {
           const rawLast = (status.lines ?? []).slice(-1)[0];
           if (rawLast) {
-            const clean = rawLast.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "").trim();
-            const display = clean.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s*/, "");
+            const clean = rawLast
+              .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "")
+              .trim();
+            const display = clean.replace(
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s*/,
+              "",
+            );
             setScrapeNotice((prev) => ({
               ...prev,
               [orderId]: {
@@ -2209,7 +2376,9 @@ export default function OrdersPage() {
           // tab starts tracking a different one), sending the real kill would
           // cancel someone else's still-genuinely-running scrape instead.
           // Check ownership first.
-          const statusRes = await fetch(`${LOCAL_SCRAPER_URL}/scrape-run/status`);
+          const statusRes = await fetch(
+            `${LOCAL_SCRAPER_URL}/scrape-run/status`,
+          );
           const status = (await statusRes.json().catch(() => ({}))) as {
             running?: boolean;
             orderId?: string | null;
@@ -2358,7 +2527,9 @@ export default function OrdersPage() {
   const [minElevators, setMinElevators] = useState("");
   const [structureTypes, setStructureTypes] = useState<string[]>([]);
   const [layoutTypes, setLayoutTypes] = useState<string[]>([]);
-  const [selectedSources, setSelectedSources] = useState<string[]>(getInitialSelectedSources);
+  const [selectedSources, setSelectedSources] = useState<string[]>(
+    getInitialSelectedSources,
+  );
 
   const toggleSource = (source: string) => {
     setSelectedSources((prev) => {
@@ -2377,7 +2548,10 @@ export default function OrdersPage() {
   const handleSelectAllSources = () => {
     setSelectedSources([...ALL_SCRAPE_SOURCES]);
     try {
-      localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify(ALL_SCRAPE_SOURCES));
+      localStorage.setItem(
+        SCRAPE_SOURCES_STORAGE_KEY,
+        JSON.stringify(ALL_SCRAPE_SOURCES),
+      );
     } catch {
       /* ignore */
     }
@@ -2573,7 +2747,10 @@ export default function OrdersPage() {
       return;
     }
     try {
-      localStorage.setItem(SCRAPE_SOURCES_STORAGE_KEY, JSON.stringify(selectedSources));
+      localStorage.setItem(
+        SCRAPE_SOURCES_STORAGE_KEY,
+        JSON.stringify(selectedSources),
+      );
     } catch {
       /* ignore */
     }
@@ -2594,10 +2771,8 @@ export default function OrdersPage() {
         priceMax: dealType === "buy" && priceMax ? Number(priceMax) : undefined,
         rentMin: dealType === "rent" && rentMin ? Number(rentMin) : undefined,
         rentMax: dealType === "rent" && rentMax ? Number(rentMax) : undefined,
-        maxDeposit:
-          dealType === "rent" ? nonNegNum(maxDeposit) : undefined,
-        maxKeyMoney:
-          dealType === "rent" ? nonNegNum(maxKeyMoney) : undefined,
+        maxDeposit: dealType === "rent" ? nonNegNum(maxDeposit) : undefined,
+        maxKeyMoney: dealType === "rent" ? nonNegNum(maxKeyMoney) : undefined,
         // false rather than undefined when not applicable — same reason as
         // ownerChange below: an edit that flips away from 借りる has to clear
         // a previously-ticked ペット可のみ, and patch ignores undefined values.
@@ -2644,7 +2819,11 @@ export default function OrdersPage() {
           status: "pending",
         })) as Id<"orders">;
         // Start the scrape right away; dispatch reads only _id and wards from the order.
-        void handleScrapeOrder({ ...orderParams, _id: newId, status: "pending" } as unknown as Doc<"orders">);
+        void handleScrapeOrder({
+          ...orderParams,
+          _id: newId,
+          status: "pending",
+        } as unknown as Doc<"orders">);
       }
 
       setDone(true);
@@ -2685,7 +2864,11 @@ export default function OrdersPage() {
   // Email listings are never re-scraped, so the rule does not apply to them.
   const isStale = (l: Doc<"listings"> | undefined) => {
     const seen = (l as any)?.lastSeenAt;
-    return l?.source !== "email" && seen != null && Date.now() - seen > 14 * 24 * 60 * 60 * 1000;
+    return (
+      l?.source !== "email" &&
+      seen != null &&
+      Date.now() - seen > 14 * 24 * 60 * 60 * 1000
+    );
   };
   /** The matches the list actually shows: no stale listings, one row per same property. Counts use this too. */
   const shownMatches = (list: Doc<"matching">[]) => {
@@ -2719,12 +2902,16 @@ export default function OrdersPage() {
   const newMatches24hCount = sumSummary("new24h");
   const highScoreMatchesCount = sumSummary("high");
   const ordersWithNewMatchesCount =
-    orders?.filter((o) => (summaryByOrder.get(o._id)?.new24h ?? 0) > 0).length ?? 0;
+    orders?.filter((o) => (summaryByOrder.get(o._id)?.new24h ?? 0) > 0)
+      .length ?? 0;
   const ordersWithMatchesCount =
-    orders?.filter((o) => (summaryByOrder.get(o._id)?.total ?? 0) > 0).length ?? 0;
+    orders?.filter((o) => (summaryByOrder.get(o._id)?.total ?? 0) > 0).length ??
+    0;
   const pendingOrdersCount =
     orders?.filter(
-      (o) => o.status !== "completed" && (summaryByOrder.get(o._id)?.total ?? 0) === 0,
+      (o) =>
+        o.status !== "completed" &&
+        (summaryByOrder.get(o._id)?.total ?? 0) === 0,
     ).length ?? 0;
 
   // Filtered and sorted orders
@@ -2739,7 +2926,9 @@ export default function OrdersPage() {
         if (orderSearchQuery.trim()) {
           const q = orderSearchQuery.toLowerCase().trim();
           // Same fallback label the card shows, so unnamed orders are searchable.
-          const orderName = (order.name || `物件 #${order._id.slice(0, 6)}`).toLowerCase();
+          const orderName = (
+            order.name || `物件 #${order._id.slice(0, 6)}`
+          ).toLowerCase();
           const customer = customers?.find((c) => c._id === order.customerId);
           const customerName = (customer?.name || "").toLowerCase();
           const wardStr = [order.ward, ...(order.wards || [])]
@@ -2815,19 +3004,32 @@ export default function OrdersPage() {
   }, [routeOrderId]);
 
   return (
-    <div key={isDetailView ? `detail-${routeOrderId}` : "dashboard-view"} className="page-shell space-y-5 animate-in fade-in duration-200">
+    <div
+      key={isDetailView ? `detail-${routeOrderId}` : "dashboard-view"}
+      className={`page-shell animate-in fade-in duration-200 ${
+        isDetailView ? "space-y-2" : "space-y-5"
+      }`}
+    >
       {/* ── Page Header ── */}
       {isDetailView ? (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-[22px] font-bold leading-tight text-[var(--text-primary)]">
-            {detailOrder?.name ||
-              (orders === undefined ? "読み込み中..." : "物件")}
-          </h1>
-          {detailOrder && (orderMatches(detailOrder._id)?.length ?? 0) > 0 && (
-            <span className="text-[14.5px] font-bold text-[var(--brand)]">
-              マッチ {(summaryByOrder.get(detailOrder._id)?.total ?? orderMatches(detailOrder._id)?.length ?? 0).toLocaleString()}件
-            </span>
-          )}
+        <div className="space-y-2 px-5 md:px-6">
+          <div>
+            <button
+              type="button"
+              onClick={() => navigate("/orders")}
+              className="group inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-semibold text-slate-800 transition-all duration-150 hover:bg-[#e4e2dc] hover:shadow-2xs active:scale-[0.98]"
+              title="一覧に戻る"
+            >
+              <ArrowLeft className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5" />
+              一覧に戻る
+            </button>
+          </div>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="text-[26px] md:text-[28px] font-bold leading-tight text-[var(--text-primary)] tracking-[-0.02em]">
+              {detailOrder?.name ||
+                (orders === undefined ? "読み込み中..." : "物件")}
+            </h1>
+          </div>
         </div>
       ) : (
         <div className="page-header">
@@ -2839,21 +3041,17 @@ export default function OrdersPage() {
           </div>
           <div className="flex items-center gap-2.5">
             <Button
-              onClick={() => setIsAlertModalOpen(true)}
-              variant="outline"
-              className="gap-2 border-indigo-200 bg-indigo-50/70 text-indigo-900 hover:bg-indigo-100 shadow-2xs font-bold text-xs h-9 px-3.5"
-            >
-              <Bell className="h-3.5 w-3.5 text-indigo-600" />
-              <span>お宝物件 即時通知</span>
-            </Button>
-            <Button
               onClick={() => {
                 if (showForm) resetForm();
                 setShowForm(!showForm);
               }}
               variant={showForm ? "outline" : "default"}
             >
-              {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {showForm ? (
+                <X className="h-4 w-4" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
               {showForm ? "キャンセル" : "新規作成"}
             </Button>
           </div>
@@ -2865,156 +3063,195 @@ export default function OrdersPage() {
           never sends anything (see ProposalModal for that, unrelated).
           Dashboard-only: on an order page it is background plumbing. ── */}
       {!isDetailView && (
-      <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-        {/* Header: what this is, in one plain sentence; actions on the right. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Mail className="h-5 w-5 shrink-0 text-[var(--brand)]" />
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">メール連携</h2>
-              <p className="text-[13px] text-[var(--text-muted)]">
-                仲介会社から届く物件紹介メールを、自動で物件一覧に取り込みます。
-              </p>
+        <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+          {/* Header: what this is, in one plain sentence; actions on the right. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Mail className="h-5 w-5 shrink-0 text-[var(--brand)]" />
+              <div className="min-w-0">
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  メール連携
+                </h2>
+                <p className="text-[13px] text-[var(--text-muted)]">
+                  仲介会社から届く物件紹介メールを、自動で物件一覧に取り込みます。
+                </p>
+              </div>
             </div>
+            {(mailAccounts ?? []).some((a) => !a.needsReconnect) && (
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={syncingMail}
+                  onClick={() => void handleSyncMailNow()}
+                >
+                  {syncingMail ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  今すぐ取り込む
+                </Button>
+                {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={inspecting}
+                  onClick={() => void handleInspectMail()}
+                >
+                  {inspecting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5" />
+                  )}
+                  同期メールを確認
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowMailRules(true)}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  取り込み設定
+                </Button>
+              </div>
+            )}
           </div>
-          {(mailAccounts ?? []).some((a) => !a.needsReconnect) && (
-            <div className="flex shrink-0 items-center gap-2">
-              <Button size="sm" variant="outline" disabled={syncingMail} onClick={() => void handleSyncMailNow()}>
-                {syncingMail ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                今すぐ取り込む
-              </Button>
-              {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
-              <Button size="sm" variant="ghost" disabled={inspecting} onClick={() => void handleInspectMail()}>
-                {inspecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
-                同期メールを確認
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowMailRules(true)}>
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                取り込み設定
-              </Button>
+
+          {/* One line per connected mailbox, saying in words whether it works. */}
+          {(mailAccounts ?? []).map((account) => {
+            const label = account.provider === "gmail" ? "Gmail" : "Outlook";
+            return (
+              <div
+                key={account._id}
+                className={`flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2.5 ${
+                  account.needsReconnect
+                    ? "border-[var(--danger)]/20 bg-[var(--danger-soft)]"
+                    : "border-[var(--border-subtle)]"
+                }`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  {account.needsReconnect ? (
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--danger)]" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  )}
+                  <p className="min-w-0 text-[13.5px] text-[var(--text-primary)]">
+                    <span className="font-semibold">{account.email}</span>
+                    <span className="text-[var(--text-muted)]">
+                      {account.needsReconnect
+                        ? ` の接続が切れています。もう一度つなぐと、メールの取り込みが再開します。`
+                        : ` とつながっています。`}
+                    </span>
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  {account.needsReconnect && (
+                    <Button
+                      size="sm"
+                      disabled={connectingMailProvider === account.provider}
+                      onClick={() => void handleConnectMail(account.provider)}
+                    >
+                      {connectingMailProvider === account.provider && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      )}
+                      {label}にもう一度つなぐ
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `${account.email} との接続をやめますか？\nこのメールからの物件の取り込みが止まります。あとでもう一度つなぐこともできます。`,
+                        )
+                      ) {
+                        void disconnectMailAccount({ id: account._id });
+                      }
+                    }}
+                    className="cursor-pointer text-[13px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--danger)]"
+                  >
+                    接続をやめる
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Mailboxes not connected yet. */}
+          {(mailProviders ?? []).some(
+            (p) =>
+              p.available &&
+              !(mailAccounts ?? []).some((a) => a.provider === p.provider),
+          ) && (
+            <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] px-4 py-2.5">
+              <span className="text-[13px] text-[var(--text-muted)]">
+                ほかのメールもつなぐ:
+              </span>
+              {(mailProviders ?? [])
+                .filter((p) => p.available)
+                .filter(
+                  (p) =>
+                    !(mailAccounts ?? []).some(
+                      (a) => a.provider === p.provider,
+                    ),
+                )
+                .map((p) => (
+                  <Button
+                    key={p.provider}
+                    size="sm"
+                    variant="outline"
+                    disabled={connectingMailProvider === p.provider}
+                    onClick={() => void handleConnectMail(p.provider)}
+                  >
+                    {connectingMailProvider === p.provider ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    {connectingMailProvider === p.provider
+                      ? `${p.label}に接続中…`
+                      : `${p.label}をつなぐ`}
+                  </Button>
+                ))}
+            </div>
+          )}
+
+          {/* Last sync / auth problem */}
+          {mailNotice && (
+            <div
+              className={`flex items-start gap-2 border-t px-4 py-2.5 text-[13.5px] leading-relaxed ${
+                mailNotice.kind === "error"
+                  ? "border-[var(--border-subtle)] bg-[var(--danger-soft)] text-[#7d2a24]"
+                  : mailNotice.kind === "ok"
+                    ? "border-[var(--border-subtle)] bg-emerald-50 text-emerald-900"
+                    : "border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] text-[var(--text-secondary)]"
+              }`}
+              role={mailNotice.kind === "error" ? "alert" : "status"}
+            >
+              {mailNotice.kind === "error" ? (
+                <AlertTriangle className="mt-[2px] h-3.5 w-3.5 shrink-0" />
+              ) : mailNotice.kind === "ok" ? (
+                <CheckCircle2 className="mt-[2px] h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Loader2 className="mt-[2px] h-3.5 w-3.5 shrink-0 animate-spin" />
+              )}
+              <p className="min-w-0 flex-1 whitespace-pre-line">
+                {mailNotice.text}
+              </p>
+              {mailNotice.kind !== "info" && (
+                <button
+                  type="button"
+                  onClick={() => setMailNotice(null)}
+                  className="shrink-0 cursor-pointer opacity-60 hover:opacity-100"
+                  aria-label="閉じる"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           )}
         </div>
-
-        {/* One line per connected mailbox, saying in words whether it works. */}
-        {(mailAccounts ?? []).map((account) => {
-          const label = account.provider === "gmail" ? "Gmail" : "Outlook";
-          return (
-            <div
-              key={account._id}
-              className={`flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2.5 ${
-                account.needsReconnect
-                  ? "border-[var(--danger)]/20 bg-[var(--danger-soft)]"
-                  : "border-[var(--border-subtle)]"
-              }`}
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                {account.needsReconnect ? (
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--danger)]" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                )}
-                <p className="min-w-0 text-[13.5px] text-[var(--text-primary)]">
-                  <span className="font-semibold">{account.email}</span>
-                  <span className="text-[var(--text-muted)]">
-                    {account.needsReconnect
-                      ? ` の接続が切れています。もう一度つなぐと、メールの取り込みが再開します。`
-                      : ` とつながっています。`}
-                  </span>
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                {account.needsReconnect && (
-                  <Button
-                    size="sm"
-                    disabled={connectingMailProvider === account.provider}
-                    onClick={() => void handleConnectMail(account.provider)}
-                  >
-                    {connectingMailProvider === account.provider && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    {label}にもう一度つなぐ
-                  </Button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `${account.email} との接続をやめますか？\nこのメールからの物件の取り込みが止まります。あとでもう一度つなぐこともできます。`,
-                      )
-                    ) {
-                      void disconnectMailAccount({ id: account._id });
-                    }
-                  }}
-                  className="cursor-pointer text-[13px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--danger)]"
-                >
-                  接続をやめる
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Mailboxes not connected yet. */}
-        {(mailProviders ?? []).some(
-          (p) => p.available && !(mailAccounts ?? []).some((a) => a.provider === p.provider),
-        ) && (
-          <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] px-4 py-2.5">
-            <span className="text-[13px] text-[var(--text-muted)]">ほかのメールもつなぐ:</span>
-            {(mailProviders ?? [])
-              .filter((p) => p.available)
-              .filter((p) => !(mailAccounts ?? []).some((a) => a.provider === p.provider))
-              .map((p) => (
-                <Button
-                  key={p.provider}
-                  size="sm"
-                  variant="outline"
-                  disabled={connectingMailProvider === p.provider}
-                  onClick={() => void handleConnectMail(p.provider)}
-                >
-                  {connectingMailProvider === p.provider ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Plus className="h-3.5 w-3.5" />
-                  )}
-                  {connectingMailProvider === p.provider ? `${p.label}に接続中…` : `${p.label}をつなぐ`}
-                </Button>
-              ))}
-          </div>
-        )}
-
-        {/* Last sync / auth problem */}
-        {mailNotice && (
-          <div
-            className={`flex items-start gap-2 border-t px-4 py-2.5 text-[13.5px] leading-relaxed ${
-              mailNotice.kind === "error"
-                ? "border-[var(--border-subtle)] bg-[var(--danger-soft)] text-[#7d2a24]"
-                : mailNotice.kind === "ok"
-                  ? "border-[var(--border-subtle)] bg-emerald-50 text-emerald-900"
-                  : "border-[var(--border-subtle)] bg-[var(--bg-surface-hover)] text-[var(--text-secondary)]"
-            }`}
-            role={mailNotice.kind === "error" ? "alert" : "status"}
-          >
-            {mailNotice.kind === "error" ? (
-              <AlertTriangle className="mt-[2px] h-3.5 w-3.5 shrink-0" />
-            ) : mailNotice.kind === "ok" ? (
-              <CheckCircle2 className="mt-[2px] h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <Loader2 className="mt-[2px] h-3.5 w-3.5 shrink-0 animate-spin" />
-            )}
-            <p className="min-w-0 flex-1 whitespace-pre-line">{mailNotice.text}</p>
-            {mailNotice.kind !== "info" && (
-              <button
-                type="button"
-                onClick={() => setMailNotice(null)}
-                className="shrink-0 cursor-pointer opacity-60 hover:opacity-100"
-                aria-label="閉じる"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
       )}
 
       {/* Order Creation / Editing Form */}
@@ -3053,12 +3290,10 @@ export default function OrdersPage() {
                   取引種別
                 </Label>
                 <div className="flex gap-2.5">
-                  {(
-                    [
-                      { value: "buy" as const, label: "買う" },
-                      { value: "rent" as const, label: "借りる" },
-                    ]
-                  ).map((opt) => (
+                  {[
+                    { value: "buy" as const, label: "買う" },
+                    { value: "rent" as const, label: "借りる" },
+                  ].map((opt) => (
                     <button
                       type="button"
                       key={opt.value}
@@ -3099,7 +3334,10 @@ export default function OrdersPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
-                    <Label htmlFor="order-name" className="text-sm font-bold text-slate-700">
+                    <Label
+                      htmlFor="order-name"
+                      className="text-sm font-bold text-slate-700"
+                    >
                       案件名 <span className="text-[var(--danger)]">*</span>
                     </Label>
                     <Input
@@ -3112,7 +3350,9 @@ export default function OrdersPage() {
                       }}
                       aria-required="true"
                       aria-invalid={orderNameError}
-                      aria-describedby={orderNameError ? "order-name-error" : undefined}
+                      aria-describedby={
+                        orderNameError ? "order-name-error" : undefined
+                      }
                       className={`h-11 text-base rounded-xl ${
                         orderNameError
                           ? "border-[var(--danger)] bg-[var(--danger-soft)] focus:border-[var(--danger)]"
@@ -3120,7 +3360,10 @@ export default function OrdersPage() {
                       }`}
                     />
                     {orderNameError && (
-                      <p id="order-name-error" className="text-[13px] font-medium text-[var(--danger)]">
+                      <p
+                        id="order-name-error"
+                        className="text-[13px] font-medium text-[var(--danger)]"
+                      >
                         案件名を入力してください。
                       </p>
                     )}
@@ -3543,7 +3786,8 @@ export default function OrdersPage() {
                         スクレイピング対象Webサイト
                       </Label>
                       <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                        {selectedSources.length} / {ALL_SCRAPE_SOURCES.length} 選択中
+                        {selectedSources.length} / {ALL_SCRAPE_SOURCES.length}{" "}
+                        選択中
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -3586,7 +3830,9 @@ export default function OrdersPage() {
                           onChange={() => toggleSource(src)}
                           className="w-4 h-4 accent-emerald-700 cursor-pointer rounded shrink-0"
                         />
-                        <span className="truncate">{SOURCE_LABELS[src] || src}</span>
+                        <span className="truncate">
+                          {SOURCE_LABELS[src] || src}
+                        </span>
                       </label>
                     );
                   })}
@@ -3594,7 +3840,8 @@ export default function OrdersPage() {
 
                 {selectedSources.length === 0 && (
                   <p className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5">
-                    ※ スクレイピング対象サイトが選択されていません。少なくとも1つのサイトを選択してください。
+                    ※
+                    スクレイピング対象サイトが選択されていません。少なくとも1つのサイトを選択してください。
                   </p>
                 )}
               </div>
@@ -3642,205 +3889,214 @@ export default function OrdersPage() {
       {/* ── Summary strip. Read-only: the tab row below is the ONE place filters
           are set, so these numbers cannot quietly disagree with the list. ── */}
       {!isDetailView && (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {/* New Matches (Today / 24h) */}
-        <div className="kpi-card">
-          <div className="flex h-full flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[13.5px] font-bold uppercase tracking-wider text-emerald-800">
-                  本日の新着
-                </span>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {/* New Matches (Today / 24h) */}
+          <div className="kpi-card">
+            <div className="flex h-full flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[13.5px] font-bold uppercase tracking-wider text-emerald-800">
+                    本日の新着
+                  </span>
+                </div>
+                <div className="text-2xl font-black text-emerald-700 font-data">
+                  +{newMatches24hCount}
+                  <span className="text-xs font-bold text-emerald-600 ml-1">
+                    件
+                  </span>
+                </div>
               </div>
-              <div className="text-2xl font-black text-emerald-700 font-data">
-                +{newMatches24hCount}
-                <span className="text-xs font-bold text-emerald-600 ml-1">件</span>
+              <div className="text-[13.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
+                {ordersWithNewMatchesCount}件の物件で新着あり
               </div>
-            </div>
-            <div className="text-[13.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
-              {ordersWithNewMatchesCount}件の物件で新着あり
             </div>
           </div>
-        </div>
 
-        {/* High Score Matches (80+ S/A rank) */}
-        <div className="kpi-card">
-          <div className="flex h-full flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[13.5px] font-bold uppercase tracking-wider text-amber-800">
-                  高評価物件
-                </span>
+          {/* High Score Matches (80+ S/A rank) */}
+          <div className="kpi-card">
+            <div className="flex h-full flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                  <span className="text-[13.5px] font-bold uppercase tracking-wider text-amber-800">
+                    高評価物件
+                  </span>
+                </div>
+                <div className="text-2xl font-black text-slate-900 font-data">
+                  {highScoreMatchesCount}
+                  <span className="text-xs font-bold text-slate-400 ml-1">
+                    件
+                  </span>
+                </div>
               </div>
-              <div className="text-2xl font-black text-slate-900 font-data">
-                {highScoreMatchesCount}
-                <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+              <div className="text-[13.5px] font-semibold text-amber-700 mt-2 border-t border-amber-50 pt-1.5">
+                スコア80点以上
               </div>
-            </div>
-            <div className="text-[13.5px] font-semibold text-amber-700 mt-2 border-t border-amber-50 pt-1.5">
-              スコア80点以上
             </div>
           </div>
-        </div>
 
-        {/* Total Matched Listings */}
-        <div className="kpi-card">
-          <div className="flex h-full flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
-                <span className="text-[13.5px] font-bold uppercase tracking-wider text-slate-500">
-                  総マッチ物件数
-                </span>
+          {/* Total Matched Listings */}
+          <div className="kpi-card">
+            <div className="flex h-full flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-[var(--text-muted)] mb-1.5">
+                  <span className="text-[13.5px] font-bold uppercase tracking-wider text-slate-500">
+                    総マッチ物件数
+                  </span>
+                </div>
+                <div className="text-2xl font-black text-slate-900 font-data">
+                  {totalMatchesCount.toLocaleString()}
+                  <span className="text-xs font-bold text-slate-400 ml-1">
+                    件
+                  </span>
+                </div>
               </div>
-              <div className="text-2xl font-black text-slate-900 font-data">
-                {totalMatchesCount.toLocaleString()}
-                <span className="text-xs font-bold text-slate-400 ml-1">件</span>
+              <div className="text-[13.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
+                {ordersWithMatchesCount}件の物件にマッチ
               </div>
-            </div>
-            <div className="text-[13.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
-              {ordersWithMatchesCount}件の物件にマッチ
             </div>
           </div>
         </div>
-      </div>
       )}
 
       {/* Orders List Section */}
-      <div className="space-y-4">
+      <div className={isDetailView ? "space-y-1" : "space-y-4"}>
         {/* Search, Filter & Sort Controls */}
         {!isDetailView && (
-        <div className="space-y-3 bg-white p-4 rounded-2xl border border-[var(--border-subtle)] shadow-2xs">
-          {/* Status Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-slate-100">
-            {[
-              { key: "all", label: "すべて", count: totalOrdersCount },
-              ...(ordersWithNewMatchesCount > 0
-                ? [
-                    {
-                      key: "newMatches",
-                      label: "本日の新着あり",
-                      count: ordersWithNewMatchesCount,
-                      highlight: true,
-                    },
-                  ]
-                : []),
-              ...(scrapingOrdersCount > 0
-                ? [
-                    {
-                      key: "scraping",
-                      label: "検索中",
-                      count: scrapingOrdersCount,
-                      highlight: true,
-                    },
-                  ]
-                : []),
-              {
-                key: "hasMatches",
-                label: "マッチあり",
-                count: ordersWithMatchesCount,
-              },
-              { key: "pending", label: "未検索", count: pendingOrdersCount },
-              { key: "completed", label: "完了", count: completedOrdersCount },
-            ].map((tab) => {
-              const isActive = orderStatusFilter === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setOrderStatusFilter(tab.key as any)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-bold transition-all cursor-pointer select-none ${
-                    isActive
-                      ? "bg-emerald-700 text-white shadow-xs"
-                      : tab.highlight
-                        ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200/80"
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  <span
-                    className={`text-[13.5px] px-1.5 py-0.2 rounded-full font-black ${
+          <div className="space-y-3 bg-white p-4 rounded-2xl border border-[var(--border-subtle)] shadow-2xs">
+            {/* Status Tabs */}
+            <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-slate-100">
+              {[
+                { key: "all", label: "すべて", count: totalOrdersCount },
+                ...(ordersWithNewMatchesCount > 0
+                  ? [
+                      {
+                        key: "newMatches",
+                        label: "本日の新着あり",
+                        count: ordersWithNewMatchesCount,
+                        highlight: true,
+                      },
+                    ]
+                  : []),
+                ...(scrapingOrdersCount > 0
+                  ? [
+                      {
+                        key: "scraping",
+                        label: "検索中",
+                        count: scrapingOrdersCount,
+                        highlight: true,
+                      },
+                    ]
+                  : []),
+                {
+                  key: "hasMatches",
+                  label: "マッチあり",
+                  count: ordersWithMatchesCount,
+                },
+                { key: "pending", label: "未検索", count: pendingOrdersCount },
+                {
+                  key: "completed",
+                  label: "完了",
+                  count: completedOrdersCount,
+                },
+              ].map((tab) => {
+                const isActive = orderStatusFilter === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setOrderStatusFilter(tab.key as any)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-bold transition-all cursor-pointer select-none ${
                       isActive
-                        ? "bg-white/20 text-white"
-                        : "bg-white text-slate-700 border border-slate-200"
+                        ? "bg-emerald-700 text-white shadow-xs"
+                        : tab.highlight
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200/80"
                     }`}
                   >
-                    {tab.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            {/* Search Input */}
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={orderSearchQuery}
-                onChange={(e) => setOrderSearchQuery(e.target.value)}
-                placeholder="物件名・顧客名・エリア（区/市/駅）で検索..."
-                className="w-full h-10 pl-9 pr-8 text-[15.5px] font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
-              />
-              {orderSearchQuery && (
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[13.5px] px-1.5 py-0.2 rounded-full font-black ${
+                        isActive
+                          ? "bg-white/20 text-white"
+                          : "bg-white text-slate-700 border border-slate-200"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              {/* Search Input */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  placeholder="物件名・顧客名・エリア（区/市/駅）で検索..."
+                  className="w-full h-10 pl-9 pr-8 text-[15.5px] font-medium rounded-lg border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-emerald-600 focus:outline-none transition-colors"
+                />
+                {orderSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setOrderSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* View Mode Switcher (List | Map | Split) */}
+              <div className="flex items-center rounded-xl bg-slate-100 p-0.5 border border-slate-200 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setOrderSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  onClick={() => setViewMode("list")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === "list"
+                      ? "bg-white text-slate-900 shadow-2xs"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                  title="リスト表示"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>リスト</span>
                 </button>
-              )}
-            </div>
-
-            {/* View Mode Switcher (List | Map | Split) */}
-            <div className="flex items-center rounded-xl bg-slate-100 p-0.5 border border-slate-200 shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  viewMode === "list"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
-                title="リスト表示"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>リスト</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("map")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  viewMode === "map"
-                    ? "bg-white text-emerald-800 shadow-2xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
-                title="地図インテリジェンス全画面表示"
-              >
-                <Compass className="w-3.5 h-3.5 text-emerald-600" />
-                <span>地図分析</span>
-              </button>
-            </div>
-
-            {/* Sort & Bulk Toggle */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
-                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-                <select
-                  value={orderSortKey}
-                  onChange={(e) => setOrderSortKey(e.target.value as any)}
-                  className="h-9 px-2.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 cursor-pointer focus:outline-none hover:border-slate-300"
+                <button
+                  type="button"
+                  onClick={() => setViewMode("map")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === "map"
+                      ? "bg-white text-emerald-800 shadow-2xs"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                  title="地図インテリジェンス全画面表示"
                 >
-                  <option value="newest">作成日が新しい順</option>
-                  <option value="newMatchesDesc">新着マッチが多い順</option>
-                  <option value="matchesDesc">マッチ件数が多い順</option>
-                  <option value="nameAsc">物件名順</option>
-                </select>
+                  <Compass className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>地図分析</span>
+                </button>
+              </div>
+
+              {/* Sort & Bulk Toggle */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
+                  <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                  <select
+                    value={orderSortKey}
+                    onChange={(e) => setOrderSortKey(e.target.value as any)}
+                    className="h-9 px-2.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 cursor-pointer focus:outline-none hover:border-slate-300"
+                  >
+                    <option value="newest">作成日が新しい順</option>
+                    <option value="newMatchesDesc">新着マッチが多い順</option>
+                    <option value="matchesDesc">マッチ件数が多い順</option>
+                    <option value="nameAsc">物件名順</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
-
-        </div>
         )}
 
         {effectiveView === "map" ? (
@@ -3856,1960 +4112,2928 @@ export default function OrdersPage() {
             className={
               effectiveView === "split"
                 ? "grid grid-cols-1 lg:grid-cols-12 gap-5 items-start"
-                : "space-y-4"
+                : isDetailView
+                  ? "space-y-1"
+                  : "space-y-4"
             }
           >
             <div
               className={
                 effectiveView === "split"
                   ? "lg:col-span-6 space-y-4 max-h-[840px] overflow-y-auto pr-1"
-                  : "space-y-4"
+                  : isDetailView
+                    ? "space-y-1"
+                    : "space-y-4"
               }
             >
               {filteredOrders === undefined ? (
-          <div className="space-y-3">
-            {[1, 2].map((n) => (
-              <Card key={n} className="p-6">
                 <div className="space-y-3">
-                  <Skeleton className="h-5 w-1/3" />
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-14 w-full" />
+                  {[1, 2].map((n) => (
+                    <Card key={n} className="p-6">
+                      <div className="space-y-3">
+                        <Skeleton className="h-5 w-1/3" />
+                        <Skeleton className="h-4 w-2/3" />
+                        <Skeleton className="h-14 w-full" />
+                      </div>
+                    </Card>
+                  ))}
                 </div>
-              </Card>
-            ))}
-          </div>
-        ) : filteredOrders.length === 0 ? (
-          <div className="empty-state p-12 text-center bg-white rounded-2xl border border-[var(--border-subtle)] space-y-3">
-            <Search className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto" />
-            <p className="text-sm font-bold text-[var(--text-secondary)]">
-              {isDetailView
-                ? "物件が見つかりませんでした"
-                : orders && orders.length > 0
-                  ? "条件に一致する物件が見つかりませんでした"
-                  : "登録済み物件がありません"}
-            </p>
-            <p className="text-xs text-[var(--text-muted)]">
-              {isDetailView
-                ? "この物件は削除されたか、リンクが正しくありません。"
-                : orders && orders.length > 0
-                  ? "検索キーワードやステータスタブの絞り込みを変更してください。"
-                  : "「新規作成」から希望条件を登録してください。"}
-            </p>
-            {isDetailView ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/orders")}
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                物件検索に戻る
-              </Button>
-            ) : orders && orders.length > 0 ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setOrderSearchQuery("");
-                  setOrderStatusFilter("all");
-                }}
-              >
-                フィルターを解除
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          filteredOrders.map((order) => {
-            const orderMatchList = orderMatches(order._id);
-            const orderCounts = summaryByOrder.get(order._id);
-            // Once every match is loaded, count what the list will show; until then the server total.
-            const matchCount =
-              orderMatchList && listings && orderMatchList.length >= (orderCounts?.total ?? 0)
-                ? shownMatches(orderMatchList).length
-                : (orderCounts?.total ?? orderMatchList?.length ?? 0);
-            const recentMatchesInOrder =
-              orderCounts?.new24h ??
-              (orderMatchList ?? []).filter(
-                (m) =>
-                  m._creationTime &&
-                  Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
-              ).length;
-            const selectedCountForOrder = (orderMatchList ?? []).filter((m) =>
-              selectedForProposal.has(m._id),
-            ).length;
-            // In detail view the listings are the page, so they are always open.
-            const isCardExpanded = isDetailView;
-            const cardCustomer = customers?.find(
-              (c) => c._id === order.customerId,
-            );
-            const isScrapingNow =
-              order.isScraping ||
-              Boolean(order.scrapingStatus?.includes("検索中")) ||
-              isMyRun(order) ||
-              localRunOrderId === order._id;
-            const wardSummary = (
-              order.wards?.length
-                ? order.wards
-                : order.ward
-                  ? [order.ward]
-                  : []
-            ).join("・");
-            const fmtRange = (min?: number, max?: number, unit = "万円") =>
-              min && max
-                ? `${min.toLocaleString()}〜${max.toLocaleString()}${unit}`
-                : min
-                  ? `${min.toLocaleString()}${unit}〜`
-                  : max
-                    ? `〜${max.toLocaleString()}${unit}`
-                    : "指定なし";
-            const priceSummary =
-              order.dealType === "rent"
-                ? `賃料 ${fmtRange(order.rentMin, order.rentMax, "万円/月")}`
-                : `価格 ${fmtRange(order.priceMin, order.priceMax)}`;
+              ) : filteredOrders.length === 0 ? (
+                <div className="empty-state p-12 text-center bg-white rounded-2xl border border-[var(--border-subtle)] space-y-3">
+                  <Search className="w-10 h-10 text-[var(--text-muted)]/40 mx-auto" />
+                  <p className="text-sm font-bold text-[var(--text-secondary)]">
+                    {isDetailView
+                      ? "物件が見つかりませんでした"
+                      : orders && orders.length > 0
+                        ? "条件に一致する物件が見つかりませんでした"
+                        : "登録済み物件がありません"}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {isDetailView
+                      ? "この物件は削除されたか、リンクが正しくありません。"
+                      : orders && orders.length > 0
+                        ? "検索キーワードやステータスタブの絞り込みを変更してください。"
+                        : "「新規作成」から希望条件を登録してください。"}
+                  </p>
+                  {isDetailView ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate("/orders")}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      物件検索に戻る
+                    </Button>
+                  ) : orders && orders.length > 0 ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setOrderSearchQuery("");
+                        setOrderStatusFilter("all");
+                      }}
+                    >
+                      フィルターを解除
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                filteredOrders.map((order) => {
+                  const orderMatchList = orderMatches(order._id);
+                  const orderCounts = summaryByOrder.get(order._id);
+                  // Once every match is loaded, count what the list will show; until then the server total.
+                  const matchCount =
+                    orderMatchList &&
+                    listings &&
+                    orderMatchList.length >= (orderCounts?.total ?? 0)
+                      ? shownMatches(orderMatchList).length
+                      : (orderCounts?.total ?? orderMatchList?.length ?? 0);
+                  const recentMatchesInOrder =
+                    orderCounts?.new24h ??
+                    (orderMatchList ?? []).filter(
+                      (m) =>
+                        m._creationTime &&
+                        Date.now() - m._creationTime <= 24 * 60 * 60 * 1000,
+                    ).length;
+                  const selectedCountForOrder = (orderMatchList ?? []).filter(
+                    (m) => selectedForProposal.has(m._id),
+                  ).length;
+                  // In detail view the listings are the page, so they are always open.
+                  const isCardExpanded = isDetailView;
+                  const cardCustomer = customers?.find(
+                    (c) => c._id === order.customerId,
+                  );
+                  const isScrapingNow =
+                    order.isScraping ||
+                    Boolean(order.scrapingStatus?.includes("検索中")) ||
+                    isMyRun(order) ||
+                    localRunOrderId === order._id;
+                  const wardSummary = (
+                    order.wards?.length
+                      ? order.wards
+                      : order.ward
+                        ? [order.ward]
+                        : []
+                  ).join("・");
+                  const fmtRange = (
+                    min?: number,
+                    max?: number,
+                    unit = "万円",
+                  ) =>
+                    min && max
+                      ? `${min.toLocaleString()}〜${max.toLocaleString()}${unit}`
+                      : min
+                        ? `${min.toLocaleString()}${unit}〜`
+                        : max
+                          ? `〜${max.toLocaleString()}${unit}`
+                          : "指定なし";
+                  const priceSummary =
+                    order.dealType === "rent"
+                      ? `賃料 ${fmtRange(order.rentMin, order.rentMax, "万円/月")}`
+                      : `価格 ${fmtRange(order.priceMin, order.priceMax)}`;
 
-            // One row per order on the dashboard: reading order is
-            // name → who/where/how much → how many properties. Everything
-            // else lives on the order's own page.
-            if (!isDetailView) {
-              return (
-                <button
-                  key={order._id}
-                  type="button"
-                  onClick={() => navigate(`/orders/${order._id}`)}
-                  className="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 text-left transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)] hover:shadow-xs active:scale-[0.99]"
-                >
-                  <span
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${
-                      isScrapingNow
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] text-[var(--text-muted)]"
-                    }`}
-                  >
-                    {isScrapingNow ? (
-                      <Loader2 className="h-[18px] w-[18px] animate-spin" />
-                    ) : (
-                      <Building2 className="h-[18px] w-[18px]" />
-                    )}
-                  </span>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-[17.5px] font-semibold leading-snug text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand)]">
-                        {order.name || `物件 #${order._id.slice(0, 6)}`}
-                      </span>
-                      {isScrapingNow ? (
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
-                          検索中
-                        </span>
-                      ) : order.status === "completed" ? (
-                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-page-subtle)] px-2 py-0.5 text-[13.5px] font-bold text-[var(--text-secondary)]">
-                          完了
-                        </span>
-                      ) : null}
-                      {recentMatchesInOrder > 0 && (
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
-                          新着 {recentMatchesInOrder}件
-                        </span>
-                      )}
-                    </span>
-                    <span className="mt-1 block truncate text-[15px] leading-relaxed text-[var(--text-muted)]">
-                      {cardCustomer ? `${cardCustomer.name} ・ ` : ""}
-                      {wardSummary}
-                      {wardSummary ? " ・ " : ""}
-                      {priceSummary}
-                      {(() => {
-                        const ordSources = getOrderSources(order);
-                        return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
-                          ? ` ・ 対象: ${ordSources.length}サイト`
-                          : "";
-                      })()}
-                    </span>
-                    {isScrapingNow && localRunOrderId !== order._id && (
-                      <span className="mt-2 block max-w-md text-[13.5px] font-semibold">
-                        <ScrapeProgressLine order={order} />
-                      </span>
-                    )}
-                  </span>
-
-                  <span className="hidden shrink-0 text-right sm:block">
-                    <span className="block font-mono text-[17px] leading-none text-[var(--text-primary)]">
-                      {matchCount}
-                      <span className="ml-1 text-[14px] font-normal text-[var(--text-muted)]">
-                        件
-                      </span>
-                    </span>
-                    <span className="mt-1 block text-[13.5px] text-[var(--text-muted)]">
-                      マッチ物件
-                    </span>
-                  </span>
-
-                  <ChevronRight className="h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:translate-x-1 group-hover:text-[var(--brand)]" />
-                </button>
-              );
-            }
-
-            return (
-              <Card
-                key={order._id}
-                className="rounded-none border-0 bg-transparent hover:border-transparent"
-              >
-                <CardHeader className="border-b border-[var(--border-subtle)] bg-transparent p-0 pb-5">
-                  <div className="flex flex-col gap-3">
-                    <div className="min-w-0 flex-1 space-y-3">
-                      {/* Status first, then how many properties. The order's
-                          name and criteria are in the page header above, so
-                          they are not repeated here. */}
-                      <div className="flex flex-wrap items-center gap-2">
-                          {(order.status === "completed" || matchCount === 0) && (
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                const nextStatus =
-                                  order.status === "completed"
-                                    ? "pending"
-                                    : "completed";
-                                await updateOrder({
-                                  id: order._id,
-                                  status: nextStatus,
-                                });
-                              }}
-                              className={`text-[14px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
-                                order.status === "completed"
-                                  ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
-                                  : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
-                              }`}
-                              title="クリックで完了/未完了を切り替えます"
-                            >
-                              {order.status === "completed" ? "完了" : "未検索"}
-                            </button>
+                  // One row per order on the dashboard: reading order is
+                  // name → who/where/how much → how many properties. Everything
+                  // else lives on the order's own page.
+                  if (!isDetailView) {
+                    return (
+                      <button
+                        key={order._id}
+                        type="button"
+                        onClick={() => navigate(`/orders/${order._id}`)}
+                        className="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 text-left transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)] hover:shadow-xs active:scale-[0.99]"
+                      >
+                        <span
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${
+                            isScrapingNow
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] text-[var(--text-muted)]"
+                          }`}
+                        >
+                          {isScrapingNow ? (
+                            <Loader2 className="h-[18px] w-[18px] animate-spin" />
+                          ) : (
+                            <Building2 className="h-[18px] w-[18px]" />
                           )}
-                          {recentMatchesInOrder > 0 && (
-                            <Badge className="font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white border-0 shadow-xs gap-1 py-1 px-2.5">
-                              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                              +{recentMatchesInOrder} 件の新着
-                            </Badge>
-                          )}
-                          {order.dealType === "rent" && (
-                            <Badge variant="neutral">借りる</Badge>
-                          )}
-                      </div>
+                        </span>
 
-                      {/* Criteria Details */}
-                      <div className="text-[14.5px] text-[var(--text-secondary)]">
-                        {[
-                          wardSummary,
-                          priceSummary,
-                          (order.walkMinutes ?? order.criteria?.walkMinutes)
-                            ? `徒歩${order.walkMinutes ?? order.criteria?.walkMinutes}分以内`
-                            : null,
-                          order.propertyTypes?.length
-                            ? order.propertyTypes.join("・")
-                            : null,
-                          order.ownerChange ? "オーナーチェンジ" : null,
-                          order.buildingSizeMin || order.buildingSizeMax
-                            ? `専有面積 ${fmtRange(order.buildingSizeMin, order.buildingSizeMax, "㎡")}`
-                            : null,
-                          detailCustomer ? `顧客: ${detailCustomer.name}` : null,
-                          (() => {
-                            const ordSources = getOrderSources(order);
-                            return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
-                              ? `対象サイト: ${ordSources.map((s) => SOURCE_LABELS[s] || s).join("・")}`
-                              : null;
-                          })(),
-                        ]
-                          .filter(Boolean)
-                          .join(" ・ ")}
-                      </div>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-[17.5px] font-semibold leading-snug text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand)]">
+                              {order.name || `物件 #${order._id.slice(0, 6)}`}
+                            </span>
+                            {isScrapingNow ? (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
+                                検索中
+                              </span>
+                            ) : order.status === "completed" ? (
+                              <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-page-subtle)] px-2 py-0.5 text-[13.5px] font-bold text-[var(--text-secondary)]">
+                                完了
+                              </span>
+                            ) : null}
+                            {recentMatchesInOrder > 0 && (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[13.5px] font-bold text-emerald-800">
+                                新着 {recentMatchesInOrder}件
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-1 block truncate text-[15px] leading-relaxed text-[var(--text-muted)]">
+                            {cardCustomer ? `${cardCustomer.name} ・ ` : ""}
+                            {wardSummary}
+                            {wardSummary ? " ・ " : ""}
+                            {priceSummary}
+                            {(() => {
+                              const ordSources = getOrderSources(order);
+                              return ordSources.length > 0 &&
+                                ordSources.length < ALL_SCRAPE_SOURCES.length
+                                ? ` ・ 対象: ${ordSources.length}サイト`
+                                : "";
+                            })()}
+                          </span>
+                          {isScrapingNow && localRunOrderId !== order._id && (
+                            <span className="mt-2 block max-w-md text-[13.5px] font-semibold">
+                              <ScrapeProgressLine order={order} />
+                            </span>
+                          )}
+                        </span>
 
-                      {/* When the search last ran and who asked for it. Without
+                        <span className="hidden shrink-0 text-right sm:block">
+                          <span className="block font-mono text-[17px] leading-none text-[var(--text-primary)]">
+                            {matchCount}
+                            <span className="ml-1 text-[14px] font-normal text-[var(--text-muted)]">
+                              件
+                            </span>
+                          </span>
+                          <span className="mt-1 block text-[13.5px] text-[var(--text-muted)]">
+                            マッチ物件
+                          </span>
+                        </span>
+
+                        <ChevronRight className="h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:translate-x-1 group-hover:text-[var(--brand)]" />
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <Card
+                      key={order._id}
+                      className="rounded-none border-0 bg-transparent hover:border-transparent"
+                    >
+                      <CardHeader className="border-b border-[var(--border-subtle)] bg-transparent p-0 md:p-0 pt-0 md:pt-0 pb-5 md:pb-5 px-5 md:px-6">
+                        <div className="flex flex-col gap-2">
+                          <div className="min-w-0 flex-1 space-y-2">
+                            {(order.status === "completed" ||
+                              matchCount === 0 ||
+                              order.dealType === "rent") && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {(order.status === "completed" ||
+                                  matchCount === 0) && (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const nextStatus =
+                                        order.status === "completed"
+                                          ? "pending"
+                                          : "completed";
+                                      await updateOrder({
+                                        id: order._id,
+                                        status: nextStatus,
+                                      });
+                                    }}
+                                    className={`text-[14px] px-2.5 py-1 font-bold shrink-0 transition-all select-none rounded-lg ${
+                                      order.status === "completed"
+                                        ? "bg-[var(--brand)] text-white hover:bg-[var(--brand-hover)]"
+                                        : "bg-[#e4e7e4] text-[var(--text-secondary)] hover:bg-[#d8dbd8]"
+                                    }`}
+                                    title="クリックで完了/未完了を切り替えます"
+                                  >
+                                    {order.status === "completed"
+                                      ? "完了"
+                                      : "未検索"}
+                                  </button>
+                                )}
+                                {order.dealType === "rent" && (
+                                  <Badge variant="neutral">借りる</Badge>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Criteria Details */}
+                            <div className="text-[14.5px] text-[var(--text-secondary)]">
+                              {[
+                                wardSummary,
+                                priceSummary,
+                                (order.walkMinutes ??
+                                order.criteria?.walkMinutes)
+                                  ? `徒歩${order.walkMinutes ?? order.criteria?.walkMinutes}分以内`
+                                  : null,
+                                order.propertyTypes?.length
+                                  ? order.propertyTypes.join("・")
+                                  : null,
+                                order.ownerChange ? "オーナーチェンジ" : null,
+                                order.buildingSizeMin || order.buildingSizeMax
+                                  ? `専有面積 ${fmtRange(order.buildingSizeMin, order.buildingSizeMax, "㎡")}`
+                                  : null,
+                                detailCustomer
+                                  ? `顧客: ${detailCustomer.name}`
+                                  : null,
+                                (() => {
+                                  const ordSources = getOrderSources(order);
+                                  return ordSources.length > 0 &&
+                                    ordSources.length <
+                                      ALL_SCRAPE_SOURCES.length
+                                    ? `対象サイト: ${ordSources.map((s) => SOURCE_LABELS[s] || s).join("・")}`
+                                    : null;
+                                })(),
+                              ]
+                                .filter(Boolean)
+                                .join(" ・ ")}
+                            </div>
+
+                            {/* When the search last ran and who asked for it. Without
                           this the listings on the card carry no date at all, so
                           there was no way to tell today's results from a sweep
                           run weeks ago. */}
-                      <div className="flex flex-wrap items-center gap-1.5 text-[14.5px] text-[var(--text-secondary)]">
-                        {order.lastScrapeAt ? (
-                          <span>
-                            最終検索{" "}
-                            <span>
-                              {formatJaDateTimeShort(order.lastScrapeAt)}
-                            </span>
-                          </span>
-                        ) : (
-                          <span>最終検索 記録なし</span>
-                        )}
-                        <span className="text-[var(--border-strong)]">·</span>
-                        {/* Always rendered, including the 記録なし case: an absent
+                            <div className="flex flex-wrap items-center gap-1.5 text-[14.5px] text-[var(--text-secondary)]">
+                              {order.lastScrapeAt ? (
+                                <span>
+                                  最終検索{" "}
+                                  <span>
+                                    {formatJaDateTimeShort(order.lastScrapeAt)}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span>最終検索 記録なし</span>
+                              )}
+                              <span className="text-[var(--border-strong)]">
+                                ·
+                              </span>
+                              {/* Always rendered, including the 記録なし case: an absent
                             row read as "this field does not exist" rather than
                             "this search predates the attribution". A person's name
                             for a search someone pressed; the automatic label,
                             badged, for the scheduled sweep (stamped by
                             scraper-service/src/cli.ts). */}
-                        {!order.lastScrapeBy ? (
-                          <span title="この検索は実行者を記録する前のものです。次回の検索から記録されます。">
-                            実行者 記録なし
-                          </span>
-                        ) : isAutomaticTrigger(order.lastScrapeBy) ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef2f7] text-[#475569] text-[14px] font-bold">
-                            <Bot className="w-3 h-3" />
-                            {order.lastScrapeBy}
-                          </span>
-                        ) : (
-                          <span>
-                            実行者{" "}
-                            <span>
-                              {order.lastScrapeBy}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action Controls */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {isMyRun(order) ||
-                      scrapingOrderId === order._id ||
-                      order.isScraping ||
-                      (order.scrapingStatus &&
-                        order.scrapingStatus.includes("検索中")) ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            disabled={cancellingOrderId === order._id}
-                            onClick={() => void handleCancelScrape(order)}
-                            className="h-9 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-                            title="実行中の物件検索を止めます"
-                          >
-                            {cancellingOrderId === order._id ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                中止処理中...
-                              </>
-                            ) : (
-                              <>
-                                <X className="w-3.5 h-3.5" />
-                                検索を中止
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <select
-                              className="h-9 text-[14px] bg-white text-[var(--text-primary)] px-3 rounded-lg border border-[var(--border-subtle)] cursor-pointer focus:outline-none"
-                              value={scrapeSource[order._id] || "all"}
-                              onChange={(e) =>
-                                setScrapeSource((prev) => ({
-                                  ...prev,
-                                  [order._id]: e.target.value,
-                                }))
-                              }
-                            >
-                              <option value="all">
-                                {(() => {
-                                  const ordSources = getOrderSources(order);
-                                  return ordSources.length > 0 && ordSources.length < ALL_SCRAPE_SOURCES.length
-                                    ? `設定されたサイト (${ordSources.length}サイト)`
-                                    : "すべてのサイト";
-                                })()}
-                              </option>
-                              {ALL_SCRAPE_SOURCES.map((src) => (
-                                <option key={src} value={src}>
-                                  {SOURCE_LABELS[src] || src}
-                                </option>
-                              ))}
-                            </select>
-                            <Button
-                              onClick={() => handleScrapeOrder(order)}
-                              title={
-                                runner === "local"
-                                  ? "このPCのスクレイパー（作業中のコード）で取得します。別ターミナルで npm run dev:scraper が必要です。"
-                                  : "GitHub Actions（公開済みコード）で取得します。PCを閉じても実行が続きます。"
-                              }
-                            >
-                              手動検索
-                            </Button>
+                              {!order.lastScrapeBy ? (
+                                <span title="この検索は実行者を記録する前のものです。次回の検索から記録されます。">
+                                  実行者 記録なし
+                                </span>
+                              ) : isAutomaticTrigger(order.lastScrapeBy) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef2f7] text-[#475569] text-[14px] font-bold">
+                                  <Bot className="w-3 h-3" />
+                                  {order.lastScrapeBy}
+                                </span>
+                              ) : (
+                                <span>
+                                  実行者 <span>{order.lastScrapeBy}</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {/* Where the scrape runs. GitHub executes the COMMITTED
+                          {/* Action Controls */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            {isMyRun(order) ||
+                            scrapingOrderId === order._id ||
+                            order.isScraping ||
+                            (order.scrapingStatus &&
+                              order.scrapingStatus.includes("検索中")) ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={cancellingOrderId === order._id}
+                                  onClick={() => void handleCancelScrape(order)}
+                                  className="h-9 px-3.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                                  title="実行中の物件検索を止めます"
+                                >
+                                  {cancellingOrderId === order._id ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      中止処理中...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X className="w-3.5 h-3.5" />
+                                      検索を中止
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    className="h-9 text-[14px] bg-white text-[var(--text-primary)] px-3 rounded-lg border border-[var(--border-subtle)] cursor-pointer focus:outline-none"
+                                    value={scrapeSource[order._id] || "all"}
+                                    onChange={(e) =>
+                                      setScrapeSource((prev) => ({
+                                        ...prev,
+                                        [order._id]: e.target.value,
+                                      }))
+                                    }
+                                  >
+                                    <option value="all">
+                                      {(() => {
+                                        const ordSources =
+                                          getOrderSources(order);
+                                        return ordSources.length > 0 &&
+                                          ordSources.length <
+                                            ALL_SCRAPE_SOURCES.length
+                                          ? `設定されたサイト (${ordSources.length}サイト)`
+                                          : "すべてのサイト";
+                                      })()}
+                                    </option>
+                                    {ALL_SCRAPE_SOURCES.map((src) => (
+                                      <option key={src} value={src}>
+                                        {SOURCE_LABELS[src] || src}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <Button
+                                    onClick={() => handleScrapeOrder(order)}
+                                    title={
+                                      runner === "local"
+                                        ? "このPCのスクレイパー（作業中のコード）で取得します。別ターミナルで npm run dev:scraper が必要です。"
+                                        : "GitHub Actions（公開済みコード）で取得します。PCを閉じても実行が続きます。"
+                                    }
+                                  >
+                                    手動検索
+                                  </Button>
+                                </div>
+
+                                {/* Where the scrape runs. GitHub executes the COMMITTED
                               code and survives closing the laptop; ローカル runs the
                               working tree, which is the only way to test a scraper
                               change before pushing it — and only works from
                               localhost, so it is not offered elsewhere. */}
-                          {IS_LOCALHOST ? (
-                            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] p-0.5">
-                              {(
-                                [
-                                  { key: "github", label: "GitHub", icon: Cloud },
-                                  {
-                                    key: "local",
-                                    label: "ローカル",
-                                    icon: Laptop,
-                                  },
-                                ] as const
-                              ).map((opt) => (
-                                <button
-                                  key={opt.key}
-                                  type="button"
-                                  onClick={() => chooseRunner(opt.key)}
-                                  title={
-                                    opt.key === "local"
-                                      ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
-                                      : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
-                                  }
-                                  className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-[4px] px-2.5 text-[14px] font-medium transition-colors ${
-                                    runner === opt.key
-                                      ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(23,21,15,0.06)]"
-                                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                  }`}
-                                >
-                                  <opt.icon className="h-3.5 w-3.5" />
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
+                                {IS_LOCALHOST ? (
+                                  <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] p-0.5">
+                                    {(
+                                      [
+                                        {
+                                          key: "github",
+                                          label: "GitHub",
+                                          icon: Cloud,
+                                        },
+                                        {
+                                          key: "local",
+                                          label: "ローカル",
+                                          icon: Laptop,
+                                        },
+                                      ] as const
+                                    ).map((opt) => (
+                                      <button
+                                        key={opt.key}
+                                        type="button"
+                                        onClick={() => chooseRunner(opt.key)}
+                                        title={
+                                          opt.key === "local"
+                                            ? "このPCで実行（作業中のコードをそのまま使用。npm run dev:scraper が必要）"
+                                            : "GitHub Actions で実行（公開済みコード。PCを閉じても継続）"
+                                        }
+                                        className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-[4px] px-2.5 text-[14px] font-medium transition-colors ${
+                                          runner === opt.key
+                                            ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(23,21,15,0.06)]"
+                                            : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        }`}
+                                      >
+                                        <opt.icon className="h-3.5 w-3.5" />
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
 
-                          {/* Property actions get their own line. They apply to
+                                {/* Property actions get their own line. They apply to
                               whatever is ticked in the list below, so they must
                               not look like siblings of 手動検索. */}
-                          {selectedCountForOrder > 0 && (
-                            <div className="order-last flex basis-full flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
-                              <span className="mr-1 font-mono text-[12.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                                物件への操作
-                              </span>
-                              {/* Disabled until something is ticked */}
+                                {selectedCountForOrder > 0 && (
+                                  <div className="order-last flex basis-full flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
+                                    <span className="mr-1 font-mono text-[12.5px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                      物件への操作
+                                    </span>
+                                    {/* Disabled until something is ticked */}
+                                    <Button
+                                      size="sm"
+                                      disabled={selectedCountForOrder === 0}
+                                      title={
+                                        selectedCountForOrder === 0
+                                          ? "提案する物件を下の一覧から選択してください"
+                                          : `選択中の ${selectedCountForOrder} 件を提案します`
+                                      }
+                                      className={
+                                        selectedCountForOrder === 0
+                                          ? "opacity-50"
+                                          : ""
+                                      }
+                                      onClick={() => setProposalOrder(order)}
+                                    >
+                                      <Send className="w-3 h-3" />
+                                      顧客へ提案・送信
+                                      {selectedCountForOrder > 0 &&
+                                        ` (${selectedCountForOrder})`}
+                                    </Button>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            <div className="flex items-center gap-1.5 ml-auto shrink-0">
                               <Button
-                                size="sm"
-                                disabled={selectedCountForOrder === 0}
-                                title={
-                                  selectedCountForOrder === 0
-                                    ? "提案する物件を下の一覧から選択してください"
-                                    : `選択中の ${selectedCountForOrder} 件を提案します`
-                                }
-                                className={
-                                  selectedCountForOrder === 0
-                                    ? "opacity-50"
-                                    : ""
-                                }
-                                onClick={() => setProposalOrder(order)}
+                                variant="secondary"
+                                onClick={() => handleEditClick(order)}
+                                title="この物件を編集"
+                                className="border-[var(--border-subtle)] font-medium"
                               >
-                                <Send className="w-3 h-3" />
-                                顧客へ提案・送信
-                                {selectedCountForOrder > 0 &&
-                                  ` (${selectedCountForOrder})`}
+                                編集
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  const label =
+                                    order.name ||
+                                    `物件#${order._id.slice(0, 6)}`;
+                                  if (
+                                    window.confirm(
+                                      `「${label}」を削除しますか？\nこの操作は取り消せません。`,
+                                    )
+                                  ) {
+                                    handleDelete(order._id);
+                                  }
+                                }}
+                                title="削除"
+                                className="border-[var(--border-subtle)] font-medium hover:text-red-600 hover:bg-red-50"
+                              >
+                                削除
                               </Button>
                             </div>
-                          )}
-                        </>
-                      )}
-
-                      <div className="flex items-center gap-1.5 ml-auto shrink-0">
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleEditClick(order)}
-                          title="この物件を編集"
-                          className="border-[var(--border-subtle)] font-medium"
-                        >
-                          編集
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            const label = order.name || `物件#${order._id.slice(0, 6)}`;
-                            if (window.confirm(`「${label}」を削除しますか？\nこの操作は取り消せません。`)) {
-                              handleDelete(order._id);
-                            }
-                          }}
-                          title="削除"
-                          className="border-[var(--border-subtle)] font-medium hover:text-red-600 hover:bg-red-50"
-                        >
-                          削除
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Active Scrape Live Status Banner */}
-                    {(order.isScraping || (order.scrapingStatus && order.scrapingStatus.includes("検索中")) || isMyRun(order) || localRunOrderId === order._id) ? (
-                      <div className="mt-2.5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 animate-in fade-in duration-200">
-                        <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-emerald-700" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[15px] font-bold">物件を探しています</div>
-                          <div className="mt-2 max-w-xl text-[14px]">
-                            {localRunOrderId === order._id ? (
-                              <span className="text-emerald-800">このパソコンで実行中です。</span>
-                            ) : (
-                              <ScrapeProgressLine order={order} showSites />
-                            )}
                           </div>
-                          <div className="mt-2 text-[13px] text-emerald-700">
-                            見つかった物件は下の一覧に自動で追加されます。画面を閉じても検索は続きます。
-                          </div>
-                        </div>
-                      </div>
-                    ) : scrapeNotice[order._id] ? (
-                      <div
-                        className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed whitespace-pre-line ${
-                          scrapeNotice[order._id].kind === "error"
-                            ? "bg-red-50 text-red-700 border border-red-200"
-                            : "bg-[var(--brand-soft)] text-[var(--brand-ink)] border border-[var(--brand-border)]"
-                        }`}
-                      >
-                        {scrapeNotice[order._id].text}
-                      </div>
-                    ) : null}
-                  </div>
-                </CardHeader>
 
-                {/* Matched Listings Drawer */}
-                {isCardExpanded && (
-                  <CardContent className="p-0 pt-6 space-y-2">
-                    {matchCount > 0 && orderMatchList ? (
-                      <>
-                        <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
-                      <div className="min-w-0 space-y-2">
-                        <div className="text-[17px] font-bold text-[var(--text-primary)]">
-                          物件一覧
-                          <span className="ml-2 text-[15px] font-normal text-[var(--text-muted)]">
-                            {matchCount.toLocaleString()}件
-                            {orderMatchList.length < matchCount &&
-                              `（新しい順に${orderMatchList.length.toLocaleString()}件を表示）`}
-                          </span>
+                          {/* Active Scrape Live Status Banner */}
+                          {order.isScraping ||
+                          (order.scrapingStatus &&
+                            order.scrapingStatus.includes("検索中")) ||
+                          isMyRun(order) ||
+                          localRunOrderId === order._id ? (
+                            <div className="mt-2.5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 animate-in fade-in duration-200">
+                              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-emerald-700" />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[15px] font-bold">
+                                  物件を探しています
+                                </div>
+                                <div className="mt-2 max-w-xl text-[14px]">
+                                  {localRunOrderId === order._id ? (
+                                    <span className="text-emerald-800">
+                                      このパソコンで実行中です。
+                                    </span>
+                                  ) : (
+                                    <ScrapeProgressLine
+                                      order={order}
+                                      showSites
+                                    />
+                                  )}
+                                </div>
+                                <div className="mt-2 text-[13px] text-emerald-700">
+                                  見つかった物件は下の一覧に自動で追加されます。画面を閉じても検索は続きます。
+                                </div>
+                              </div>
+                            </div>
+                          ) : scrapeNotice[order._id] ? (
+                            <div
+                              className={`mt-2 p-3 rounded-xl text-xs font-bold leading-relaxed whitespace-pre-line ${
+                                scrapeNotice[order._id].kind === "error"
+                                  ? "bg-red-50 text-red-700 border border-red-200"
+                                  : "bg-[var(--brand-soft)] text-[var(--brand-ink)] border border-[var(--brand-border)]"
+                              }`}
+                            >
+                              {scrapeNotice[order._id].text}
+                            </div>
+                          ) : null}
                         </div>
+                      </CardHeader>
 
-                        {/* Quick filters, with live counts. Built from these
+                      {/* Matched Listings Drawer */}
+                      {isCardExpanded && (
+                        <CardContent className="p-0 md:p-0 pt-6 md:pt-6 px-5 md:px-6 space-y-2">
+                          {matchCount > 0 && orderMatchList ? (
+                            <>
+                              <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                                <div className="min-w-0 space-y-2">
+                                  <div className="text-[17px] font-bold text-[var(--text-primary)]">
+                                    物件数
+                                    <span className="ml-2 text-[15px] font-normal text-[var(--text-muted)]">
+                                      {matchCount.toLocaleString()}件
+                                      {orderMatchList.length < matchCount &&
+                                        `（新しい順に${orderMatchList.length.toLocaleString()}件を表示）`}
+                                    </span>
+                                  </div>
+
+                                  {/* Quick filters, with live counts. Built from these
                             results, so a 477-row list can be cut to "高評価" or a
                             single 物件種別 without touching the order's criteria. */}
-                        {(() => {
-                          const scoreOf = (m: Doc<"matching">) =>
-                            matchScore(m, evaluations);
-                          const chips = buildListingFilters(
-                            shownMatches(orderMatchList),
-                            matchedListing,
-                            scoreOf,
-                          );
-                          if (chips.length === 0) return null;
-                          const active = listFilter[order._id] ?? "all";
-                          const isDealSort = (sortKey[order._id] || "newest") === "dealScore";
-                          return (
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSortKey((prev) => ({
-                                    ...prev,
-                                    [order._id]: isDealSort ? "newest" : "dealScore",
-                                  }));
-                                  setCurrentPage((prev) => ({
-                                    ...prev,
-                                    [order._id]: 1,
-                                  }));
-                                }}
-                                className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all flex items-center gap-1.5 ${
-                                  isDealSort
-                                    ? "bg-amber-500 text-white border-amber-600 shadow-sm"
-                                    : "border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100/80 hover:border-amber-300"
-                                }`}
-                                title={isDealSort ? "お買い得順を解除" : "お買い得順に並び替え"}
-                              >
-                                <Sparkles className="w-3.5 h-3.5 fill-current" />
-                                <span>お買い得順</span>
-                              </button>
-                              {chips.map((chip) => {
-                                const isActive = active === chip.key;
-                                return (
-                                  <button
-                                    key={chip.key}
-                                    type="button"
-                                    onClick={() => {
-                                      setListFilter((prev) => ({
+                                  {(() => {
+                                    const scoreOf = (m: Doc<"matching">) =>
+                                      matchScore(m, evaluations);
+                                    const chips = buildListingFilters(
+                                      shownMatches(orderMatchList),
+                                      matchedListing,
+                                      scoreOf,
+                                    );
+                                    if (chips.length === 0) return null;
+                                    const active =
+                                      listFilter[order._id] ?? "all";
+                                    const isDealSort =
+                                      (sortKey[order._id] || "newest") ===
+                                      "dealScore";
+                                    return (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSortKey((prev) => ({
+                                              ...prev,
+                                              [order._id]: isDealSort
+                                                ? "newest"
+                                                : "dealScore",
+                                            }));
+                                            setCurrentPage((prev) => ({
+                                              ...prev,
+                                              [order._id]: 1,
+                                            }));
+                                          }}
+                                          className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all flex items-center gap-1.5 ${
+                                            isDealSort
+                                              ? "bg-amber-500 text-white border-amber-600 shadow-sm"
+                                              : "border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100/80 hover:border-amber-300"
+                                          }`}
+                                          title={
+                                            isDealSort
+                                              ? "お買い得順を解除"
+                                              : "お買い得順に並び替え"
+                                          }
+                                        >
+                                          <Sparkles className="w-3.5 h-3.5 fill-current" />
+                                          <span>お買い得順</span>
+                                        </button>
+                                        {chips.map((chip) => {
+                                          const isActive = active === chip.key;
+                                          return (
+                                            <button
+                                              key={chip.key}
+                                              type="button"
+                                              onClick={() => {
+                                                setListFilter((prev) => ({
+                                                  ...prev,
+                                                  [order._id]: chip.key,
+                                                }));
+                                                // Filtering changes what page 4 even means.
+                                                setCurrentPage((prev) => ({
+                                                  ...prev,
+                                                  [order._id]: 1,
+                                                }));
+                                              }}
+                                              className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all ${
+                                                isActive
+                                                  ? "bg-[var(--brand)] text-white border-[var(--brand)]"
+                                                  : "border-transparent bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                              }`}
+                                            >
+                                              {chip.label}
+                                              <span
+                                                className={`ml-1 font-bold ${isActive ? "text-white/90" : "text-[var(--text-muted)]"}`}
+                                              >
+                                                {chip.count}
+                                              </span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+
+                                <label className="flex items-center gap-2 text-[14.5px] font-bold text-[var(--text-muted)]">
+                                  <span className="sr-only">並び順</span>
+                                  <select
+                                    value={sortKey[order._id] || "newest"}
+                                    onChange={(e) => {
+                                      setSortKey((prev) => ({
                                         ...prev,
-                                        [order._id]: chip.key,
+                                        [order._id]: e.target.value as SortKey,
                                       }));
-                                      // Filtering changes what page 4 even means.
+                                      // Page 1: staying on page 4 of a re-sorted list shows
+                                      // a slice the user did not ask to see.
                                       setCurrentPage((prev) => ({
                                         ...prev,
                                         [order._id]: 1,
                                       }));
                                     }}
-                                    className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all ${
-                                      isActive
-                                        ? "bg-[var(--brand)] text-white border-[var(--brand)]"
-                                        : "border-transparent bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                    }`}
+                                    className="h-9 px-2.5 bg-white text-[var(--text-primary)] text-[14.5px] font-medium rounded-lg border border-[var(--border-subtle)] cursor-pointer focus:outline-none"
                                   >
-                                    {chip.label}
-                                    <span
-                                      className={`ml-1 font-bold ${isActive ? "text-white/90" : "text-[var(--text-muted)]"}`}
-                                    >
-                                      {chip.count}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
+                                    {SORT_OPTIONS.map((o) => (
+                                      <option key={o.key} value={o.key}>
+                                        {o.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
 
-                      <label className="flex items-center gap-2 text-[14.5px] font-bold text-[var(--text-muted)]">
-                        <span className="sr-only">並び順</span>
-                        <select
-                          value={sortKey[order._id] || "newest"}
-                          onChange={(e) => {
-                            setSortKey((prev) => ({
-                              ...prev,
-                              [order._id]: e.target.value as SortKey,
-                            }));
-                            // Page 1: staying on page 4 of a re-sorted list shows
-                            // a slice the user did not ask to see.
-                            setCurrentPage((prev) => ({
-                              ...prev,
-                              [order._id]: 1,
-                            }));
-                          }}
-                          className="h-9 px-2.5 bg-white text-[var(--text-primary)] text-[14.5px] font-medium rounded-lg border border-[var(--border-subtle)] cursor-pointer focus:outline-none"
-                        >
-                          {SORT_OPTIONS.map((o) => (
-                            <option key={o.key} value={o.key}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    {(() => {
-                      const pageSize = showLimit[order._id] || 10;
-                      const activeSort: SortKey = sortKey[order._id] || "newest";
-                      // When a listing lacks the sort field it goes last in every
-                      // ordering rather than being treated as 0 円 / 1970年.
-                      const LAST = Number.POSITIVE_INFINITY;
-                      // Scrapers store 0 when the price is 価格未定/要相談.
-                      const priceOf = (l: Doc<"listings"> | undefined) =>
-                        l?.price && l.price > 0 ? l.price : undefined;
-                      const activeFilter = listFilter[order._id] ?? "all";
-                      const visibleMatches = orderMatchList.filter((m) => {
-                        // Not seen by any scrape for 14 days: the portal has most likely
-                        // taken it down. No lastSeenAt (older rows) stays visible.
-                        if (isStale(matchedListing(m.listingId ?? ""))) return false;
-                        return passesListingFilter(
-                          activeFilter,
-                          m,
-                          matchedListing(m.listingId ?? ""),
-                          matchScore(m, evaluations),
-                        );
-                      });
-                      const seenKeys = new Set<string>();
-                      // Ties fall back to a fixed key: the API returns rows in
-                      // Postgres heap order, which shifts on every update/refetch.
-                      let orderedMatches = [...visibleMatches].sort(
-                        (a, b) => compareMatches(a, b) || a._id.localeCompare(b._id),
-                      );
-                      const orderSig = `${activeSort}|${activeFilter}|${visibleMatches
-                        .map((m) => m._id)
-                        .sort()
-                        .join(",")}`;
-                      const frozen = frozenOrder.current[order._id];
-                      if (frozen?.sig === orderSig) {
-                        const rank = new Map(frozen.ids.map((id, i) => [id, i]));
-                        orderedMatches = [...visibleMatches].sort(
-                          (a, b) => (rank.get(a._id) ?? 0) - (rank.get(b._id) ?? 0),
-                        );
-                      } else {
-                        frozenOrder.current[order._id] = {
-                          sig: orderSig,
-                          ids: orderedMatches.map((m) => m._id),
-                        };
-                      }
-                      const sortedMatches = orderedMatches
-                        // Same property listed on several portals: keep the best-ranked copy.
-                        .filter((m) => {
-                          const l = matchedListing(m.listingId ?? "");
-                          if (!l?.address || !l.price || l.area == null) return true;
-                          const k = `${l.address}|${l.price}|${l.area}`;
-                          if (seenKeys.has(k)) return false;
-                          seenKeys.add(k);
-                          return true;
-                        });
-                      function compareMatches(a: Doc<"matching">, b: Doc<"matching">): number {
-                        const la = matchedListing(a.listingId ?? "");
-                        const lb = matchedListing(b.listingId ?? "");
-                        // When explicitly ordering by deal score, sort purely by dealScore descending
-                        // so lower-scored emails do not displace higher-scored properties.
-                        if (activeSort === "dealScore") {
-                          const scoreA = getListingDealScore(la, a);
-                          const scoreB = getListingDealScore(lb, b);
-                          const diff = (scoreB ?? -LAST) - (scoreA ?? -LAST);
-                          if (diff !== 0) return diff;
-                        }
-                        // A broker emailed this directly — surface it ahead of
-                        // everything scraped off a public portal, regardless
-                        // of whatever sort the user picked.
-                        const emailRank = (l: Doc<"listings"> | undefined) =>
-                          l?.source === "email" ? 0 : 1;
-                        const rankDiff = emailRank(la) - emailRank(lb);
-                        if (rankDiff !== 0) return rankDiff;
-                        switch (activeSort) {
-                          case "priceAsc":
-                            return (priceOf(la) ?? LAST) - (priceOf(lb) ?? LAST);
-                          case "priceDesc":
-                            return (priceOf(lb) ?? -LAST) - (priceOf(la) ?? -LAST);
-                          case "newest":
-                            return (
-                              (listingDate(lb) ?? -LAST) -
-                              (listingDate(la) ?? -LAST)
-                            );
-                          case "oldest":
-                            return (
-                              (listingDate(la) ?? LAST) -
-                              (listingDate(lb) ?? LAST)
-                            );
-                          case "foundNewest":
-                            return (
-                              (lb?._creationTime ?? -LAST) -
-                              (la?._creationTime ?? -LAST)
-                            );
-                          case "dealScore":
-                            return (
-                              (getListingDealScore(lb, b) ?? -LAST) -
-                              (getListingDealScore(la, a) ?? -LAST)
-                            );
-                          case "score":
-                          default:
-                            return (
-                              (matchScore(b, evaluations) ?? 0) -
-                              (matchScore(a, evaluations) ?? 0)
-                            );
-                        }
-                      }
-                      const focusIdx = focusListingId
-                        ? sortedMatches.findIndex((m) => m.listingId === focusListingId)
-                        : -1;
-                      const page =
-                        focusIdx >= 0
-                          ? Math.floor(focusIdx / pageSize) + 1
-                          : currentPage[order._id] || 1;
-                      if (focusIdx >= 0) focusPageRef.current = { orderId: order._id, page };
-                      const totalMatches = sortedMatches.length;
-                      const totalPages = Math.max(
-                        1,
-                        Math.ceil(totalMatches / pageSize),
-                      );
-                      const validPage = Math.min(page, totalPages);
-                      const startIndex = (validPage - 1) * pageSize;
-                      const endIndex = Math.min(
-                        startIndex + pageSize,
-                        totalMatches,
-                      );
-                      const paginatedMatches = sortedMatches.slice(
-                        startIndex,
-                        endIndex,
-                      );
-
-                      return (
-                        <>
-                          {paginatedMatches.map((m) => {
-                            const listing = matchedListing(m.listingId ?? "");
-                            const isExpanded = expandedMatch === m._id;
-                            const hasEvaluation =
-                              evaluations[m._id] !== undefined
-                                ? evaluations[m._id]
-                                : m.evaluation;
-                            const scoreDetail:
-                              | EvaluationScoreDetail
-                              | undefined =
-                              scoreDetails[m._id] ??
-                              (
-                                m as Doc<"matching"> & {
-                                  scoreDetail?: EvaluationScoreDetail;
-                                }
-                              ).scoreDetail;
-
-                            // Extract score from DB score or from evaluation text string
-                            const extractedScore =
-                              m.score ??
-                              (hasEvaluation
-                                ? hasEvaluation.match(/評価[：:\s]*(\d+)/)?.[1]
-                                  ? Number(
-                                      hasEvaluation.match(
-                                        /評価[：:\s]*(\d+)/,
-                                      )[1],
+                              {(() => {
+                                const pageSize = showLimit[order._id] || 10;
+                                const activeSort: SortKey =
+                                  sortKey[order._id] || "newest";
+                                // When a listing lacks the sort field it goes last in every
+                                // ordering rather than being treated as 0 円 / 1970年.
+                                const LAST = Number.POSITIVE_INFINITY;
+                                // Scrapers store 0 when the price is 価格未定/要相談.
+                                const priceOf = (
+                                  l: Doc<"listings"> | undefined,
+                                ) =>
+                                  l?.price && l.price > 0 ? l.price : undefined;
+                                const activeFilter =
+                                  listFilter[order._id] ?? "all";
+                                const visibleMatches = orderMatchList.filter(
+                                  (m) => {
+                                    // Not seen by any scrape for 14 days: the portal has most likely
+                                    // taken it down. No lastSeenAt (older rows) stays visible.
+                                    if (
+                                      isStale(matchedListing(m.listingId ?? ""))
                                     )
-                                  : undefined
-                                : undefined);
+                                      return false;
+                                    return passesListingFilter(
+                                      activeFilter,
+                                      m,
+                                      matchedListing(m.listingId ?? ""),
+                                      matchScore(m, evaluations),
+                                    );
+                                  },
+                                );
+                                const seenKeys = new Set<string>();
+                                // Ties fall back to a fixed key: the API returns rows in
+                                // Postgres heap order, which shifts on every update/refetch.
+                                let orderedMatches = [...visibleMatches].sort(
+                                  (a, b) =>
+                                    compareMatches(a, b) ||
+                                    a._id.localeCompare(b._id),
+                                );
+                                const orderSig = `${activeSort}|${activeFilter}|${visibleMatches
+                                  .map((m) => m._id)
+                                  .sort()
+                                  .join(",")}`;
+                                const frozen = frozenOrder.current[order._id];
+                                if (frozen?.sig === orderSig) {
+                                  const rank = new Map(
+                                    frozen.ids.map((id, i) => [id, i]),
+                                  );
+                                  orderedMatches = [...visibleMatches].sort(
+                                    (a, b) =>
+                                      (rank.get(a._id) ?? 0) -
+                                      (rank.get(b._id) ?? 0),
+                                  );
+                                } else {
+                                  frozenOrder.current[order._id] = {
+                                    sig: orderSig,
+                                    ids: orderedMatches.map((m) => m._id),
+                                  };
+                                }
+                                const sortedMatches = orderedMatches
+                                  // Same property listed on several portals: keep the best-ranked copy.
+                                  .filter((m) => {
+                                    const l = matchedListing(m.listingId ?? "");
+                                    if (
+                                      !l?.address ||
+                                      !l.price ||
+                                      l.area == null
+                                    )
+                                      return true;
+                                    const k = `${l.address}|${l.price}|${l.area}`;
+                                    if (seenKeys.has(k)) return false;
+                                    seenKeys.add(k);
+                                    return true;
+                                  });
+                                function compareMatches(
+                                  a: Doc<"matching">,
+                                  b: Doc<"matching">,
+                                ): number {
+                                  const la = matchedListing(a.listingId ?? "");
+                                  const lb = matchedListing(b.listingId ?? "");
+                                  // When explicitly ordering by deal score, sort purely by dealScore descending
+                                  // so lower-scored emails do not displace higher-scored properties.
+                                  if (activeSort === "dealScore") {
+                                    const scoreA = getListingDealScore(la, a);
+                                    const scoreB = getListingDealScore(lb, b);
+                                    const diff =
+                                      (scoreB ?? -LAST) - (scoreA ?? -LAST);
+                                    if (diff !== 0) return diff;
+                                  }
+                                  // A broker emailed this directly — surface it ahead of
+                                  // everything scraped off a public portal, regardless
+                                  // of whatever sort the user picked.
+                                  const emailRank = (
+                                    l: Doc<"listings"> | undefined,
+                                  ) => (l?.source === "email" ? 0 : 1);
+                                  const rankDiff =
+                                    emailRank(la) - emailRank(lb);
+                                  if (rankDiff !== 0) return rankDiff;
+                                  switch (activeSort) {
+                                    case "priceAsc":
+                                      return (
+                                        (priceOf(la) ?? LAST) -
+                                        (priceOf(lb) ?? LAST)
+                                      );
+                                    case "priceDesc":
+                                      return (
+                                        (priceOf(lb) ?? -LAST) -
+                                        (priceOf(la) ?? -LAST)
+                                      );
+                                    case "newest":
+                                      return (
+                                        (listingDate(lb) ?? -LAST) -
+                                        (listingDate(la) ?? -LAST)
+                                      );
+                                    case "oldest":
+                                      return (
+                                        (listingDate(la) ?? LAST) -
+                                        (listingDate(lb) ?? LAST)
+                                      );
+                                    case "foundNewest":
+                                      return (
+                                        (lb?._creationTime ?? -LAST) -
+                                        (la?._creationTime ?? -LAST)
+                                      );
+                                    case "dealScore":
+                                      return (
+                                        (getListingDealScore(lb, b) ?? -LAST) -
+                                        (getListingDealScore(la, a) ?? -LAST)
+                                      );
+                                    case "score":
+                                    default:
+                                      return (
+                                        (matchScore(b, evaluations) ?? 0) -
+                                        (matchScore(a, evaluations) ?? 0)
+                                      );
+                                  }
+                                }
+                                const focusIdx = focusListingId
+                                  ? sortedMatches.findIndex(
+                                      (m) => m.listingId === focusListingId,
+                                    )
+                                  : -1;
+                                const page =
+                                  focusIdx >= 0
+                                    ? Math.floor(focusIdx / pageSize) + 1
+                                    : currentPage[order._id] || 1;
+                                if (focusIdx >= 0)
+                                  focusPageRef.current = {
+                                    orderId: order._id,
+                                    page,
+                                  };
+                                const totalMatches = sortedMatches.length;
+                                const totalPages = Math.max(
+                                  1,
+                                  Math.ceil(totalMatches / pageSize),
+                                );
+                                const validPage = Math.min(page, totalPages);
+                                const startIndex = (validPage - 1) * pageSize;
+                                const endIndex = Math.min(
+                                  startIndex + pageSize,
+                                  totalMatches,
+                                );
+                                const paginatedMatches = sortedMatches.slice(
+                                  startIndex,
+                                  endIndex,
+                                );
 
-                            const listingCoords = listing ? resolveListingCoordinates(listing) : null;
-                            const listingHazard = listingCoords && listing
-                              ? assessPropertyHazard(listingCoords, listing.ward, listing.address)
-                              : null;
+                                return (
+                                  <>
+                                    {paginatedMatches.map((m) => {
+                                      const listing = matchedListing(
+                                        m.listingId ?? "",
+                                      );
+                                      const isExpanded =
+                                        expandedMatch === m._id;
+                                      const hasEvaluation =
+                                        evaluations[m._id] !== undefined
+                                          ? evaluations[m._id]
+                                          : m.evaluation;
+                                      const scoreDetail:
+                                        | EvaluationScoreDetail
+                                        | undefined =
+                                        scoreDetails[m._id] ??
+                                        (
+                                          m as Doc<"matching"> & {
+                                            scoreDetail?: EvaluationScoreDetail;
+                                          }
+                                        ).scoreDetail;
 
-                            return (
-                              <div
-                                key={m._id}
-                                id={`listing-row-${m.listingId}`}
-                                data-listing-id={m.listingId}
-                                className={`scroll-mt-24 border rounded-2xl overflow-hidden transition-all duration-300 ${
-                                  selectedForProposal.has(m._id)
-                                    ? "border-emerald-300 bg-emerald-50/60 ring-2 ring-emerald-500/20"
-                                    : "border-[var(--border-subtle)] bg-white hover:border-[var(--border-strong)] hover:shadow-sm"
-                                }`}
-                              >
-                                {/* Header Row */}
-                                <div
-                                  className="flex flex-col sm:flex-row sm:items-start justify-between px-5 py-3.5 gap-2 cursor-pointer select-none"
-                                  onClick={() => toggleExpand(m._id)}
-                                >
-                                  <div className="flex items-start gap-3 min-w-0">
-                                  {listing?.images?.[0] && (
-                                    <img
-                                      src={listing.images[0]}
-                                      alt=""
-                                      loading="lazy"
-                                      referrerPolicy="no-referrer"
-                                      className="h-20 w-28 shrink-0 rounded-lg object-cover bg-slate-100"
-                                      onError={(e) => (e.currentTarget.style.display = "none")}
-                                    />
-                                  )}
-                                  <div className="flex flex-wrap items-center gap-2.5 min-w-0">
-                                    {/* Tick here, then 顧客へ物件を提案 opens with these
+                                      // Extract score from DB score or from evaluation text string
+                                      const extractedScore =
+                                        m.score ??
+                                        (hasEvaluation
+                                          ? hasEvaluation.match(
+                                              /評価[：:\s]*(\d+)/,
+                                            )?.[1]
+                                            ? Number(
+                                                hasEvaluation.match(
+                                                  /評価[：:\s]*(\d+)/,
+                                                )[1],
+                                              )
+                                            : undefined
+                                          : undefined);
+
+                                      const listingCoords = listing
+                                        ? resolveListingCoordinates(listing)
+                                        : null;
+                                      const listingHazard =
+                                        listingCoords && listing
+                                          ? assessPropertyHazard(
+                                              listingCoords,
+                                              listing.ward,
+                                              listing.address,
+                                            )
+                                          : null;
+
+                                      return (
+                                        <div
+                                          key={m._id}
+                                          id={`listing-row-${m.listingId}`}
+                                          data-listing-id={m.listingId}
+                                          className={`scroll-mt-24 border rounded-2xl overflow-hidden transition-all duration-300 ${
+                                            selectedForProposal.has(m._id)
+                                              ? "border-emerald-300 bg-emerald-50/60 ring-2 ring-emerald-500/20"
+                                              : "border-[var(--border-subtle)] bg-white hover:border-[var(--border-strong)] hover:shadow-sm"
+                                          }`}
+                                        >
+                                          {/* Header Row */}
+                                          <div
+                                            className="flex flex-col sm:flex-row sm:items-start justify-between px-5 py-3.5 gap-2 cursor-pointer select-none"
+                                            onClick={() => toggleExpand(m._id)}
+                                          >
+                                            <div className="flex items-start gap-3 min-w-0">
+                                              {listing?.images?.[0] && (
+                                                <img
+                                                  src={listing.images[0]}
+                                                  alt=""
+                                                  loading="lazy"
+                                                  referrerPolicy="no-referrer"
+                                                  className="h-20 w-28 shrink-0 rounded-lg object-cover bg-slate-100"
+                                                  onError={(e) =>
+                                                    (e.currentTarget.style.display =
+                                                      "none")
+                                                  }
+                                                />
+                                              )}
+                                              <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                                                {/* Tick here, then 顧客へ物件を提案 opens with these
                                     already chosen. stopPropagation keeps the click
                                     from toggling the row's expand state. */}
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedForProposal.has(m._id)}
-                                      onChange={() =>
-                                        toggleProposalSelection(m._id)
-                                      }
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="w-4 h-4 accent-emerald-700 shrink-0 cursor-pointer"
-                                      title="提案メールに含める"
-                                      aria-label="提案に含める"
-                                    />
-                                    {listings === undefined ? (
-                                      <span
-                                        className="h-5 w-56 max-w-full animate-pulse rounded-md bg-slate-200"
-                                        role="status"
-                                        aria-label="物件情報を読み込み中"
-                                      />
-                                    ) : (
-                                      <span className="text-[17px] font-bold text-[var(--text-primary)] truncate">
-                                        {listing?.address || (listing ? "所在地未記載" : "物件情報を取得できませんでした")}
-                                      </span>
-                                    )}
-                                    {/* Same rule as the 本日の新着 tab so badge and count agree. */}
-                                    {isFoundToday(m) && (
-                                      <span className="shrink-0 rounded-full bg-[#3f6b3f] px-2.5 py-0.5 text-[12.5px] font-bold text-white">
-                                        新着
-                                      </span>
-                                    )}
-                                    {(listing?.station || listing?.walkMinutes != null || listing?.area != null || listing?.landSize != null ||
-                                      listing?.buildYear != null || listing?.structure || listing?.structureType || listing?.yield != null ||
-                                      listing?.buildingCoverageRatio != null || listing?.floorAreaRatio != null) && (
-                                      <>
-                                        <div className="basis-full h-0" />
-                                        <div className="text-[14px] text-slate-500">
-                                          {[
-                                            listing?.station
-                                              ? `${listing.station}${listing.walkMinutes != null ? ` 徒歩${listing.walkMinutes}分` : ""}`
-                                              : listing?.walkMinutes != null
-                                                ? `徒歩${listing.walkMinutes}分`
-                                                : null,
-                                            listing?.area != null || listing?.landSize != null
-                                              ? `${listing.area ?? listing.landSize}㎡`
-                                              : null,
-                                            listing?.buildYear != null
-                                              ? listing.buildYear >= new Date().getFullYear()
-                                                ? "新築"
-                                                : `築${new Date().getFullYear() - listing.buildYear}年`
-                                              : null,
-                                            listing?.structureType || listing?.structure || null,
-                                            listing?.yield != null ? `利回り${listing.yield}%` : null,
-                                            listing?.buildingCoverageRatio != null || listing?.floorAreaRatio != null
-                                              ? `建ぺい率/容積率 ${listing.buildingCoverageRatio ?? "—"}%/${listing.floorAreaRatio ?? "—"}%`
-                                              : null,
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" ・ ")}
-                                        </div>
-                                      </>
-                                    )}
-                                    <div className="basis-full h-0" />
+                                                <input
+                                                  type="checkbox"
+                                                  checked={selectedForProposal.has(
+                                                    m._id,
+                                                  )}
+                                                  onChange={() =>
+                                                    toggleProposalSelection(
+                                                      m._id,
+                                                    )
+                                                  }
+                                                  onClick={(e) =>
+                                                    e.stopPropagation()
+                                                  }
+                                                  className="w-4 h-4 accent-emerald-700 shrink-0 cursor-pointer"
+                                                  title="提案メールに含める"
+                                                  aria-label="提案に含める"
+                                                />
+                                                {listings === undefined ? (
+                                                  <span
+                                                    className="h-5 w-56 max-w-full animate-pulse rounded-md bg-slate-200"
+                                                    role="status"
+                                                    aria-label="物件情報を読み込み中"
+                                                  />
+                                                ) : (
+                                                  <span className="text-[17px] font-bold text-[var(--text-primary)] truncate">
+                                                    {listing?.address ||
+                                                      (listing
+                                                        ? "所在地未記載"
+                                                        : "物件情報を取得できませんでした")}
+                                                  </span>
+                                                )}
+                                                {/* Same rule as the 本日の新着 tab so badge and count agree. */}
+                                                {isFoundToday(m) && (
+                                                  <span className="shrink-0 rounded-full bg-[#3f6b3f] px-2.5 py-0.5 text-[12.5px] font-bold text-white">
+                                                    新着
+                                                  </span>
+                                                )}
+                                                {(listing?.station ||
+                                                  listing?.walkMinutes !=
+                                                    null ||
+                                                  listing?.area != null ||
+                                                  listing?.landSize != null ||
+                                                  listing?.buildYear != null ||
+                                                  listing?.structure ||
+                                                  listing?.structureType ||
+                                                  listing?.yield != null ||
+                                                  listing?.buildingCoverageRatio !=
+                                                    null ||
+                                                  listing?.floorAreaRatio !=
+                                                    null) && (
+                                                  <>
+                                                    <div className="basis-full h-0" />
+                                                    <div className="text-[14px] text-slate-500">
+                                                      {[
+                                                        listing?.station
+                                                          ? `${listing.station}${listing.walkMinutes != null ? ` 徒歩${listing.walkMinutes}分` : ""}`
+                                                          : listing?.walkMinutes !=
+                                                              null
+                                                            ? `徒歩${listing.walkMinutes}分`
+                                                            : null,
+                                                        listing?.area != null ||
+                                                        listing?.landSize !=
+                                                          null
+                                                          ? `${listing.area ?? listing.landSize}㎡`
+                                                          : null,
+                                                        listing?.buildYear !=
+                                                        null
+                                                          ? listing.buildYear >=
+                                                            new Date().getFullYear()
+                                                            ? "新築"
+                                                            : `築${new Date().getFullYear() - listing.buildYear}年`
+                                                          : null,
+                                                        listing?.structureType ||
+                                                          listing?.structure ||
+                                                          null,
+                                                        listing?.yield != null
+                                                          ? `利回り${listing.yield}%`
+                                                          : null,
+                                                        listing?.buildingCoverageRatio !=
+                                                          null ||
+                                                        listing?.floorAreaRatio !=
+                                                          null
+                                                          ? `建ぺい率/容積率 ${listing.buildingCoverageRatio ?? "—"}%/${listing.floorAreaRatio ?? "—"}%`
+                                                          : null,
+                                                      ]
+                                                        .filter(Boolean)
+                                                        .join(" ・ ")}
+                                                    </div>
+                                                  </>
+                                                )}
+                                                <div className="basis-full h-0" />
 
-                                    {/* Quick Hazard Map Inspection Badge & Hint */}
-                                    {(listingHazard?.overallRisk === "high" || listingHazard?.overallRisk === "medium") && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setHazardModalListing(
-                                          listing
-                                            ? { ...listing, _id: m.listingId }
-                                            : null,
-                                        );
-                                      }}
-                                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[13px] font-medium border-0 transition-all cursor-pointer shrink-0 select-none ${
-                                        listingHazard?.overallRisk === "high"
-                                          ? "bg-rose-50 text-rose-700 hover:bg-rose-100"
-                                          : listingHazard?.overallRisk === "medium"
-                                            ? "bg-amber-50 text-amber-800 hover:bg-amber-100"
-                                            : "bg-[#efeeea] text-[#5b5f5a] hover:bg-[#e6e5e0]"
-                                      }`}
-                                      title={
-                                        listingHazard
-                                          ? `【${listingHazard.overallRisk === "high" ? "高浸水警戒" : listingHazard.overallRisk === "medium" ? "浸水要確認" : "良好地盤"}】${listingHazard.riskLabel}: ${listingHazard.riskDescription}（クリックでハザードマップを開く）`
-                                          : "この物件のハザードマップ（浸水・地盤リスク）を確認"
-                                      }
-                                    >
-                                      {listingHazard?.overallRisk === "high" ? (
-                                        <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
-                                      ) : listingHazard?.overallRisk === "medium" ? (
-                                        <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
-                                      ) : (
-                                        <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                                      )}
-                                      <span>
-                                        {listingHazard?.overallRisk === "high"
-                                          ? "高浸水警戒"
-                                          : listingHazard?.overallRisk === "medium"
-                                            ? "浸水要確認"
-                                            : "良好地盤"}
-                                      </span>
-                                    </button>
-                                    )}
+                                                {/* Quick Hazard Map Inspection Badge & Hint */}
+                                                {(listingHazard?.overallRisk ===
+                                                  "high" ||
+                                                  listingHazard?.overallRisk ===
+                                                    "medium") && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setHazardModalListing(
+                                                        listing
+                                                          ? {
+                                                              ...listing,
+                                                              _id: m.listingId,
+                                                            }
+                                                          : null,
+                                                      );
+                                                    }}
+                                                    className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[13px] font-medium border-0 transition-all cursor-pointer shrink-0 select-none ${
+                                                      listingHazard?.overallRisk ===
+                                                      "high"
+                                                        ? "bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                                        : listingHazard?.overallRisk ===
+                                                            "medium"
+                                                          ? "bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                                          : "bg-[#efeeea] text-[#5b5f5a] hover:bg-[#e6e5e0]"
+                                                    }`}
+                                                    title={
+                                                      listingHazard
+                                                        ? `【${listingHazard.overallRisk === "high" ? "高浸水警戒" : listingHazard.overallRisk === "medium" ? "浸水要確認" : "良好地盤"}】${listingHazard.riskLabel}: ${listingHazard.riskDescription}（クリックでハザードマップを開く）`
+                                                        : "この物件のハザードマップ（浸水・地盤リスク）を確認"
+                                                    }
+                                                  >
+                                                    {listingHazard?.overallRisk ===
+                                                    "high" ? (
+                                                      <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                                    ) : listingHazard?.overallRisk ===
+                                                      "medium" ? (
+                                                      <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                                    ) : (
+                                                      <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                    )}
+                                                    <span>
+                                                      {listingHazard?.overallRisk ===
+                                                      "high"
+                                                        ? "高浸水警戒"
+                                                        : listingHazard?.overallRisk ===
+                                                            "medium"
+                                                          ? "浸水要確認"
+                                                          : "良好地盤"}
+                                                    </span>
+                                                  </button>
+                                                )}
 
-                                    {/* Source Portal Tag */}
-                                    {listing?.source === "email" ? (
-                                      <span title={listing.emailFrom || "メールで届いた物件紹介"}>
-                                        <Badge
-                                          variant="amber"
-                                          className="text-[13.5px] shrink-0"
-                                        >
-                                          メール
-                                        </Badge>
-                                      </span>
-                                    ) : (
-                                      listing?.source && (
-                                      <Badge
-                                        variant="brand"
-                                        className="text-[13px] shrink-0 rounded-full border-0 bg-[#efeeea] px-3 py-1 font-medium text-[#5b5f5a]"
-                                      >
-                                        {listing.source === "stepon"
-                                          ? "住友不動産"
-                                          : listing.source === "mitsui"
-                                            ? "三井のリハウス"
-                                            : listing.source === "tokyu"
-                                              ? "東急リバブル"
-                                              : listing.source === "nomu"
-                                                ? "ノムコム"
-                                                : listing.source === "nomu_pro"
-                                                  ? "ノムコムプロ"
-                                                  : listing.source === "mizuho"
-                                                    ? "みずほ不動産"
-                                                    : listing.source ===
-                                                        "mitsubishi_ufj"
-                                                      ? "三菱UFJ"
-                                                      : listing.source ===
-                                                          "odakyu"
-                                                        ? "小田急"
+                                                {/* Source Portal Tag */}
+                                                {listing?.source === "email" ? (
+                                                  <span
+                                                    title={
+                                                      listing.emailFrom ||
+                                                      "メールで届いた物件紹介"
+                                                    }
+                                                  >
+                                                    <Badge
+                                                      variant="amber"
+                                                      className="text-[13.5px] shrink-0"
+                                                    >
+                                                      メール
+                                                    </Badge>
+                                                  </span>
+                                                ) : (
+                                                  listing?.source && (
+                                                    <Badge
+                                                      variant="brand"
+                                                      className="text-[13px] shrink-0 rounded-full border-0 bg-[#efeeea] px-3 py-1 font-medium text-[#5b5f5a]"
+                                                    >
+                                                      {listing.source ===
+                                                      "stepon"
+                                                        ? "住友不動産"
                                                         : listing.source ===
-                                                            "keio"
-                                                          ? "京王"
+                                                            "mitsui"
+                                                          ? "三井のリハウス"
                                                           : listing.source ===
-                                                              "asahi"
-                                                            ? "朝日住宅"
+                                                              "tokyu"
+                                                            ? "東急リバブル"
                                                             : listing.source ===
-                                                                "haseko"
-                                                              ? "長谷工"
+                                                                "nomu"
+                                                              ? "ノムコム"
                                                               : listing.source ===
-                                                                  "daikyo"
-                                                                ? "大京穴吹"
+                                                                  "nomu_pro"
+                                                                ? "ノムコムプロ"
                                                                 : listing.source ===
-                                                                    "tokyotatemono"
-                                                                  ? "東京建物"
+                                                                    "mizuho"
+                                                                  ? "みずほ不動産"
                                                                   : listing.source ===
-                                                                      "homes"
-                                                                    ? "LIFULL HOME'S"
-                                                                    : listing.source}
-                                      </Badge>
-                                      )
-                                    )}
+                                                                      "mitsubishi_ufj"
+                                                                    ? "三菱UFJ"
+                                                                    : listing.source ===
+                                                                        "odakyu"
+                                                                      ? "小田急"
+                                                                      : listing.source ===
+                                                                          "keio"
+                                                                        ? "京王"
+                                                                        : listing.source ===
+                                                                            "asahi"
+                                                                          ? "朝日住宅"
+                                                                          : listing.source ===
+                                                                              "haseko"
+                                                                            ? "長谷工"
+                                                                            : listing.source ===
+                                                                                "daikyo"
+                                                                              ? "大京穴吹"
+                                                                              : listing.source ===
+                                                                                  "tokyotatemono"
+                                                                                ? "東京建物"
+                                                                                : listing.source ===
+                                                                                    "homes"
+                                                                                  ? "LIFULL HOME'S"
+                                                                                  : listing.source}
+                                                    </Badge>
+                                                  )
+                                                )}
 
-                                    {/* The portal's own 新着 badge. Kept separate from
+                                                {/* The portal's own 新着 badge. Kept separate from
                                     掲載日: 東急リバブル・みずほ・東京建物 show this
                                     badge but never publish a date. */}
-                                    {/* Property type and the portal's own 新着 flag
+                                                {/* Property type and the portal's own 新着 flag
                                         are in the row's subtitle line now — a row
                                         with six coloured badges was unreadable. */}
 
-                                    {/* Evaluation Status Badge if evaluated but no score */}
-                                    {hasEvaluation &&
-                                      extractedScore === undefined && (
-                                        <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1 shrink-0">
-                                          評価済み
-                                        </span>
-                                      )}
+                                                {/* Evaluation Status Badge if evaluated but no score */}
+                                                {hasEvaluation &&
+                                                  extractedScore ===
+                                                    undefined && (
+                                                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1 shrink-0">
+                                                      評価済み
+                                                    </span>
+                                                  )}
 
-                                    {evaluatingId === m._id && (
-                                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0 animate-pulse">
-                                        <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
-                                        評価中...
-                                      </span>
-                                    )}
-
-                                    <div className="basis-full h-0" />
-                                    <DealScoreBadge listing={listing} match={m} />
-
-                                  </div>
-                                  </div>
-
-                                  <div className="flex items-start gap-4 shrink-0 text-slate-700">
-                                    {listing?.price && (
-                                      <div className="flex flex-col items-end">
-                                        <div className="flex items-center gap-1.5">
-                                          {(() => {
-                                            const area = listing.area || listing.landSize || 0;
-                                            const benchmark = (m.scoreDetail as any)?.marketAvgPricePerSqm || listing.mlitBenchmark;
-                                            if (area > 0 && listing.price && benchmark) {
-                                              const expected = Math.round(benchmark * area);
-                                              const diff = expected - listing.price;
-                                              const pct = Math.round((diff / expected) * 100);
-                                              if (pct >= 8) {
-                                                return (
-                                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[13.5px] font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                                    <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
-                                                    相場比 -{pct}% 割安
+                                                {evaluatingId === m._id && (
+                                                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0 animate-pulse">
+                                                    <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                                                    評価中...
                                                   </span>
-                                                );
-                                              }
-                                            }
-                                            return null;
-                                          })()}
-                                          {(listing.priceDropped || (listing.previousPrice && listing.price < listing.previousPrice)) && (
-                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[13.5px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                                              <TrendingDown className="w-3 h-3 text-rose-500" />
-                                              値下げ{listing.priceDropPct ? ` -${listing.priceDropPct}%` : ""}
-                                            </span>
-                                          )}
-                                          <span className="text-[28px] font-bold leading-none text-slate-900 font-data">
-                                            {formatMan(listing.price)}
-                                            <span className="text-sm font-normal ml-1 text-slate-600">
-                                              円
-                                            </span>
-                                          </span>
-                                        </div>
-                                        {listing.previousPrice && listing.price < listing.previousPrice && (
-                                          <span className="text-[14px] text-slate-400 line-through font-data">
-                                            {formatMan(listing.previousPrice)}円
-                                          </span>
-                                        )}
-                                        {extractedScore !== undefined && (
-                                          <span className="mt-2">
-                                            <ScoreChip score={extractedScore} />
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
+                                                )}
 
-                                    {/* No 取得日 on the collapsed row — it competed with
+                                                <div className="basis-full h-0" />
+                                                <DealScoreBadge
+                                                  listing={listing}
+                                                  match={m}
+                                                />
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-start gap-4 shrink-0 text-slate-700">
+                                              {listing?.price && (
+                                                <div className="flex flex-col items-end">
+                                                  <div className="flex items-center gap-1.5">
+                                                    {(() => {
+                                                      const area =
+                                                        listing.area ||
+                                                        listing.landSize ||
+                                                        0;
+                                                      const benchmark =
+                                                        (m.scoreDetail as any)
+                                                          ?.marketAvgPricePerSqm ||
+                                                        listing.mlitBenchmark;
+                                                      if (
+                                                        area > 0 &&
+                                                        listing.price &&
+                                                        benchmark
+                                                      ) {
+                                                        const expected =
+                                                          Math.round(
+                                                            benchmark * area,
+                                                          );
+                                                        const diff =
+                                                          expected -
+                                                          listing.price;
+                                                        const pct = Math.round(
+                                                          (diff / expected) *
+                                                            100,
+                                                        );
+                                                        if (pct >= 8) {
+                                                          return (
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[13.5px] font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                                              <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
+                                                              相場比 -{pct}%
+                                                              割安
+                                                            </span>
+                                                          );
+                                                        }
+                                                      }
+                                                      return null;
+                                                    })()}
+                                                    {(listing.priceDropped ||
+                                                      (listing.previousPrice &&
+                                                        listing.price <
+                                                          listing.previousPrice)) && (
+                                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[13.5px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                                                        <TrendingDown className="w-3 h-3 text-rose-500" />
+                                                        値下げ
+                                                        {listing.priceDropPct
+                                                          ? ` -${listing.priceDropPct}%`
+                                                          : ""}
+                                                      </span>
+                                                    )}
+                                                    <span className="text-[28px] font-bold leading-none text-slate-900 font-data">
+                                                      {formatMan(listing.price)}
+                                                      <span className="text-sm font-normal ml-1 text-slate-600">
+                                                        円
+                                                      </span>
+                                                    </span>
+                                                  </div>
+                                                  {listing.previousPrice &&
+                                                    listing.price <
+                                                      listing.previousPrice && (
+                                                      <span className="text-[14px] text-slate-400 line-through font-data">
+                                                        {formatMan(
+                                                          listing.previousPrice,
+                                                        )}
+                                                        円
+                                                      </span>
+                                                    )}
+                                                  {extractedScore !==
+                                                    undefined && (
+                                                    <span className="mt-2">
+                                                      <ScoreChip
+                                                        score={extractedScore}
+                                                      />
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+
+                                              {/* No 取得日 on the collapsed row — it competed with
                                     price / area / walk time for space and is the
                                     least useful of them at a glance. Both dates
                                     (掲載日 and 取得日時) are in the expanded details. */}
 
-                                    <span className="sr-only">
-                                      {isExpanded ? "詳細を閉じる" : "詳細を開く"}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Expanded Details */}
-                                {(isExpanded || closingMatchId === m._id) && listing && createPortal(
-                                  <div
-                                    className={`fixed inset-0 z-[80] flex flex-col overflow-y-auto bg-[var(--bg-page)] ${
-                                      closingMatchId === m._id ? "listing-modal-exit" : "listing-modal-enter"
-                                    }`}
-                                    role="dialog"
-                                    aria-modal="true"
-                                    aria-label={listing.address || "物件詳細"}
-                                  >
-                                    <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-white/95 backdrop-blur">
-                                      <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3.5">
-                                        <button
-                                          type="button"
-                                          onClick={handleCloseExpanded}
-                                          className="group inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-semibold text-slate-800 transition-all duration-150 hover:bg-[#e4e2dc] hover:shadow-2xs active:scale-[0.98]"
-                                          title="一覧に戻る (Esc)"
-                                        >
-                                          <ArrowLeft className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5" />
-                                          一覧に戻る
-                                        </button>
-                                        {extractedScore !== undefined && (
-                                          <div className="ml-auto shrink-0"><ScoreChip score={extractedScore} small /></div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  <div className="mx-auto w-full max-w-5xl flex-1 space-y-5 px-5 pb-10 pt-6 text-sm">
-                                    <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
-                                    {listing.images?.[0] && (
-                                      <img
-                                        src={listing.images[0]}
-                                        alt="物件写真"
-                                        referrerPolicy="no-referrer"
-                                        className="mb-5 max-h-80 w-full rounded-lg object-cover bg-slate-100"
-                                        onError={(e) => (e.currentTarget.style.display = "none")}
-                                      />
-                                    )}
-                                    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-                                      <h2 className="min-w-0 text-[20px] font-bold text-[var(--text-primary)]">
-                                        {listing.address || "物件詳細"}
-                                      </h2>
-                                      {listing.price ? (
-                                        <div className="shrink-0">
-                                          <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
-                                            {formatMan(listing.price)}
-                                          </span>
-                                          <span className="ml-1.5 text-[13px] text-slate-600">円</span>
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                    <div className="mt-3">
-                                      <DealScoreBadge listing={listing} match={m} />
-                                    </div>
-                                    {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
-                                    {(listing.station ||
-                                      listing.walkMinutes != null ||
-                                      listing.area != null ||
-                                      listing.landSize != null ||
-                                      listing.floor != null ||
-                                      listing.elevators != null ||
-                                      listing.structure ||
-                                      listing.totalUnits != null ||
-                                      listing.roadWidth != null ||
-                                      listing.frontage != null ||
-                                      listing.buildYear != null ||
-                                      listing.yield != null ||
-                                      listing.buildingCoverageRatio != null ||
-                                      listing.floorAreaRatio != null ||
-                                      listing.layout ||
-                                      listing.specs) && (
-                                      <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-[var(--border-subtle)] pt-5 sm:grid-cols-4">
-                                        {(listing.station || listing.walkMinutes != null) && (
-                                          <div>
-                                            <div className="text-xs text-slate-500">最寄駅</div>
-                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
-                                              {[listing.station, listing.walkMinutes != null ? `徒歩${listing.walkMinutes}分` : null].filter(Boolean).join(" ")}
-                                            </div>
-                                          </div>
-                                        )}
-                                        {(listing.layout || specText(listing, "間取り")) && (
-                                          <div>
-                                            <div className="text-xs text-slate-500">間取り</div>
-                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{listing.layout || specText(listing, "間取り")}</div>
-                                          </div>
-                                        )}
-                                        {(specText(listing, "土地面積") || listing.landSize != null) && (
-                                          <div>
-                                            <div className="text-xs text-slate-500">土地面積</div>
-                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "土地面積") ?? `${listing.landSize}㎡`}</div>
-                                          </div>
-                                        )}
-                                        {(specText(listing, "建物面積", "専有面積", "延床面積") || listing.area != null) && (
-                                          <div>
-                                            <div className="text-xs text-slate-500">専有/延床面積</div>
-                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "建物面積", "専有面積", "延床面積") ?? `${listing.area}㎡`}</div>
-                                          </div>
-                                        )}
-                                        {listing.floor != null && (
-                                          <div>
-<div className="text-xs text-slate-500">階数</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.floor < 0 ? `地下${-listing.floor}階` : `${listing.floor}階`}</div>
-</div>
-                                        )}
-                                        {listing.elevators != null && (
-                                          <div>
-<div className="text-xs text-slate-500">EV</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.elevators === 0 ? "なし" : `${listing.elevators}基`}</div>
-</div>
-                                        )}
-                                        {(listing.structure || listing.structureType || specText(listing, "構造・工法", "建物構造", "構造")) && (
-                                          <div>
-<div className="text-xs text-slate-500">構造</div>
-<div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">{specText(listing, "構造・工法") || listing.structure || listing.structureType || specText(listing, "建物構造", "構造")}</div>
-</div>
-                                        )}
-                                        {listing.totalUnits != null && (
-                                          <div>
-<div className="text-xs text-slate-500">総戸数</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.totalUnits}戸</div>
-</div>
-                                        )}
-                                        {listing.buildYear != null && (
-                                          <div>
-<div className="text-xs text-slate-500">築年</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildYear}年 ({listing.buildYear >= new Date().getFullYear() ? "新築" : `築${new Date().getFullYear() - listing.buildYear}年`})</div>
-</div>
-                                        )}
-                                        {listing.yield != null && (
-                                          <div>
-<div className="text-xs text-slate-500">利回り</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.yield}%</div>
-</div>
-                                        )}
-                                        {listing.roadWidth != null && (
-                                          <div>
-<div className="text-xs text-slate-500">前面道路</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">幅員{listing.roadWidth}m</div>
-</div>
-                                        )}
-                                        {listing.frontage != null && (
-                                          <div>
-<div className="text-xs text-slate-500">間口</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.frontage}m</div>
-</div>
-                                        )}
-                                        {(listing.buildingCoverageRatio != null || listing.floorAreaRatio != null) && (
-                                          <div>
-<div className="text-xs text-slate-500">建ぺい率/容積率</div>
-<div className="mt-1 text-[15px] font-medium text-slate-900">{listing.buildingCoverageRatio ?? "—"}% / {listing.floorAreaRatio ?? "—"}%</div>
-</div>
-                                        )}
-                                      </div>
-                                    )}
-                                    </div>
-
-                                    {/* Full detail-page table (管理費, 修繕積立金, 向き, 土地権利, ...). */}
-                                    {(() => {
-                                      const rows = Object.entries((listing.specs ?? {}) as Record<string, string>).filter(
-                                        ([k]) => k !== "価格" && k !== "所在地",
-                                      );
-                                      if (rows.length === 0) return null;
-                                      const specsOpen = openSpecs.has(m._id);
-                                      const toggleSpecs = () =>
-                                        setOpenSpecs((prev) => {
-                                          const next = new Set(prev);
-                                          if (next.has(m._id)) next.delete(m._id);
-                                          else next.add(m._id);
-                                          return next;
-                                        });
-                                      return (
-                                        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
-                                          <button
-                                            type="button"
-                                            onClick={toggleSpecs}
-                                            aria-expanded={specsOpen}
-                                            className="group mb-2 flex w-full cursor-pointer items-center justify-between text-[14.5px] font-bold text-slate-900"
-                                          >
-                                            <span>物件詳細 <span className="ml-1 text-[13px] font-medium text-slate-500">{rows.length}項目</span></span>
-                                            <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "rotate-180" : ""}`} />
-                                          </button>
-                                          <div className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "max-h-[3000px] opacity-100" : "relative max-h-36 overflow-hidden"}`}>
-                                          <dl className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
-                                            {rows.map(([k, v]) => (
-                                              <div
-                                                key={k}
-                                                className="grid grid-cols-[8.5rem_1fr] gap-3 border-b border-slate-100 py-2.5 text-[14px]"
-                                              >
-                                                <dt className="text-slate-500">{k}</dt>
-                                                <dd className="min-w-0 break-words font-medium text-slate-900">{v}</dd>
-                                              </div>
-                                            ))}
-                                          </dl>
-                                          {!specsOpen && (
-                                            <button
-                                              type="button"
-                                              onClick={toggleSpecs}
-                                              className="absolute inset-x-0 bottom-0 flex h-20 cursor-pointer items-end justify-center bg-gradient-to-t from-white via-white/85 to-transparent pb-1 text-[13px] font-bold text-[var(--brand)]"
-                                            >
-                                              すべて表示
-                                            </button>
-                                          )}
-                                          </div>
-                                        </div>
-                                      );
-                                    })()}
-
-                                    {/* Hazard card: risk level, area description, and the map button. */}
-                                    {(() => {
-                                      const risk = listingHazard?.overallRisk;
-                                      const tone =
-                                        risk === "high"
-                                          ? { box: "border-rose-200 bg-rose-50/60", pill: "bg-rose-100 text-rose-800", name: "高浸水警戒" }
-                                          : risk === "medium"
-                                            ? { box: "border-amber-200 bg-amber-50/60", pill: "bg-amber-100 text-amber-900", name: "浸水要確認" }
-                                            : { box: "border-[var(--border-subtle)] bg-white", pill: "bg-[var(--brand-soft)] text-[var(--brand-ink)]", name: "良好地盤" };
-                                      return (
-                                        <div
-                                          className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${tone.box}`}
-                                          title={listingHazard?.riskDescription}
-                                        >
-                                          <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                              <span className="text-xs font-bold text-slate-500">ハザード</span>
-                                              <span className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-bold ${tone.pill}`}>
-                                                {tone.name}
+                                              <span className="sr-only">
+                                                {isExpanded
+                                                  ? "詳細を閉じる"
+                                                  : "詳細を開く"}
                                               </span>
                                             </div>
-                                            <p className="mt-1 text-[14px] text-slate-700">
-                                              {listingHazard?.riskLabel || "ハザード・地盤を確認"}
-                                            </p>
                                           </div>
-                                          <Button
-                                            className="h-10 shrink-0 gap-2 rounded-xl px-5 text-sm font-bold shadow-sm"
-                                            onClick={() =>
-                                              setHazardModalListing(
-                                                listing ? { ...listing, _id: m.listingId } : null,
-                                              )
-                                            }
-                                          >
-                                            <MapPin className="h-4 w-4" />
-                                            ハザードマップを見る
-                                          </Button>
-                                        </div>
-                                      );
-                                    })()}
 
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      {/* Email listings' `url` is a synthesized key used only
+                                          {/* Expanded Details */}
+                                          {(isExpanded ||
+                                            closingMatchId === m._id) &&
+                                            listing &&
+                                            createPortal(
+                                              <div
+                                                className={`fixed inset-0 z-[80] flex flex-col overflow-y-auto bg-[var(--bg-page)] ${
+                                                  closingMatchId === m._id
+                                                    ? "listing-modal-exit"
+                                                    : "listing-modal-enter"
+                                                }`}
+                                                role="dialog"
+                                                aria-modal="true"
+                                                aria-label={
+                                                  listing.address || "物件詳細"
+                                                }
+                                              >
+                                                <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-white/95 backdrop-blur">
+                                                  <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3.5">
+                                                    <button
+                                                      type="button"
+                                                      onClick={
+                                                        handleCloseExpanded
+                                                      }
+                                                      className="group inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-[#f1f0ec] px-4 text-sm font-semibold text-slate-800 transition-all duration-150 hover:bg-[#e4e2dc] hover:shadow-2xs active:scale-[0.98]"
+                                                      title="一覧に戻る (Esc)"
+                                                    >
+                                                      <ArrowLeft className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5" />
+                                                      一覧に戻る
+                                                    </button>
+                                                    {extractedScore !==
+                                                      undefined && (
+                                                      <div className="ml-auto shrink-0">
+                                                        <ScoreChip
+                                                          score={extractedScore}
+                                                          small
+                                                        />
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                                <div className="mx-auto w-full max-w-5xl flex-1 space-y-5 px-5 pb-10 pt-6 text-sm">
+                                                  <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
+                                                    {listing.images?.[0] && (
+                                                      <img
+                                                        src={listing.images[0]}
+                                                        alt="物件写真"
+                                                        referrerPolicy="no-referrer"
+                                                        className="mb-5 max-h-80 w-full rounded-lg object-cover bg-slate-100"
+                                                        onError={(e) =>
+                                                          (e.currentTarget.style.display =
+                                                            "none")
+                                                        }
+                                                      />
+                                                    )}
+                                                    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+                                                      <h2 className="min-w-0 text-[20px] font-bold text-[var(--text-primary)]">
+                                                        {listing.address ||
+                                                          "物件詳細"}
+                                                      </h2>
+                                                      {listing.price ? (
+                                                        <div className="shrink-0">
+                                                          <span className="text-[32px] font-extrabold leading-none text-slate-900 font-data">
+                                                            {formatMan(
+                                                              listing.price,
+                                                            )}
+                                                          </span>
+                                                          <span className="ml-1.5 text-[13px] text-slate-600">
+                                                            円
+                                                          </span>
+                                                        </div>
+                                                      ) : null}
+                                                    </div>
+                                                    <div className="mt-3">
+                                                      <DealScoreBadge
+                                                        listing={listing}
+                                                        match={m}
+                                                      />
+                                                    </div>
+                                                    {/* Listing Specs (Structure, Floor, EV, Units, Road) */}
+                                                    {(listing.station ||
+                                                      listing.walkMinutes !=
+                                                        null ||
+                                                      listing.area != null ||
+                                                      listing.landSize !=
+                                                        null ||
+                                                      listing.floor != null ||
+                                                      listing.elevators !=
+                                                        null ||
+                                                      listing.structure ||
+                                                      listing.totalUnits !=
+                                                        null ||
+                                                      listing.roadWidth !=
+                                                        null ||
+                                                      listing.frontage !=
+                                                        null ||
+                                                      listing.buildYear !=
+                                                        null ||
+                                                      listing.yield != null ||
+                                                      listing.buildingCoverageRatio !=
+                                                        null ||
+                                                      listing.floorAreaRatio !=
+                                                        null ||
+                                                      listing.layout ||
+                                                      listing.specs) && (
+                                                      <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-[var(--border-subtle)] pt-5 sm:grid-cols-4">
+                                                        {(listing.station ||
+                                                          listing.walkMinutes !=
+                                                            null) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              最寄駅
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {[
+                                                                listing.station,
+                                                                listing.walkMinutes !=
+                                                                null
+                                                                  ? `徒歩${listing.walkMinutes}分`
+                                                                  : null,
+                                                              ]
+                                                                .filter(Boolean)
+                                                                .join(" ")}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {(listing.layout ||
+                                                          specText(
+                                                            listing,
+                                                            "間取り",
+                                                          )) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              間取り
+                                                            </div>
+                                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">
+                                                              {listing.layout ||
+                                                                specText(
+                                                                  listing,
+                                                                  "間取り",
+                                                                )}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {(specText(
+                                                          listing,
+                                                          "土地面積",
+                                                        ) ||
+                                                          listing.landSize !=
+                                                            null) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              土地面積
+                                                            </div>
+                                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">
+                                                              {specText(
+                                                                listing,
+                                                                "土地面積",
+                                                              ) ??
+                                                                `${listing.landSize}㎡`}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {(specText(
+                                                          listing,
+                                                          "建物面積",
+                                                          "専有面積",
+                                                          "延床面積",
+                                                        ) ||
+                                                          listing.area !=
+                                                            null) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              専有/延床面積
+                                                            </div>
+                                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">
+                                                              {specText(
+                                                                listing,
+                                                                "建物面積",
+                                                                "専有面積",
+                                                                "延床面積",
+                                                              ) ??
+                                                                `${listing.area}㎡`}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.floor !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              階数
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {listing.floor < 0
+                                                                ? `地下${-listing.floor}階`
+                                                                : `${listing.floor}階`}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.elevators !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              EV
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {listing.elevators ===
+                                                              0
+                                                                ? "なし"
+                                                                : `${listing.elevators}基`}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {(listing.structure ||
+                                                          listing.structureType ||
+                                                          specText(
+                                                            listing,
+                                                            "構造・工法",
+                                                            "建物構造",
+                                                            "構造",
+                                                          )) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              構造
+                                                            </div>
+                                                            <div className="mt-1 line-clamp-2 text-[15px] font-medium text-slate-900">
+                                                              {specText(
+                                                                listing,
+                                                                "構造・工法",
+                                                              ) ||
+                                                                listing.structure ||
+                                                                listing.structureType ||
+                                                                specText(
+                                                                  listing,
+                                                                  "建物構造",
+                                                                  "構造",
+                                                                )}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.totalUnits !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              総戸数
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {
+                                                                listing.totalUnits
+                                                              }
+                                                              戸
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.buildYear !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              築年
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {
+                                                                listing.buildYear
+                                                              }
+                                                              年 (
+                                                              {listing.buildYear >=
+                                                              new Date().getFullYear()
+                                                                ? "新築"
+                                                                : `築${new Date().getFullYear() - listing.buildYear}年`}
+                                                              )
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.yield !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              利回り
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {listing.yield}%
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.roadWidth !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              前面道路
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              幅員
+                                                              {
+                                                                listing.roadWidth
+                                                              }
+                                                              m
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {listing.frontage !=
+                                                          null && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              間口
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {listing.frontage}
+                                                              m
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {(listing.buildingCoverageRatio !=
+                                                          null ||
+                                                          listing.floorAreaRatio !=
+                                                            null) && (
+                                                          <div>
+                                                            <div className="text-xs text-slate-500">
+                                                              建ぺい率/容積率
+                                                            </div>
+                                                            <div className="mt-1 text-[15px] font-medium text-slate-900">
+                                                              {listing.buildingCoverageRatio ??
+                                                                "—"}
+                                                              % /{" "}
+                                                              {listing.floorAreaRatio ??
+                                                                "—"}
+                                                              %
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </div>
+
+                                                  {/* Full detail-page table (管理費, 修繕積立金, 向き, 土地権利, ...). */}
+                                                  {(() => {
+                                                    const rows = Object.entries(
+                                                      (listing.specs ??
+                                                        {}) as Record<
+                                                        string,
+                                                        string
+                                                      >,
+                                                    ).filter(
+                                                      ([k]) =>
+                                                        k !== "価格" &&
+                                                        k !== "所在地",
+                                                    );
+                                                    if (rows.length === 0)
+                                                      return null;
+                                                    const specsOpen =
+                                                      openSpecs.has(m._id);
+                                                    const toggleSpecs = () =>
+                                                      setOpenSpecs((prev) => {
+                                                        const next = new Set(
+                                                          prev,
+                                                        );
+                                                        if (next.has(m._id))
+                                                          next.delete(m._id);
+                                                        else next.add(m._id);
+                                                        return next;
+                                                      });
+                                                    return (
+                                                      <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5">
+                                                        <button
+                                                          type="button"
+                                                          onClick={toggleSpecs}
+                                                          aria-expanded={
+                                                            specsOpen
+                                                          }
+                                                          className="group mb-2 flex w-full cursor-pointer items-center justify-between text-[14.5px] font-bold text-slate-900"
+                                                        >
+                                                          <span>
+                                                            物件詳細{" "}
+                                                            <span className="ml-1 text-[13px] font-medium text-slate-500">
+                                                              {rows.length}項目
+                                                            </span>
+                                                          </span>
+                                                          <ChevronDown
+                                                            className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "rotate-180" : ""}`}
+                                                          />
+                                                        </button>
+                                                        <div
+                                                          className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${specsOpen ? "max-h-[3000px] opacity-100" : "relative max-h-36 overflow-hidden"}`}
+                                                        >
+                                                          <dl className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+                                                            {rows.map(
+                                                              ([k, v]) => (
+                                                                <div
+                                                                  key={k}
+                                                                  className="grid grid-cols-[8.5rem_1fr] gap-3 border-b border-slate-100 py-2.5 text-[14px]"
+                                                                >
+                                                                  <dt className="text-slate-500">
+                                                                    {k}
+                                                                  </dt>
+                                                                  <dd className="min-w-0 break-words font-medium text-slate-900">
+                                                                    {v}
+                                                                  </dd>
+                                                                </div>
+                                                              ),
+                                                            )}
+                                                          </dl>
+                                                          {!specsOpen && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={
+                                                                toggleSpecs
+                                                              }
+                                                              className="absolute inset-x-0 bottom-0 flex h-20 cursor-pointer items-end justify-center bg-gradient-to-t from-white via-white/85 to-transparent pb-1 text-[13px] font-bold text-[var(--brand)]"
+                                                            >
+                                                              すべて表示
+                                                            </button>
+                                                          )}
+                                                        </div>
+                                                      </div>
+                                                    );
+                                                  })()}
+
+                                                  {/* Hazard card: risk level, area description, and the map button. */}
+                                                  {(() => {
+                                                    const risk =
+                                                      listingHazard?.overallRisk;
+                                                    const tone =
+                                                      risk === "high"
+                                                        ? {
+                                                            box: "border-rose-200 bg-rose-50/60",
+                                                            pill: "bg-rose-100 text-rose-800",
+                                                            name: "高浸水警戒",
+                                                          }
+                                                        : risk === "medium"
+                                                          ? {
+                                                              box: "border-amber-200 bg-amber-50/60",
+                                                              pill: "bg-amber-100 text-amber-900",
+                                                              name: "浸水要確認",
+                                                            }
+                                                          : {
+                                                              box: "border-[var(--border-subtle)] bg-white",
+                                                              pill: "bg-[var(--brand-soft)] text-[var(--brand-ink)]",
+                                                              name: "良好地盤",
+                                                            };
+                                                    return (
+                                                      <div
+                                                        className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${tone.box}`}
+                                                        title={
+                                                          listingHazard?.riskDescription
+                                                        }
+                                                      >
+                                                        <div className="min-w-0">
+                                                          <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-bold text-slate-500">
+                                                              ハザード
+                                                            </span>
+                                                            <span
+                                                              className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-bold ${tone.pill}`}
+                                                            >
+                                                              {tone.name}
+                                                            </span>
+                                                          </div>
+                                                          <p className="mt-1 text-[14px] text-slate-700">
+                                                            {listingHazard?.riskLabel ||
+                                                              "ハザード・地盤を確認"}
+                                                          </p>
+                                                        </div>
+                                                        <Button
+                                                          className="h-10 shrink-0 gap-2 rounded-xl px-5 text-sm font-bold shadow-sm"
+                                                          onClick={() =>
+                                                            setHazardModalListing(
+                                                              listing
+                                                                ? {
+                                                                    ...listing,
+                                                                    _id: m.listingId,
+                                                                  }
+                                                                : null,
+                                                            )
+                                                          }
+                                                        >
+                                                          <MapPin className="h-4 w-4" />
+                                                          ハザードマップを見る
+                                                        </Button>
+                                                      </div>
+                                                    );
+                                                  })()}
+
+                                                  <div className="flex flex-wrap items-center gap-2">
+                                                    {/* Email listings' `url` is a synthesized key used only
                                           for de-dup, not a real page, so no link for those. */}
-                                      {listing.url && listing.source !== "email" && (
-                                        <a
-                                          href={listing.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex h-8 items-center rounded-md border border-[var(--border-subtle)] bg-white px-3 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                                        >
-                                          {listing.source}で見る
-                                        </a>
-                                      )}
-                                      {listing.address && GMAPS_KEY && (
-                                        <a
-                                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address)}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="gmaps-btn inline-flex h-8 items-center rounded-md border-2 border-transparent px-3 text-xs font-semibold text-[var(--text-primary)] transition-opacity hover:opacity-80"
-                                        >
-                                          Google Maps
-                                        </a>
-                                      )}
-                                    </div>
+                                                    {listing.url &&
+                                                      listing.source !==
+                                                        "email" && (
+                                                        <a
+                                                          href={listing.url}
+                                                          target="_blank"
+                                                          rel="noopener noreferrer"
+                                                          className="inline-flex h-8 items-center rounded-md border border-[var(--border-subtle)] bg-white px-3 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                                                        >
+                                                          {listing.source}で見る
+                                                        </a>
+                                                      )}
+                                                    {listing.address &&
+                                                      GMAPS_KEY && (
+                                                        <a
+                                                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address)}`}
+                                                          target="_blank"
+                                                          rel="noopener noreferrer"
+                                                          className="gmaps-btn inline-flex h-8 items-center rounded-md border-2 border-transparent px-3 text-xs font-semibold text-[var(--text-primary)] transition-opacity hover:opacity-80"
+                                                        >
+                                                          Google Maps
+                                                        </a>
+                                                      )}
+                                                  </div>
 
-                                    {/* ── Investor ROI & Cash Flow Simulator (Expandable Card) ── */}
-                                    {listing && (
+                                                  {/* ── Investor ROI & Cash Flow Simulator (Temporarily disabled) ── */}
+                                                  {/* {listing && (
                                       <InvestorRoiSimulator
                                         listing={{ ...listing, _id: m.listingId }}
                                         orderName={order.name}
                                         defaultExpanded={false}
                                         className="mt-3.5"
                                       />
-                                    )}
+                                    )} */}
 
-                                    {/* Email Source Details & PDF Attachments */}
-                                    {(listing.source === "email" ||
-                                      listing.url?.startsWith("email:") ||
-                                      Boolean(listing.emailFrom)) && (
-                                      <EmailListingDetails
-                                        listing={listing}
-                                        handleOpenAttachment={handleOpenAttachment}
-                                        openingAttachmentId={openingAttachmentId}
-                                      />
-                                    )}
-
-                                    {/* Evaluation Section */}
-                                    <div className="border-t border-slate-100 pt-3">
-                                      {hasEvaluation ? (
-                                        (() => {
-                                          const sd: any = scoreDetail ?? {};
-                                          const text = String(hasEvaluation);
-                                          const aiFailed = text.startsWith("AI解説の生成に失敗");
-                                          const narrative = text
-                                            .replace(/\n*【プロの総合投資スコア[^】]*】\s*$/, "")
-                                            .trim();
-                                          const score = extractedScore;
-                                          const ppsm: number | null = sd.listingPricePerSqm ?? null;
-                                          const mppsm: number | null = sd.marketAvgPricePerSqm ?? null;
-                                          const ratio = ppsm && mppsm ? ppsm / mppsm : null;
-                                          const warnings: string[] = sd.dataWarnings ?? [];
-                                          const amenityWarn = warnings.find((w) => w.includes("周辺施設"));
-                                          const otherWarns = warnings.filter((w) => !w.includes("周辺施設"));
-                                          const comps: any[] = sd.comparables ?? [];
-                                          const maxPpsm = Math.max(ppsm ?? 0, mppsm ?? 0, ...comps.map((c) => c.pricePerSqm ?? 0), 1);
-                                          const bar = (v: number | null | undefined, strong = false) => (
-                                            <div className="relative h-1.5 w-full rounded-full bg-stone-200/70">
-                                              {v != null && (
-                                                <div
-                                                  className={`h-full rounded-full ${strong ? "bg-[var(--brand)]" : "bg-emerald-800/30"}`}
-                                                  style={{ width: `${Math.min(100, (v / maxPpsm) * 100)}%` }}
-                                                />
-                                              )}
-                                              {mppsm != null && (
-                                                <div
-                                                  className="absolute -top-1 h-3.5 w-px bg-slate-800"
-                                                  style={{ left: `${Math.min(100, (mppsm / maxPpsm) * 100)}%` }}
-                                                />
-                                              )}
-                                            </div>
-                                          );
-                                          const row = (label: string, head: React.ReactNode, sub?: React.ReactNode) => (
-                                            <div className="grid grid-cols-[5.5rem_1fr] gap-4 border-b border-slate-100 py-4 first:pt-0 last:border-0">
-                                              <div className="text-sm text-slate-500">{label}</div>
-                                              <div>
-                                                <div className="text-base font-bold">{head}</div>
-                                                {sub && <div className="mt-1 text-sm leading-relaxed text-slate-600">{sub}</div>}
-                                              </div>
-                                            </div>
-                                          );
-                                          // A failed AI run has nothing to hide, so its retry notice stays visible.
-                                          const reportOpen = openReports.has(m._id) || aiFailed;
-                                          return (
-                                            <div className="space-y-6 text-[var(--text-primary)]">
-                                              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
-                                                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                                                  <span className="text-sm font-bold text-[var(--brand)]">物件評価レポート</span>
-                                                  <span className="text-[13.5px] text-slate-600">
-                                                    総合スコア <strong className="font-data text-xl text-slate-900">{score ?? "—"}</strong> / 100
-                                                  </span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                  <button
-                                                    type="button"
-                                                    className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3.5 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
-                                                    onClick={() =>
-                                                      setOpenReports((prev) => {
-                                                        const next = new Set(prev);
-                                                        if (next.has(m._id)) next.delete(m._id);
-                                                        else next.add(m._id);
-                                                        return next;
-                                                      })
-                                                    }
-                                                    aria-expanded={reportOpen}
-                                                  >
-                                                    <Sparkles className="h-4 w-4" />
-                                                    {reportOpen ? "AIレポートを閉じる" : "AIレポートを表示"}
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    className="h-9 cursor-pointer rounded-lg border border-[var(--border-subtle)] bg-white px-3 text-sm font-medium text-slate-700 hover:bg-[var(--bg-page-subtle)] disabled:opacity-50"
-                                                    onClick={() => handleEvaluate(m._id, listing, order)}
-                                                    disabled={evaluatingId === m._id}
-                                                  >
-                                                    {evaluatingId === m._id ? "評価中..." : "再評価"}
-                                                  </button>
-                                                </div>
-                                              </div>
-
-                                              {reportOpen && (
-                                              <div className="smooth-expand space-y-8 rounded-xl border border-[var(--border-subtle)] bg-white p-6">
-                                              <div className="grid gap-8 md:grid-cols-[13rem_1fr]">
-                                                <div>
-                                                  <div className="text-sm text-slate-500">総合投資スコア</div>
-                                                  <div className="mt-2 flex items-baseline gap-2">
-                                                    <span className="text-6xl font-bold leading-none tracking-tight font-data">{score ?? "—"}</span>
-                                                    <span className="text-sm text-slate-500">/ 100</span>
-                                                  </div>
-                                                  <div className="mt-3 h-1 w-full rounded-full bg-stone-200">
-                                                    <div className="h-full rounded-full bg-[var(--brand)]" style={{ width: `${score ?? 0}%` }} />
-                                                  </div>
-                                                  {aiFailed && (
-                                                    <p className="mt-3 text-xs leading-relaxed text-slate-500">
-                                                      社内査定ロジックによる確定値。AI解説は生成できませんでした{text.match(/失敗しました（(.*?)）/s)?.[1] ? `（${text.match(/失敗しました（(.*?)）/s)![1]}）` : ""}。{" "}
-                                                      <button
-                                                        type="button"
-                                                        className="cursor-pointer font-bold text-[var(--brand)] hover:underline"
-                                                        onClick={() => handleEvaluate(m._id, listing, order)}
-                                                        disabled={evaluatingId === m._id}
-                                                      >
-                                                        再試行
-                                                      </button>
-                                                    </p>
+                                                  {/* Email Source Details & PDF Attachments */}
+                                                  {(listing.source ===
+                                                    "email" ||
+                                                    listing.url?.startsWith(
+                                                      "email:",
+                                                    ) ||
+                                                    Boolean(
+                                                      listing.emailFrom,
+                                                    )) && (
+                                                    <EmailListingDetails
+                                                      listing={listing}
+                                                      handleOpenAttachment={
+                                                        handleOpenAttachment
+                                                      }
+                                                      openingAttachmentId={
+                                                        openingAttachmentId
+                                                      }
+                                                    />
                                                   )}
-                                                </div>
 
-                                                <div>
-                                                  {ratio != null &&
-                                                    row(
-                                                      "価格",
-                                                      ratio >= 1.05
-                                                        ? `相場の約${ratio.toFixed(1)}倍`
-                                                        : ratio <= 0.95
-                                                          ? `相場の約${ratio.toFixed(1)}倍（割安）`
-                                                          : "相場並み",
-                                                      `当物件 ${ppsm}万円/㎡ に対し、類似事例の相場は ${mppsm}万円/㎡`,
-                                                    )}
-                                                  {(sd.hazardRisk || sd.hazardLabel) &&
-                                                    row(
-                                                      "ハザード",
-                                                      <span
-                                                        className={
-                                                          sd.hazardRisk === "high"
-                                                            ? "text-rose-800"
-                                                            : sd.hazardRisk === "medium"
-                                                              ? "text-amber-700"
-                                                              : "text-emerald-800"
-                                                        }
-                                                      >
-                                                        {sd.hazardLabel ||
-                                                          (sd.hazardRisk === "high" ? "高浸水警戒" : sd.hazardRisk === "medium" ? "浸水要確認" : "良好地盤")}
-                                                        {sd.groundType ? `・${sd.groundType}` : ""}
-                                                      </span>,
-                                                      sd.hazardDescription,
-                                                    )}
-                                                  {amenityWarn
-                                                    ? row(
-                                                        "周辺施設",
-                                                        <span className="text-amber-700">評価から除外</span>,
-                                                        "データの取得に失敗したため、スコアには含まれていません。",
-                                                      )
-                                                    : sd.amenityCount != null &&
-                                                      row("周辺施設", `徒歩5分圏内に${sd.amenityCount}件`)}
-                                                  {otherWarns.length > 0 &&
-                                                    row(
-                                                      "注意",
-                                                      <span className="text-amber-700">データ不足</span>,
-                                                      otherWarns.map((w, i) => <div key={i}>{w}</div>),
-                                                    )}
-                                                </div>
-                                              </div>
-
-                                              {!aiFailed && narrative && (
-                                                <NarrativeView text={narrative} />
-                                              )}
-
-                                              {comps.length > 0 && (
-                                                <div>
-                                                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                                    <div className="text-base font-bold">類似取引事例</div>
-                                                    <div className="text-xs text-slate-500">
-                                                      国土交通省データ
-                                                      {listing.area != null ? ` ・ ${listing.area}㎡前後` : ""} ・ 面積が近い順
-                                                      {sd.marketAvgPrice != null ? ` ・ 平均 ${formatMan(sd.marketAvgPrice)}円` : ""}
-                                                    </div>
-                                                  </div>
-                                                  {ppsm != null && mppsm != null && (
-                                                    <p className="mt-2 text-[14.5px] text-slate-700">
-                                                      この物件は㎡単価 <strong>{ppsm}万円</strong>。周辺の相場 <strong>{mppsm}万円</strong> の
-                                                      <strong className={ppsm > mppsm ? "text-rose-700" : "text-[var(--brand)]"}>
-                                                        {" "}約{(ppsm / mppsm).toFixed(1)}倍
-                                                      </strong>
-                                                      です。下の棒が長いほど㎡あたりが高く、縦線が相場です。
-                                                    </p>
-                                                  )}
-                                                  {(() => {
-                                                    const cols = "grid-cols-[4.5rem_3.5rem_3.5rem_6rem_1fr_7rem]";
-                                                    const yr = (v: unknown) => `${String(v).replace(/年$/, "")}年`;
-                                                    const diff = (v?: number | null) => {
-                                                      if (v == null || mppsm == null || !mppsm) return null;
-                                                      const pct = Math.round((v / mppsm - 1) * 100);
-                                                      return (
-                                                        <span className={`text-xs font-bold ${pct > 0 ? "text-rose-700" : "text-[var(--brand)]"}`}>
-                                                          相場比 {pct > 0 ? "+" : ""}{pct}%
-                                                        </span>
-                                                      );
-                                                    };
-                                                    return (
-                                                      <div className="mt-3 overflow-x-auto">
-                                                        <div className="min-w-[36rem] text-sm">
-                                                          <div className={`grid ${cols} items-end gap-x-3 pb-2 text-xs text-slate-500`}>
-                                                            <span>所在</span>
-                                                            <span>築年</span>
-                                                            <span>時期</span>
-                                                            <span className="text-right">取引価格</span>
-                                                            <span className="relative block h-4">
-                                                              {mppsm != null && (
-                                                                <span
-                                                                  className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] font-bold text-slate-700"
-                                                                  style={{ left: `${Math.min(100, (mppsm / maxPpsm) * 100)}%` }}
-                                                                >
-                                                                  相場 {mppsm}
-                                                                </span>
-                                                              )}
-                                                            </span>
-                                                            <span className="text-right">㎡単価</span>
+                                                  {/* Evaluation Section */}
+                                                  <div className="border-t border-slate-100 pt-3">
+                                                    {hasEvaluation ? (
+                                                      (() => {
+                                                        const sd: any =
+                                                          scoreDetail ?? {};
+                                                        const text =
+                                                          String(hasEvaluation);
+                                                        const aiFailed =
+                                                          text.startsWith(
+                                                            "AI解説の生成に失敗",
+                                                          );
+                                                        const narrative = text
+                                                          .replace(
+                                                            /\n*【プロの総合投資スコア[^】]*】\s*$/,
+                                                            "",
+                                                          )
+                                                          .trim();
+                                                        const score =
+                                                          extractedScore;
+                                                        const ppsm:
+                                                          | number
+                                                          | null =
+                                                          sd.listingPricePerSqm ??
+                                                          null;
+                                                        const mppsm:
+                                                          | number
+                                                          | null =
+                                                          sd.marketAvgPricePerSqm ??
+                                                          null;
+                                                        const ratio =
+                                                          ppsm && mppsm
+                                                            ? ppsm / mppsm
+                                                            : null;
+                                                        const warnings: string[] =
+                                                          sd.dataWarnings ?? [];
+                                                        const amenityWarn =
+                                                          warnings.find((w) =>
+                                                            w.includes(
+                                                              "周辺施設",
+                                                            ),
+                                                          );
+                                                        const otherWarns =
+                                                          warnings.filter(
+                                                            (w) =>
+                                                              !w.includes(
+                                                                "周辺施設",
+                                                              ),
+                                                          );
+                                                        const comps: any[] =
+                                                          sd.comparables ?? [];
+                                                        const maxPpsm =
+                                                          Math.max(
+                                                            ppsm ?? 0,
+                                                            mppsm ?? 0,
+                                                            ...comps.map(
+                                                              (c) =>
+                                                                c.pricePerSqm ??
+                                                                0,
+                                                            ),
+                                                            1,
+                                                          );
+                                                        const bar = (
+                                                          v:
+                                                            | number
+                                                            | null
+                                                            | undefined,
+                                                          strong = false,
+                                                        ) => (
+                                                          <div className="relative h-1.5 w-full rounded-full bg-stone-200/70">
+                                                            {v != null && (
+                                                              <div
+                                                                className={`h-full rounded-full ${strong ? "bg-[var(--brand)]" : "bg-emerald-800/30"}`}
+                                                                style={{
+                                                                  width: `${Math.min(100, (v / maxPpsm) * 100)}%`,
+                                                                }}
+                                                              />
+                                                            )}
+                                                            {mppsm != null && (
+                                                              <div
+                                                                className="absolute -top-1 h-3.5 w-px bg-slate-800"
+                                                                style={{
+                                                                  left: `${Math.min(100, (mppsm / maxPpsm) * 100)}%`,
+                                                                }}
+                                                              />
+                                                            )}
                                                           </div>
-                                                          {ppsm != null && (
-                                                            <div className={`grid ${cols} items-center gap-x-3 rounded-lg bg-[var(--brand-soft)] px-0 py-2.5 font-bold`}>
-                                                              <span className="pl-2">当物件</span>
-                                                              <span className="font-normal">{listing.buildYear ? yr(listing.buildYear) : "—"}</span>
-                                                              <span />
-                                                              <span className="text-right font-data">{listing.price ? `${formatMan(listing.price)}円` : ""}</span>
-                                                              {bar(ppsm, true)}
-                                                              <span className="pr-2 text-right"><span className="font-data">{ppsm}万円</span><br />{diff(ppsm)}</span>
+                                                        );
+                                                        const row = (
+                                                          label: string,
+                                                          head: React.ReactNode,
+                                                          sub?: React.ReactNode,
+                                                        ) => (
+                                                          <div className="grid grid-cols-[5.5rem_1fr] gap-4 border-b border-slate-100 py-4 first:pt-0 last:border-0">
+                                                            <div className="text-sm text-slate-500">
+                                                              {label}
                                                             </div>
+                                                            <div>
+                                                              <div className="text-base font-bold">
+                                                                {head}
+                                                              </div>
+                                                              {sub && (
+                                                                <div className="mt-1 text-sm leading-relaxed text-slate-600">
+                                                                  {sub}
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </div>
+                                                        );
+                                                        // A failed AI run has nothing to hide, so its retry notice stays visible.
+                                                        const reportOpen =
+                                                          openReports.has(
+                                                            m._id,
+                                                          ) || aiFailed;
+                                                        return (
+                                                          <div className="space-y-6 text-[var(--text-primary)]">
+                                                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3">
+                                                              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                                                                <span className="text-sm font-bold text-[var(--brand)]">
+                                                                  物件評価レポート
+                                                                </span>
+                                                                <span className="text-[13.5px] text-slate-600">
+                                                                  総合スコア{" "}
+                                                                  <strong className="font-data text-xl text-slate-900">
+                                                                    {score ??
+                                                                      "—"}
+                                                                  </strong>{" "}
+                                                                  / 100
+                                                                </span>
+                                                              </div>
+                                                              <div className="flex items-center gap-2">
+                                                                <button
+                                                                  type="button"
+                                                                  className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3.5 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+                                                                  onClick={() =>
+                                                                    setOpenReports(
+                                                                      (
+                                                                        prev,
+                                                                      ) => {
+                                                                        const next =
+                                                                          new Set(
+                                                                            prev,
+                                                                          );
+                                                                        if (
+                                                                          next.has(
+                                                                            m._id,
+                                                                          )
+                                                                        )
+                                                                          next.delete(
+                                                                            m._id,
+                                                                          );
+                                                                        else
+                                                                          next.add(
+                                                                            m._id,
+                                                                          );
+                                                                        return next;
+                                                                      },
+                                                                    )
+                                                                  }
+                                                                  aria-expanded={
+                                                                    reportOpen
+                                                                  }
+                                                                >
+                                                                  <Sparkles className="h-4 w-4" />
+                                                                  {reportOpen
+                                                                    ? "AIレポートを閉じる"
+                                                                    : "AIレポートを表示"}
+                                                                </button>
+                                                                <button
+                                                                  type="button"
+                                                                  className="h-9 cursor-pointer rounded-lg border border-[var(--border-subtle)] bg-white px-3 text-sm font-medium text-slate-700 hover:bg-[var(--bg-page-subtle)] disabled:opacity-50"
+                                                                  onClick={() =>
+                                                                    handleEvaluate(
+                                                                      m._id,
+                                                                      listing,
+                                                                      order,
+                                                                    )
+                                                                  }
+                                                                  disabled={
+                                                                    evaluatingId ===
+                                                                    m._id
+                                                                  }
+                                                                >
+                                                                  {evaluatingId ===
+                                                                  m._id
+                                                                    ? "評価中..."
+                                                                    : "再評価"}
+                                                                </button>
+                                                              </div>
+                                                            </div>
+
+                                                            {reportOpen && (
+                                                              <div className="smooth-expand space-y-8 rounded-xl border border-[var(--border-subtle)] bg-white p-6">
+                                                                <div className="grid gap-8 md:grid-cols-[13rem_1fr]">
+                                                                  <div>
+                                                                    <div className="text-sm text-slate-500">
+                                                                      総合投資スコア
+                                                                    </div>
+                                                                    <div className="mt-2 flex items-baseline gap-2">
+                                                                      <span className="text-6xl font-bold leading-none tracking-tight font-data">
+                                                                        {score ??
+                                                                          "—"}
+                                                                      </span>
+                                                                      <span className="text-sm text-slate-500">
+                                                                        / 100
+                                                                      </span>
+                                                                    </div>
+                                                                    <div className="mt-3 h-1 w-full rounded-full bg-stone-200">
+                                                                      <div
+                                                                        className="h-full rounded-full bg-[var(--brand)]"
+                                                                        style={{
+                                                                          width: `${score ?? 0}%`,
+                                                                        }}
+                                                                      />
+                                                                    </div>
+                                                                    {aiFailed && (
+                                                                      <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                                                                        社内査定ロジックによる確定値。AI解説は生成できませんでした
+                                                                        {text.match(
+                                                                          /失敗しました（(.*?)）/s,
+                                                                        )?.[1]
+                                                                          ? `（${text.match(/失敗しました（(.*?)）/s)![1]}）`
+                                                                          : ""}
+                                                                        。{" "}
+                                                                        <button
+                                                                          type="button"
+                                                                          className="cursor-pointer font-bold text-[var(--brand)] hover:underline"
+                                                                          onClick={() =>
+                                                                            handleEvaluate(
+                                                                              m._id,
+                                                                              listing,
+                                                                              order,
+                                                                            )
+                                                                          }
+                                                                          disabled={
+                                                                            evaluatingId ===
+                                                                            m._id
+                                                                          }
+                                                                        >
+                                                                          再試行
+                                                                        </button>
+                                                                      </p>
+                                                                    )}
+                                                                  </div>
+
+                                                                  <div>
+                                                                    {ratio !=
+                                                                      null &&
+                                                                      row(
+                                                                        "価格",
+                                                                        ratio >=
+                                                                          1.05
+                                                                          ? `相場の約${ratio.toFixed(1)}倍`
+                                                                          : ratio <=
+                                                                              0.95
+                                                                            ? `相場の約${ratio.toFixed(1)}倍（割安）`
+                                                                            : "相場並み",
+                                                                        `当物件 ${ppsm}万円/㎡ に対し、類似事例の相場は ${mppsm}万円/㎡`,
+                                                                      )}
+                                                                    {(sd.hazardRisk ||
+                                                                      sd.hazardLabel) &&
+                                                                      row(
+                                                                        "ハザード",
+                                                                        <span
+                                                                          className={
+                                                                            sd.hazardRisk ===
+                                                                            "high"
+                                                                              ? "text-rose-800"
+                                                                              : sd.hazardRisk ===
+                                                                                  "medium"
+                                                                                ? "text-amber-700"
+                                                                                : "text-emerald-800"
+                                                                          }
+                                                                        >
+                                                                          {sd.hazardLabel ||
+                                                                            (sd.hazardRisk ===
+                                                                            "high"
+                                                                              ? "高浸水警戒"
+                                                                              : sd.hazardRisk ===
+                                                                                  "medium"
+                                                                                ? "浸水要確認"
+                                                                                : "良好地盤")}
+                                                                          {sd.groundType
+                                                                            ? `・${sd.groundType}`
+                                                                            : ""}
+                                                                        </span>,
+                                                                        sd.hazardDescription,
+                                                                      )}
+                                                                    {amenityWarn
+                                                                      ? row(
+                                                                          "周辺施設",
+                                                                          <span className="text-amber-700">
+                                                                            評価から除外
+                                                                          </span>,
+                                                                          "データの取得に失敗したため、スコアには含まれていません。",
+                                                                        )
+                                                                      : sd.amenityCount !=
+                                                                          null &&
+                                                                        row(
+                                                                          "周辺施設",
+                                                                          `徒歩5分圏内に${sd.amenityCount}件`,
+                                                                        )}
+                                                                    {otherWarns.length >
+                                                                      0 &&
+                                                                      row(
+                                                                        "注意",
+                                                                        <span className="text-amber-700">
+                                                                          データ不足
+                                                                        </span>,
+                                                                        otherWarns.map(
+                                                                          (
+                                                                            w,
+                                                                            i,
+                                                                          ) => (
+                                                                            <div
+                                                                              key={
+                                                                                i
+                                                                              }
+                                                                            >
+                                                                              {
+                                                                                w
+                                                                              }
+                                                                            </div>
+                                                                          ),
+                                                                        ),
+                                                                      )}
+                                                                  </div>
+                                                                </div>
+
+                                                                {!aiFailed &&
+                                                                  narrative && (
+                                                                    <NarrativeView
+                                                                      text={
+                                                                        narrative
+                                                                      }
+                                                                    />
+                                                                  )}
+
+                                                                {comps.length >
+                                                                  0 && (
+                                                                  <div>
+                                                                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                                                      <div className="text-base font-bold">
+                                                                        類似取引事例
+                                                                      </div>
+                                                                      <div className="text-xs text-slate-500">
+                                                                        国土交通省データ
+                                                                        {listing.area !=
+                                                                        null
+                                                                          ? ` ・ ${listing.area}㎡前後`
+                                                                          : ""}{" "}
+                                                                        ・
+                                                                        面積が近い順
+                                                                        {sd.marketAvgPrice !=
+                                                                        null
+                                                                          ? ` ・ 平均 ${formatMan(sd.marketAvgPrice)}円`
+                                                                          : ""}
+                                                                      </div>
+                                                                    </div>
+                                                                    {ppsm !=
+                                                                      null &&
+                                                                      mppsm !=
+                                                                        null && (
+                                                                        <p className="mt-2 text-[14.5px] text-slate-700">
+                                                                          この物件は㎡単価{" "}
+                                                                          <strong>
+                                                                            {
+                                                                              ppsm
+                                                                            }
+                                                                            万円
+                                                                          </strong>
+                                                                          。周辺の相場{" "}
+                                                                          <strong>
+                                                                            {
+                                                                              mppsm
+                                                                            }
+                                                                            万円
+                                                                          </strong>{" "}
+                                                                          の
+                                                                          <strong
+                                                                            className={
+                                                                              ppsm >
+                                                                              mppsm
+                                                                                ? "text-rose-700"
+                                                                                : "text-[var(--brand)]"
+                                                                            }
+                                                                          >
+                                                                            {" "}
+                                                                            約
+                                                                            {(
+                                                                              ppsm /
+                                                                              mppsm
+                                                                            ).toFixed(
+                                                                              1,
+                                                                            )}
+                                                                            倍
+                                                                          </strong>
+                                                                          です。下の棒が長いほど㎡あたりが高く、縦線が相場です。
+                                                                        </p>
+                                                                      )}
+                                                                    {(() => {
+                                                                      const cols =
+                                                                        "grid-cols-[4.5rem_3.5rem_3.5rem_6rem_1fr_7rem]";
+                                                                      const yr =
+                                                                        (
+                                                                          v: unknown,
+                                                                        ) =>
+                                                                          `${String(v).replace(/年$/, "")}年`;
+                                                                      const diff =
+                                                                        (
+                                                                          v?:
+                                                                            | number
+                                                                            | null,
+                                                                        ) => {
+                                                                          if (
+                                                                            v ==
+                                                                              null ||
+                                                                            mppsm ==
+                                                                              null ||
+                                                                            !mppsm
+                                                                          )
+                                                                            return null;
+                                                                          const pct =
+                                                                            Math.round(
+                                                                              (v /
+                                                                                mppsm -
+                                                                                1) *
+                                                                                100,
+                                                                            );
+                                                                          return (
+                                                                            <span
+                                                                              className={`text-xs font-bold ${pct > 0 ? "text-rose-700" : "text-[var(--brand)]"}`}
+                                                                            >
+                                                                              相場比{" "}
+                                                                              {pct >
+                                                                              0
+                                                                                ? "+"
+                                                                                : ""}
+                                                                              {
+                                                                                pct
+                                                                              }
+                                                                              %
+                                                                            </span>
+                                                                          );
+                                                                        };
+                                                                      return (
+                                                                        <div className="mt-3 overflow-x-auto">
+                                                                          <div className="min-w-[36rem] text-sm">
+                                                                            <div
+                                                                              className={`grid ${cols} items-end gap-x-3 pb-2 text-xs text-slate-500`}
+                                                                            >
+                                                                              <span>
+                                                                                所在
+                                                                              </span>
+                                                                              <span>
+                                                                                築年
+                                                                              </span>
+                                                                              <span>
+                                                                                時期
+                                                                              </span>
+                                                                              <span className="text-right">
+                                                                                取引価格
+                                                                              </span>
+                                                                              <span className="relative block h-4">
+                                                                                {mppsm !=
+                                                                                  null && (
+                                                                                  <span
+                                                                                    className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] font-bold text-slate-700"
+                                                                                    style={{
+                                                                                      left: `${Math.min(100, (mppsm / maxPpsm) * 100)}%`,
+                                                                                    }}
+                                                                                  >
+                                                                                    相場{" "}
+                                                                                    {
+                                                                                      mppsm
+                                                                                    }
+                                                                                  </span>
+                                                                                )}
+                                                                              </span>
+                                                                              <span className="text-right">
+                                                                                ㎡単価
+                                                                              </span>
+                                                                            </div>
+                                                                            {ppsm !=
+                                                                              null && (
+                                                                              <div
+                                                                                className={`grid ${cols} items-center gap-x-3 rounded-lg bg-[var(--brand-soft)] px-0 py-2.5 font-bold`}
+                                                                              >
+                                                                                <span className="pl-2">
+                                                                                  当物件
+                                                                                </span>
+                                                                                <span className="font-normal">
+                                                                                  {listing.buildYear
+                                                                                    ? yr(
+                                                                                        listing.buildYear,
+                                                                                      )
+                                                                                    : "—"}
+                                                                                </span>
+                                                                                <span />
+                                                                                <span className="text-right font-data">
+                                                                                  {listing.price
+                                                                                    ? `${formatMan(listing.price)}円`
+                                                                                    : ""}
+                                                                                </span>
+                                                                                {bar(
+                                                                                  ppsm,
+                                                                                  true,
+                                                                                )}
+                                                                                <span className="pr-2 text-right">
+                                                                                  <span className="font-data">
+                                                                                    {
+                                                                                      ppsm
+                                                                                    }
+                                                                                    万円
+                                                                                  </span>
+                                                                                  <br />
+                                                                                  {diff(
+                                                                                    ppsm,
+                                                                                  )}
+                                                                                </span>
+                                                                              </div>
+                                                                            )}
+                                                                            {comps.map(
+                                                                              (
+                                                                                c,
+                                                                                i,
+                                                                              ) => (
+                                                                                <div
+                                                                                  key={
+                                                                                    i
+                                                                                  }
+                                                                                  className={`grid ${cols} items-center gap-x-3 border-b border-slate-100 py-2.5`}
+                                                                                >
+                                                                                  <span
+                                                                                    className="truncate"
+                                                                                    title={
+                                                                                      c.district
+                                                                                    }
+                                                                                  >
+                                                                                    {c.district ||
+                                                                                      "—"}
+                                                                                  </span>
+                                                                                  <span>
+                                                                                    {c.buildYear
+                                                                                      ? yr(
+                                                                                          c.buildYear,
+                                                                                        )
+                                                                                      : "—"}
+                                                                                  </span>
+                                                                                  <span className="text-xs text-slate-500">
+                                                                                    {String(
+                                                                                      c.period ||
+                                                                                        "",
+                                                                                    ).replace(
+                                                                                      /年第(\d)四半期/,
+                                                                                      "年$1Q",
+                                                                                    )}
+                                                                                  </span>
+                                                                                  <span className="text-right font-data">
+                                                                                    {formatMan(
+                                                                                      c.price,
+                                                                                    )}
+
+                                                                                    円
+                                                                                  </span>
+                                                                                  {bar(
+                                                                                    c.pricePerSqm,
+                                                                                  )}
+                                                                                  <span className="text-right">
+                                                                                    <span className="font-data text-slate-700">
+                                                                                      {c.pricePerSqm !=
+                                                                                      null
+                                                                                        ? `${c.pricePerSqm}万円`
+                                                                                        : "—"}
+                                                                                    </span>
+                                                                                    <br />
+                                                                                    {diff(
+                                                                                      c.pricePerSqm,
+                                                                                    )}
+                                                                                  </span>
+                                                                                </div>
+                                                                              ),
+                                                                            )}
+                                                                          </div>
+                                                                        </div>
+                                                                      );
+                                                                    })()}
+                                                                  </div>
+                                                                )}
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        );
+                                                      })()
+                                                    ) : (
+                                                      <div className="space-y-1.5">
+                                                        <button
+                                                          type="button"
+                                                          className="group flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 px-5 text-[16px] font-bold text-white shadow-md shadow-indigo-500/30 transition-all hover:-translate-y-px hover:shadow-lg hover:shadow-indigo-500/40 active:translate-y-0 disabled:cursor-wait disabled:opacity-70 disabled:hover:translate-y-0"
+                                                          onClick={() =>
+                                                            handleEvaluate(
+                                                              m._id,
+                                                              listing,
+                                                              order,
+                                                            )
+                                                          }
+                                                          disabled={
+                                                            evaluatingId ===
+                                                            m._id
+                                                          }
+                                                        >
+                                                          {evaluatingId ===
+                                                          m._id ? (
+                                                            <Loader2 className="h-5 w-5 animate-spin" />
+                                                          ) : (
+                                                            <Sparkles className="h-5 w-5 transition-transform group-hover:rotate-12" />
                                                           )}
-                                                          {comps.map((c, i) => (
-                                                            <div
-                                                              key={i}
-                                                              className={`grid ${cols} items-center gap-x-3 border-b border-slate-100 py-2.5`}
-                                                            >
-                                                              <span className="truncate" title={c.district}>{c.district || "—"}</span>
-                                                              <span>{c.buildYear ? yr(c.buildYear) : "—"}</span>
-                                                              <span className="text-xs text-slate-500">
-                                                                {String(c.period || "").replace(/年第(\d)四半期/, "年$1Q")}
-                                                              </span>
-                                                              <span className="text-right font-data">{formatMan(c.price)}円</span>
-                                                              {bar(c.pricePerSqm)}
-                                                              <span className="text-right">
-                                                                <span className="font-data text-slate-700">{c.pricePerSqm != null ? `${c.pricePerSqm}万円` : "—"}</span>
-                                                                <br />
-                                                                {diff(c.pricePerSqm)}
-                                                              </span>
-                                                            </div>
-                                                          ))}
-                                                        </div>
+                                                          {evaluatingId ===
+                                                          m._id
+                                                            ? "AIが分析中..."
+                                                            : "AIで詳細レポートを生成"}
+                                                          <span className="rounded-md bg-white/25 px-1.5 py-0.5 text-[11px] font-extrabold leading-none tracking-wider">
+                                                            AI
+                                                          </span>
+                                                        </button>
+                                                        <p className="text-center text-[12.5px] text-slate-500">
+                                                          強み・リスク・提案方針をAIが文章で解説します。点数自体はAIでは決まりません。
+                                                        </p>
                                                       </div>
-                                                    );
+                                                    )}
+
+                                                    <details className="group/ex mt-3 rounded-xl border border-[var(--border-default)] bg-white text-[13.5px] leading-relaxed text-slate-700">
+                                                      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-[14px] font-bold text-[var(--brand-ink)]">
+                                                        評価の計算方法を見る（自動スコア・AIレポート）
+                                                        <ChevronDown className="h-4 w-4 transition-transform group-open/ex:rotate-180" />
+                                                      </summary>
+                                                      <div className="space-y-6 border-t border-[var(--border-subtle)] px-4 py-4">
+                                                        {/* ── Base score ── */}
+                                                        <section className="space-y-3">
+                                                          <h4 className="text-[15px] font-bold text-slate-900">
+                                                            ①
+                                                            自動スコア（検索時に自動計算・AIは使いません）
+                                                          </h4>
+                                                          <p>
+                                                            新しくマッチした物件に、検索のたびに自動で0〜100点のスコアを算出します。固定の計算式なので、同じ入力なら必ず同じ点数です。この物件の収益性を主に見て、買主の希望条件への合致は補助的に加点します。
+                                                          </p>
+
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              手順1　収益・市場スコア：メイン評価（全体の75〜90%）
+                                                            </div>
+                                                            <p className="mt-0.5 text-slate-600">
+                                                              データがある項目だけを、重みで加重平均します。データがない項目は計算から外れます。
+                                                            </p>
+                                                            <div className="mt-2 overflow-x-auto">
+                                                              <table className="w-full min-w-[30rem] text-left text-[13px]">
+                                                                <thead className="text-xs text-slate-500">
+                                                                  <tr className="border-b border-slate-200">
+                                                                    <th className="py-1.5 pr-3 font-medium">
+                                                                      項目
+                                                                    </th>
+                                                                    <th className="py-1.5 pr-3 font-medium">
+                                                                      重み
+                                                                    </th>
+                                                                    <th className="py-1.5 font-medium">
+                                                                      評価基準（満点=100%）
+                                                                    </th>
+                                                                  </tr>
+                                                                </thead>
+                                                                <tbody className="align-top [&_td]:py-1.5 [&_td]:pr-3 [&_tr]:border-b [&_tr]:border-slate-100">
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      相場比（㎡単価）
+                                                                    </td>
+                                                                    <td>40</td>
+                                                                    <td>
+                                                                      当物件の㎡単価
+                                                                      ÷
+                                                                      国土交通省の成約相場。0.7倍以下=100%、0.85倍以下=88%、1.0倍以下=72%、1.1倍以下=55%、1.25倍以下=35%、1.5倍以下=18%、それを超える場合=5%。極端に安い（0.25倍未満）場合は借地権等の疑いで55%止まり。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      表面利回り
+                                                                    </td>
+                                                                    <td>30</td>
+                                                                    <td>
+                                                                      9%以上=100%、7%以上=85%、5.5%以上=65%、4%以上=45%、それ未満は利回り÷10。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      駅徒歩
+                                                                    </td>
+                                                                    <td>15</td>
+                                                                    <td>
+                                                                      3分以内=100%、5分=90%、7分=80%、10分=65%、15分=45%、それ以降は段階的に低下。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      都心6区
+                                                                    </td>
+                                                                    <td>12</td>
+                                                                    <td>
+                                                                      千代田・中央・港・渋谷・新宿・文京なら加点（売却時の流動性）。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      値下げ
+                                                                    </td>
+                                                                    <td>12</td>
+                                                                    <td>
+                                                                      値下げ率10%以上=100%、5%以上=85%、それ未満=70%。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      ハザード
+                                                                    </td>
+                                                                    <td>10</td>
+                                                                    <td>
+                                                                      良好=100%、要確認=60%、高警戒=20%。
+                                                                    </td>
+                                                                  </tr>
+                                                                  <tr>
+                                                                    <td className="font-bold">
+                                                                      前面道路
+                                                                    </td>
+                                                                    <td>5</td>
+                                                                    <td>
+                                                                      6m以上=100%、4m以上=70%、2.7m以上=40%、それ未満=15%。
+                                                                    </td>
+                                                                  </tr>
+                                                                </tbody>
+                                                              </table>
+                                                            </div>
+                                                            <p className="mt-1.5 text-slate-600">
+                                                              相場は同じ区・同じ種別（マンション／土地／戸建）の国土交通省の取引データです。周辺施設の数は点数に含めません。
+                                                            </p>
+                                                          </div>
+
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              手順2　希望条件の適合度（補助）
+                                                            </div>
+                                                            <p className="mt-0.5">
+                                                              この検索に設定した条件だけを採点します（エリア22、予算25、物件種別12、利回り14、面積10、土地面積10、徒歩10、前面道路10、構造6、築年6
+                                                              など）。条件に合えば100%、外れるほど下がります。設定した条件が多いほど影響が大きくなり、全体の
+                                                              <strong>
+                                                                10〜25%
+                                                              </strong>
+                                                              を占めます。
+                                                            </p>
+                                                          </div>
+
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              手順3　合成して点数にする
+                                                            </div>
+                                                            <ol className="mt-0.5 list-decimal space-y-1 pl-5">
+                                                              <li>
+                                                                合成 ＝ 適合度 ×
+                                                                10〜25% ＋
+                                                                収益・市場スコア
+                                                                × 残り
+                                                              </li>
+                                                              <li>
+                                                                情報量の補正：価格・エリア・種別・徒歩・利回り・道路・築年・構造・面積の9項目のうち、記載があるものの割合で信頼度を決め、空欄が多い物件ほど50%（中間）に近づけます。
+                                                              </li>
+                                                              <li>
+                                                                点数 ＝ 8 ＋
+                                                                合成値 ×
+                                                                88（5〜97点の範囲）
+                                                              </li>
+                                                            </ol>
+                                                          </div>
+
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              手順4　上限（強みでは補えない重大な問題）
+                                                            </div>
+                                                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
+                                                              <li>
+                                                                希望エリア外：最大18点　／　物件種別が不一致：最大28点
+                                                              </li>
+                                                              <li>
+                                                                予算を50%超過：最大25点　／　25%超過：最大48点
+                                                              </li>
+                                                              <li>
+                                                                前面道路が必要幅員に不足：最大32点
+                                                              </li>
+                                                              <li>
+                                                                相場単価の+50%超の割高：最大58点　／　+30%超：最大72点
+                                                              </li>
+                                                              <li>
+                                                                高浸水警戒：最大84点　／　「要確認」項目あり：最大84点（4件以上は72点）
+                                                              </li>
+                                                            </ul>
+                                                          </div>
+                                                        </section>
+
+                                                        {/* ── AI report ── */}
+                                                        <section className="space-y-3 rounded-lg bg-gradient-to-br from-violet-50 to-indigo-50 p-4">
+                                                          <h4 className="text-[15px] font-bold text-indigo-900">
+                                                            ②
+                                                            AIレポート（ボタンを押したときだけ）
+                                                          </h4>
+                                                          <p>
+                                                            GoogleのAI（Gemini）が、不動産投資の専門家の視点で評価文を書きます。
+                                                            <strong>
+                                                              AIは点数を付けません。
+                                                            </strong>
+                                                            ①で決まった点数に合わせて、理由を文章にするだけです。
+                                                          </p>
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              AIに渡す情報
+                                                            </div>
+                                                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
+                                                              <li>
+                                                                物件情報（価格、面積、築年、構造、駅徒歩、道路、備考など）
+                                                              </li>
+                                                              <li>
+                                                                この検索の希望条件（エリア、予算、利回り、こだわり条件）
+                                                              </li>
+                                                              <li>
+                                                                国土交通省の類似成約事例と相場、ハザード・地盤診断
+                                                              </li>
+                                                              <li>
+                                                                周辺施設（Googleで調べた徒歩圏の施設情報。点数には入らず、レポート作成時の参考情報としてのみ使用）
+                                                              </li>
+                                                              <li>
+                                                                ①の確定点数、致命的な不適合、要確認事項
+                                                              </li>
+                                                            </ul>
+                                                          </div>
+                                                          <div>
+                                                            <div className="font-bold text-slate-900">
+                                                              出力
+                                                            </div>
+                                                            <p className="mt-0.5">
+                                                              結論の要約1文と、①顧客ニーズ適合度
+                                                              ②強み
+                                                              ③留意点・リスク
+                                                              ④提案方針（各最大3項目）。低評価の物件は低評価と明記し、資料に記載のない項目は推測せず「要確認」とします。
+                                                            </p>
+                                                          </div>
+                                                          <ul className="list-disc space-y-0.5 pl-5 text-slate-600">
+                                                            <li>
+                                                              生成に失敗しても①の点数は保存され、「再評価」で作り直せます。
+                                                            </li>
+                                                            <li>
+                                                              押すたびに、現在の検索条件と最新の相場で点数も再計算されます。
+                                                            </li>
+                                                            <li>
+                                                              AIの文章は参考情報です。数値・権利関係は資料と現地で確認してください。
+                                                            </li>
+                                                          </ul>
+                                                        </section>
+                                                      </div>
+                                                    </details>
+                                                  </div>
+
+                                                  {(() => {
+                                                    const d =
+                                                      describePostedDate(
+                                                        listing,
+                                                      );
+                                                    const parts = [
+                                                      d.value
+                                                        ? `${d.label.replace(/（.*$/, "")} ${formatJaDate(d.value)}`
+                                                        : null,
+                                                      listing._creationTime
+                                                        ? `検索 ${formatJaDateTime(listing._creationTime)}`
+                                                        : null,
+                                                      order.lastScrapeBy ||
+                                                        null,
+                                                    ].filter(Boolean);
+                                                    return parts.length ? (
+                                                      <div className="text-xs text-slate-400">
+                                                        {parts.join(" ・ ")}
+                                                      </div>
+                                                    ) : null;
                                                   })()}
                                                 </div>
-                                              )}
-                                              </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })()
-                                      ) : (
-                                        <div className="space-y-1.5">
-                                          <button
-                                            type="button"
-                                            className="group flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 px-5 text-[16px] font-bold text-white shadow-md shadow-indigo-500/30 transition-all hover:-translate-y-px hover:shadow-lg hover:shadow-indigo-500/40 active:translate-y-0 disabled:cursor-wait disabled:opacity-70 disabled:hover:translate-y-0"
-                                            onClick={() =>
-                                              handleEvaluate(m._id, listing, order)
-                                            }
-                                            disabled={evaluatingId === m._id}
-                                          >
-                                            {evaluatingId === m._id ? (
-                                              <Loader2 className="h-5 w-5 animate-spin" />
-                                            ) : (
-                                              <Sparkles className="h-5 w-5 transition-transform group-hover:rotate-12" />
-                                            )}
-                                            {evaluatingId === m._id ? "AIが分析中..." : "AIで詳細レポートを生成"}
-                                            <span className="rounded-md bg-white/25 px-1.5 py-0.5 text-[11px] font-extrabold leading-none tracking-wider">
-                                              AI
-                                            </span>
-                                          </button>
-                                          <p className="text-center text-[12.5px] text-slate-500">
-                                            強み・リスク・提案方針をAIが文章で解説します。点数自体はAIでは決まりません。
-                                          </p>
-                                        </div>
-                                      )}
-
-                                      <details className="group/ex mt-3 rounded-xl border border-[var(--border-default)] bg-white text-[13.5px] leading-relaxed text-slate-700">
-                                        <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-[14px] font-bold text-[var(--brand-ink)]">
-                                          評価の計算方法を見る（自動スコア・AIレポート）
-                                          <ChevronDown className="h-4 w-4 transition-transform group-open/ex:rotate-180" />
-                                        </summary>
-                                        <div className="space-y-6 border-t border-[var(--border-subtle)] px-4 py-4">
-                                          {/* ── Base score ── */}
-                                          <section className="space-y-3">
-                                            <h4 className="text-[15px] font-bold text-slate-900">① 自動スコア（検索時に自動計算・AIは使いません）</h4>
-                                            <p>
-                                              新しくマッチした物件に、検索のたびに自動で0〜100点のスコアを算出します。固定の計算式なので、同じ入力なら必ず同じ点数です。この物件の収益性を主に見て、買主の希望条件への合致は補助的に加点します。
-                                            </p>
-
-                                            <div>
-                                              <div className="font-bold text-slate-900">手順1　収益・市場スコア：メイン評価（全体の75〜90%）</div>
-                                              <p className="mt-0.5 text-slate-600">データがある項目だけを、重みで加重平均します。データがない項目は計算から外れます。</p>
-                                              <div className="mt-2 overflow-x-auto">
-                                                <table className="w-full min-w-[30rem] text-left text-[13px]">
-                                                  <thead className="text-xs text-slate-500">
-                                                    <tr className="border-b border-slate-200">
-                                                      <th className="py-1.5 pr-3 font-medium">項目</th>
-                                                      <th className="py-1.5 pr-3 font-medium">重み</th>
-                                                      <th className="py-1.5 font-medium">評価基準（満点=100%）</th>
-                                                    </tr>
-                                                  </thead>
-                                                  <tbody className="align-top [&_td]:py-1.5 [&_td]:pr-3 [&_tr]:border-b [&_tr]:border-slate-100">
-                                                    <tr><td className="font-bold">相場比（㎡単価）</td><td>40</td><td>当物件の㎡単価 ÷ 国土交通省の成約相場。0.7倍以下=100%、0.85倍以下=88%、1.0倍以下=72%、1.1倍以下=55%、1.25倍以下=35%、1.5倍以下=18%、それを超える場合=5%。極端に安い（0.25倍未満）場合は借地権等の疑いで55%止まり。</td></tr>
-                                                    <tr><td className="font-bold">表面利回り</td><td>30</td><td>9%以上=100%、7%以上=85%、5.5%以上=65%、4%以上=45%、それ未満は利回り÷10。</td></tr>
-                                                    <tr><td className="font-bold">駅徒歩</td><td>15</td><td>3分以内=100%、5分=90%、7分=80%、10分=65%、15分=45%、それ以降は段階的に低下。</td></tr>
-                                                    <tr><td className="font-bold">都心6区</td><td>12</td><td>千代田・中央・港・渋谷・新宿・文京なら加点（売却時の流動性）。</td></tr>
-                                                    <tr><td className="font-bold">値下げ</td><td>12</td><td>値下げ率10%以上=100%、5%以上=85%、それ未満=70%。</td></tr>
-                                                    <tr><td className="font-bold">ハザード</td><td>10</td><td>良好=100%、要確認=60%、高警戒=20%。</td></tr>
-                                                    <tr><td className="font-bold">前面道路</td><td>5</td><td>6m以上=100%、4m以上=70%、2.7m以上=40%、それ未満=15%。</td></tr>
-                                                  </tbody>
-                                                </table>
-                                              </div>
-                                              <p className="mt-1.5 text-slate-600">相場は同じ区・同じ種別（マンション／土地／戸建）の国土交通省の取引データです。周辺施設の数は点数に含めません。</p>
-                                            </div>
-
-                                            <div>
-                                              <div className="font-bold text-slate-900">手順2　希望条件の適合度（補助）</div>
-                                              <p className="mt-0.5">
-                                                この検索に設定した条件だけを採点します（エリア22、予算25、物件種別12、利回り14、面積10、土地面積10、徒歩10、前面道路10、構造6、築年6 など）。条件に合えば100%、外れるほど下がります。設定した条件が多いほど影響が大きくなり、全体の<strong>10〜25%</strong>を占めます。
-                                              </p>
-                                            </div>
-
-                                            <div>
-                                              <div className="font-bold text-slate-900">手順3　合成して点数にする</div>
-                                              <ol className="mt-0.5 list-decimal space-y-1 pl-5">
-                                                <li>合成 ＝ 適合度 × 10〜25% ＋ 収益・市場スコア × 残り</li>
-                                                <li>
-                                                  情報量の補正：価格・エリア・種別・徒歩・利回り・道路・築年・構造・面積の9項目のうち、記載があるものの割合で信頼度を決め、空欄が多い物件ほど50%（中間）に近づけます。
-                                                </li>
-                                                <li>点数 ＝ 8 ＋ 合成値 × 88（5〜97点の範囲）</li>
-                                              </ol>
-                                            </div>
-
-                                            <div>
-                                              <div className="font-bold text-slate-900">手順4　上限（強みでは補えない重大な問題）</div>
-                                              <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
-                                                <li>希望エリア外：最大18点　／　物件種別が不一致：最大28点</li>
-                                                <li>予算を50%超過：最大25点　／　25%超過：最大48点</li>
-                                                <li>前面道路が必要幅員に不足：最大32点</li>
-                                                <li>相場単価の+50%超の割高：最大58点　／　+30%超：最大72点</li>
-                                                <li>高浸水警戒：最大84点　／　「要確認」項目あり：最大84点（4件以上は72点）</li>
-                                              </ul>
-                                            </div>
-                                          </section>
-
-                                          {/* ── AI report ── */}
-                                          <section className="space-y-3 rounded-lg bg-gradient-to-br from-violet-50 to-indigo-50 p-4">
-                                            <h4 className="text-[15px] font-bold text-indigo-900">② AIレポート（ボタンを押したときだけ）</h4>
-                                            <p>
-                                              GoogleのAI（Gemini）が、不動産投資の専門家の視点で評価文を書きます。<strong>AIは点数を付けません。</strong>①で決まった点数に合わせて、理由を文章にするだけです。
-                                            </p>
-                                            <div>
-                                              <div className="font-bold text-slate-900">AIに渡す情報</div>
-                                              <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
-                                                <li>物件情報（価格、面積、築年、構造、駅徒歩、道路、備考など）</li>
-                                                <li>この検索の希望条件（エリア、予算、利回り、こだわり条件）</li>
-                                                <li>国土交通省の類似成約事例と相場、ハザード・地盤診断</li>
-                                                <li>周辺施設（Googleで調べた徒歩圏の施設情報。点数には入らず、レポート作成時の参考情報としてのみ使用）</li>
-                                                <li>①の確定点数、致命的な不適合、要確認事項</li>
-                                              </ul>
-                                            </div>
-                                            <div>
-                                              <div className="font-bold text-slate-900">出力</div>
-                                              <p className="mt-0.5">結論の要約1文と、①顧客ニーズ適合度 ②強み ③留意点・リスク ④提案方針（各最大3項目）。低評価の物件は低評価と明記し、資料に記載のない項目は推測せず「要確認」とします。</p>
-                                            </div>
-                                            <ul className="list-disc space-y-0.5 pl-5 text-slate-600">
-                                              <li>生成に失敗しても①の点数は保存され、「再評価」で作り直せます。</li>
-                                              <li>押すたびに、現在の検索条件と最新の相場で点数も再計算されます。</li>
-                                              <li>AIの文章は参考情報です。数値・権利関係は資料と現地で確認してください。</li>
-                                            </ul>
-                                          </section>
-                                        </div>
-                                      </details>
-                                    </div>
-
-                                    {(() => {
-                                      const d = describePostedDate(listing);
-                                      const parts = [
-                                        d.value ? `${d.label.replace(/（.*$/, "")} ${formatJaDate(d.value)}` : null,
-                                        listing._creationTime ? `検索 ${formatJaDateTime(listing._creationTime)}` : null,
-                                        order.lastScrapeBy || null,
-                                      ].filter(Boolean);
-                                      return parts.length ? (
-                                        <div className="text-xs text-slate-400">{parts.join(" ・ ")}</div>
-                                      ) : null;
-                                    })()}
-                                  </div>
-                                    <div className="sticky bottom-0 z-10 mt-auto border-t border-[var(--border-subtle)] bg-white">
-                                      <div className="mx-auto flex max-w-5xl items-center justify-end gap-3 px-5 py-3">
-                                    {/* ★ shortlist. Sends a SNAPSHOT of the listing,
+                                                <div className="sticky bottom-0 z-10 mt-auto border-t border-[var(--border-subtle)] bg-white">
+                                                  <div className="mx-auto flex max-w-5xl items-center justify-end gap-3 px-5 py-3">
+                                                    {/* ★ shortlist. Sends a SNAPSHOT of the listing,
                                     not just its id: `listings` rows are deleted
                                     with the last order that matched them, and a
                                     saved property must outlive that (see
                                     convex/savedListings.js). */}
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        void toggleSaved({
-                                          listingId: m.listingId,
-                                          orderId: order._id,
-                                          orderName: order.name,
-                                          address: listing?.address,
-                                          ward: listing?.ward,
-                                          price: listing?.price,
-                                          area: listing?.area,
-                                          landSize: listing?.landSize,
-                                          source: listing?.source,
-                                          url: listing?.url,
-                                          propertyType: listing?.propertyType,
-                                          station: listing?.station,
-                                          walkMinutes: listing?.walkMinutes,
-                                          score: extractedScore,
-                                          postedAt: listing?.postedAt,
-                                          postedDateKind:
-                                            listing?.postedDateKind,
-                                        });
-                                      }}
-                                      className={`inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-bold transition-colors ${
-                                        m.listingId && savedSet.has(m.listingId)
-                                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                                          : "border-[var(--brand)] bg-white text-[var(--brand-ink)] hover:bg-[var(--brand-soft)]"
-                                      }`}
-                                      title={
-                                        m.listingId && savedSet.has(m.listingId)
-                                          ? "保存物件から外す"
-                                          : "保存物件に追加（★）"
-                                      }
-                                      aria-label="保存物件に追加"
-                                      aria-pressed={Boolean(
-                                        m.listingId &&
-                                        savedSet.has(m.listingId),
-                                      )}
-                                    >
-                                      <Star
-                                        className={`h-4 w-4 ${
-                                          m.listingId &&
-                                          savedSet.has(m.listingId)
-                                            ? "text-amber-500 fill-amber-400"
-                                            : "text-[var(--brand)]"
-                                        }`}
-                                      />
-                                      {m.listingId && savedSet.has(m.listingId)
-                                        ? "保存済み"
-                                        : "お気に入りに追加"}
-                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void toggleSaved({
+                                                          listingId:
+                                                            m.listingId,
+                                                          orderId: order._id,
+                                                          orderName: order.name,
+                                                          address:
+                                                            listing?.address,
+                                                          ward: listing?.ward,
+                                                          price: listing?.price,
+                                                          area: listing?.area,
+                                                          landSize:
+                                                            listing?.landSize,
+                                                          source:
+                                                            listing?.source,
+                                                          url: listing?.url,
+                                                          propertyType:
+                                                            listing?.propertyType,
+                                                          station:
+                                                            listing?.station,
+                                                          walkMinutes:
+                                                            listing?.walkMinutes,
+                                                          score: extractedScore,
+                                                          postedAt:
+                                                            listing?.postedAt,
+                                                          postedDateKind:
+                                                            listing?.postedDateKind,
+                                                        });
+                                                      }}
+                                                      className={`inline-flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-bold transition-colors ${
+                                                        m.listingId &&
+                                                        savedSet.has(
+                                                          m.listingId,
+                                                        )
+                                                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                                          : "border-[var(--brand)] bg-white text-[var(--brand-ink)] hover:bg-[var(--brand-soft)]"
+                                                      }`}
+                                                      title={
+                                                        m.listingId &&
+                                                        savedSet.has(
+                                                          m.listingId,
+                                                        )
+                                                          ? "保存物件から外す"
+                                                          : "保存物件に追加（★）"
+                                                      }
+                                                      aria-label="保存物件に追加"
+                                                      aria-pressed={Boolean(
+                                                        m.listingId &&
+                                                        savedSet.has(
+                                                          m.listingId,
+                                                        ),
+                                                      )}
+                                                    >
+                                                      <Star
+                                                        className={`h-4 w-4 ${
+                                                          m.listingId &&
+                                                          savedSet.has(
+                                                            m.listingId,
+                                                          )
+                                                            ? "text-amber-500 fill-amber-400"
+                                                            : "text-[var(--brand)]"
+                                                        }`}
+                                                      />
+                                                      {m.listingId &&
+                                                      savedSet.has(m.listingId)
+                                                        ? "保存済み"
+                                                        : "お気に入りに追加"}
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>,
+                                              document.body,
+                                            )}
+                                        </div>
+                                      );
+                                    })}
+
+                                    {/* Pagination & Display Controls */}
+                                    {totalMatches > 0 && (
+                                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 mt-4">
+                                        <div className="text-xs font-semibold text-slate-500">
+                                          全{" "}
+                                          <span className="font-extrabold text-slate-900">
+                                            {totalMatches}
+                                          </span>{" "}
+                                          件中{" "}
+                                          <span className="font-extrabold text-slate-900">
+                                            {startIndex + 1}
+                                          </span>{" "}
+                                          〜{" "}
+                                          <span className="font-extrabold text-slate-900">
+                                            {endIndex}
+                                          </span>{" "}
+                                          件目を表示
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-3">
+                                          {/* Page Size Selector */}
+                                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                                            {[10, 25, 50, 9999].map((size) => (
+                                              <button
+                                                key={size}
+                                                type="button"
+                                                onClick={() => {
+                                                  setShowLimit((prev) => ({
+                                                    ...prev,
+                                                    [order._id]: size,
+                                                  }));
+                                                  setCurrentPage((prev) => ({
+                                                    ...prev,
+                                                    [order._id]: 1,
+                                                  }));
+                                                }}
+                                                className={`px-2.5 py-1 rounded-lg transition-all ${
+                                                  pageSize === size
+                                                    ? "bg-white text-emerald-800 shadow-xs font-black"
+                                                    : "text-slate-600 hover:text-slate-900"
+                                                }`}
+                                              >
+                                                {size === 9999
+                                                  ? "全件"
+                                                  : `${size}件`}
+                                              </button>
+                                            ))}
+                                          </div>
+
+                                          {/* Page Navigation Buttons */}
+                                          {totalPages > 1 && (
+                                            <div className="flex items-center gap-1">
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={validPage <= 1}
+                                                onClick={() =>
+                                                  goToPage(
+                                                    order._id,
+                                                    validPage - 1,
+                                                  )
+                                                }
+                                                className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
+                                              >
+                                                <ChevronLeft className="w-4 h-4 mr-0.5" />
+                                                前へ
+                                              </Button>
+
+                                              <div className="flex items-center gap-1 px-1">
+                                                {Array.from(
+                                                  { length: totalPages },
+                                                  (_, i) => i + 1,
+                                                ).map((p) => {
+                                                  if (
+                                                    totalPages <= 7 ||
+                                                    p === 1 ||
+                                                    p === totalPages ||
+                                                    Math.abs(p - validPage) <= 1
+                                                  ) {
+                                                    return (
+                                                      <button
+                                                        key={p}
+                                                        type="button"
+                                                        onClick={() =>
+                                                          goToPage(order._id, p)
+                                                        }
+                                                        className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
+                                                          validPage === p
+                                                            ? "bg-emerald-700 text-white shadow-xs font-extrabold"
+                                                            : "bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200"
+                                                        }`}
+                                                      >
+                                                        {p}
+                                                      </button>
+                                                    );
+                                                  }
+                                                  if (
+                                                    (p === 2 &&
+                                                      validPage > 3) ||
+                                                    (p === totalPages - 1 &&
+                                                      validPage <
+                                                        totalPages - 2)
+                                                  ) {
+                                                    return (
+                                                      <span
+                                                        key={p}
+                                                        className="text-slate-400 text-xs px-0.5"
+                                                      >
+                                                        …
+                                                      </span>
+                                                    );
+                                                  }
+                                                  return null;
+                                                })}
+                                              </div>
+
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={
+                                                  validPage >= totalPages
+                                                }
+                                                onClick={() =>
+                                                  goToPage(
+                                                    order._id,
+                                                    validPage + 1,
+                                                  )
+                                                }
+                                                className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
+                                              >
+                                                次へ
+                                                <ChevronRight className="w-4 h-4 ml-0.5" />
+                                              </Button>
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  </div>,
-                                  document.body,
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {/* Pagination & Display Controls */}
-                          {totalMatches > 0 && (
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 mt-4">
-                              <div className="text-xs font-semibold text-slate-500">
-                                全{" "}
-                                <span className="font-extrabold text-slate-900">
-                                  {totalMatches}
-                                </span>{" "}
-                                件中{" "}
-                                <span className="font-extrabold text-slate-900">
-                                  {startIndex + 1}
-                                </span>{" "}
-                                〜{" "}
-                                <span className="font-extrabold text-slate-900">
-                                  {endIndex}
-                                </span>{" "}
-                                件目を表示
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-3">
-                                {/* Page Size Selector */}
-                                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
-                                  {[10, 25, 50, 9999].map((size) => (
-                                    <button
-                                      key={size}
-                                      type="button"
-                                      onClick={() => {
-                                        setShowLimit((prev) => ({
-                                          ...prev,
-                                          [order._id]: size,
-                                        }));
-                                        setCurrentPage((prev) => ({
-                                          ...prev,
-                                          [order._id]: 1,
-                                        }));
-                                      }}
-                                      className={`px-2.5 py-1 rounded-lg transition-all ${
-                                        pageSize === size
-                                          ? "bg-white text-emerald-800 shadow-xs font-black"
-                                          : "text-slate-600 hover:text-slate-900"
-                                      }`}
-                                    >
-                                      {size === 9999 ? "全件" : `${size}件`}
-                                    </button>
-                                  ))}
-                                </div>
-
-                                {/* Page Navigation Buttons */}
-                                {totalPages > 1 && (
-                                  <div className="flex items-center gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={validPage <= 1}
-                                      onClick={() =>
-                                        goToPage(order._id, validPage - 1)
-                                      }
-                                      className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
-                                    >
-                                      <ChevronLeft className="w-4 h-4 mr-0.5" />
-                                      前へ
-                                    </Button>
-
-                                    <div className="flex items-center gap-1 px-1">
-                                      {Array.from(
-                                        { length: totalPages },
-                                        (_, i) => i + 1,
-                                      ).map((p) => {
-                                        if (
-                                          totalPages <= 7 ||
-                                          p === 1 ||
-                                          p === totalPages ||
-                                          Math.abs(p - validPage) <= 1
-                                        ) {
-                                          return (
-                                            <button
-                                              key={p}
-                                              type="button"
-                                              onClick={() =>
-                                                goToPage(order._id, p)
-                                              }
-                                              className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
-                                                validPage === p
-                                                  ? "bg-emerald-700 text-white shadow-xs font-extrabold"
-                                                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200"
-                                              }`}
-                                            >
-                                              {p}
-                                            </button>
-                                          );
-                                        }
-                                        if (
-                                          (p === 2 && validPage > 3) ||
-                                          (p === totalPages - 1 &&
-                                            validPage < totalPages - 2)
-                                        ) {
-                                          return (
-                                            <span
-                                              key={p}
-                                              className="text-slate-400 text-xs px-0.5"
-                                            >
-                                              …
-                                            </span>
-                                          );
-                                        }
-                                        return null;
-                                      })}
-                                    </div>
-
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={validPage >= totalPages}
-                                      onClick={() =>
-                                        goToPage(order._id, validPage + 1)
-                                      }
-                                      className="h-8 px-2.5 text-xs font-bold border-slate-200 rounded-lg text-slate-700"
-                                    >
-                                      次へ
-                                      <ChevronRight className="w-4 h-4 ml-0.5" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </>
+                          ) : (
+                            <div className="py-8 text-center text-xs text-[var(--text-muted)] font-medium">
+                              マッチする物件はまだありません。「手動検索」を実行して最新物件を取得してください。
                             </div>
                           )}
-                        </>
-                      );
-                    })()}
-                      </>
-                    ) : (
-                    <div className="py-8 text-center text-xs text-[var(--text-muted)] font-medium">
-                      マッチする物件はまだありません。「手動検索」を実行して最新物件を取得してください。
-                    </div>
-                  )}
-                  </CardContent>
-                )}
-              </Card>
-            );
-          })
-        )}
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })
+              )}
             </div>
 
             {effectiveView === "split" && (
@@ -5909,10 +7133,10 @@ export default function OrdersPage() {
       )}
 
       {/* Hot Matches Immediate Alert Notification Settings Modal */}
-      <AlertSettingsModal
+      {/* <AlertSettingsModal
         isOpen={isAlertModalOpen}
         onClose={() => setIsAlertModalOpen(false)}
-      />
+      /> */}
 
       {showMailRules && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
@@ -5967,13 +7191,18 @@ export default function OrdersPage() {
                   <Label className="text-xs font-bold text-[var(--text-primary)]">
                     {f.label}
                   </Label>
-                  <p className="text-[14px] text-[var(--text-muted)] mt-0.5 mb-1.5">{f.hint}</p>
+                  <p className="text-[14px] text-[var(--text-muted)] mt-0.5 mb-1.5">
+                    {f.hint}
+                  </p>
                   <textarea
                     rows={4}
                     value={mailRules[f.key]}
                     placeholder={f.placeholder}
                     onChange={(e) =>
-                      setMailRules((prev) => ({ ...prev, [f.key]: e.target.value }))
+                      setMailRules((prev) => ({
+                        ...prev,
+                        [f.key]: e.target.value,
+                      }))
                     }
                     className="w-full text-xs rounded-xl border border-[var(--border-subtle)] bg-white px-3 py-2 font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/30"
                   />
@@ -5985,7 +7214,10 @@ export default function OrdersPage() {
                   type="checkbox"
                   checked={mailRules.requireAttachment}
                   onChange={(e) =>
-                    setMailRules((prev) => ({ ...prev, requireAttachment: e.target.checked }))
+                    setMailRules((prev) => ({
+                      ...prev,
+                      requireAttachment: e.target.checked,
+                    }))
                   }
                   className="mt-0.5 w-4 h-4 accent-[var(--brand)]"
                 />
@@ -6019,7 +7251,9 @@ export default function OrdersPage() {
                   onClick={() => void handleSaveMailRules()}
                   className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
                 >
-                  {savingMailRules && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {savingMailRules && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  )}
                   保存
                 </Button>
               </div>
@@ -6030,242 +7264,267 @@ export default function OrdersPage() {
 
       {/* TEMPORARY: mail sync inspector. Shows each recent message, what it
           carried, and what the rule-based parser made of it. */}
-      {inspected && (() => {
-        const displayedMails = filterMatchedOnly
-          ? inspected.filter((m) => !m.filtered && !m.error)
-          : inspected;
-        const matchedCount = inspected.filter((m) => !m.filtered && !m.error).length;
+      {inspected &&
+        (() => {
+          const displayedMails = filterMatchedOnly
+            ? inspected.filter((m) => !m.filtered && !m.error)
+            : inspected;
+          const matchedCount = inspected.filter(
+            (m) => !m.filtered && !m.error,
+          ).length;
 
-        return (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
-              <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
-                    <Mail className="w-4 h-4" />
-                    同期メールの内容（{displayedMails.length}件）
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                    過去3ヶ月の受信メールから取り込み条件に合致したメールを表示
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => void handleInspectMail(true)}
-                    disabled={inspecting}
-                    title="各メールをAIで実際に解析し、取り込まれる物件情報を表示します（同期と同じ処理・保存はしません）"
-                    className="text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white shadow-xs hover:border-[var(--brand)] disabled:opacity-50"
-                  >
-                    {inspecting ? "解析中…" : "AIで抽出を確認"}
-                  </button>
-                  <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-semibold cursor-pointer select-none bg-white px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] shadow-xs hover:border-[var(--brand)]">
-                    <input
-                      type="checkbox"
-                      checked={filterMatchedOnly}
-                      onChange={(e) => setFilterMatchedOnly(e.target.checked)}
-                      className="rounded border-gray-300 text-brand focus:ring-brand"
-                    />
-                    設定に一致したメールのみ ({matchedCount}/{inspected.length})
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setInspected(null)}
-                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-slate-100"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-y-auto p-4 space-y-2 flex-1">
-                {displayedMails.length === 0 ? (
-                  <div className="text-center py-12 px-4">
-                    <Mail className="w-10 h-10 text-[var(--text-muted)] mx-auto mb-3 opacity-40" />
-                    <p className="text-sm font-bold text-[var(--text-secondary)]">
-                      {filterMatchedOnly
-                        ? "取り込み設定に合致するメールはありませんでした"
-                        : "表示できるメールがありません"}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
-                      {filterMatchedOnly
-                        ? "「取り込み設定」で設定した必須キーワードや許可送信者などの条件をご確認ください。右上のチェックを外すと除外されたメールも確認できます。"
-                        : "受信トレイにメールが見つかりませんでした。"}
+          return (
+            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                      <Mail className="w-4 h-4" />
+                      同期メールの内容（{displayedMails.length}件）
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      過去3ヶ月の受信メールから取り込み条件に合致したメールを表示
                     </p>
                   </div>
-                ) : (
-                  displayedMails.map((m) => {
-                    const open = openMailId === m.id;
-                    const count = m.listings?.length ?? 0;
-                    return (
-                      <div
-                        key={m.id}
-                        className="border border-[var(--border-subtle)] rounded-2xl overflow-hidden"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setOpenMailId(open ? null : m.id)}
-                          className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void handleInspectMail(true)}
+                      disabled={inspecting}
+                      title="各メールをAIで実際に解析し、取り込まれる物件情報を表示します（同期と同じ処理・保存はしません）"
+                      className="text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white shadow-xs hover:border-[var(--brand)] disabled:opacity-50"
+                    >
+                      {inspecting ? "解析中…" : "AIで抽出を確認"}
+                    </button>
+                    <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-semibold cursor-pointer select-none bg-white px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] shadow-xs hover:border-[var(--brand)]">
+                      <input
+                        type="checkbox"
+                        checked={filterMatchedOnly}
+                        onChange={(e) => setFilterMatchedOnly(e.target.checked)}
+                        className="rounded border-gray-300 text-brand focus:ring-brand"
+                      />
+                      設定に一致したメールのみ ({matchedCount}/
+                      {inspected.length})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setInspected(null)}
+                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-slate-100"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overflow-y-auto p-4 space-y-2 flex-1">
+                  {displayedMails.length === 0 ? (
+                    <div className="text-center py-12 px-4">
+                      <Mail className="w-10 h-10 text-[var(--text-muted)] mx-auto mb-3 opacity-40" />
+                      <p className="text-sm font-bold text-[var(--text-secondary)]">
+                        {filterMatchedOnly
+                          ? "取り込み設定に合致するメールはありませんでした"
+                          : "表示できるメールがありません"}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
+                        {filterMatchedOnly
+                          ? "「取り込み設定」で設定した必須キーワードや許可送信者などの条件をご確認ください。右上のチェックを外すと除外されたメールも確認できます。"
+                          : "受信トレイにメールが見つかりませんでした。"}
+                      </p>
+                    </div>
+                  ) : (
+                    displayedMails.map((m) => {
+                      const open = openMailId === m.id;
+                      const count = m.listings?.length ?? 0;
+                      return (
+                        <div
+                          key={m.id}
+                          className="border border-[var(--border-subtle)] rounded-2xl overflow-hidden"
                         >
-                          <span
-                            className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[13.5px] font-bold ${
-                              m.error
-                                ? "bg-red-100 text-red-800"
-                                : m.filtered
-                                  ? "bg-violet-100 text-violet-900"
-                                  : count > 0
-                                    ? "bg-emerald-100 text-emerald-900"
-                                    : m.needsLlm
-                                      ? "bg-amber-100 text-amber-900"
-                                      : "bg-slate-100 text-slate-600"
-                            }`}
+                          <button
+                            type="button"
+                            onClick={() => setOpenMailId(open ? null : m.id)}
+                            className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
                           >
-                            {m.error
-                              ? "エラー"
-                              : m.filtered
-                                ? "設定で除外"
-                                : count > 0
-                                  ? `物件${count}件`
-                                  : m.needsLlm
-                                    ? "AI判定へ"
-                                    : "対象外"}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-bold text-[var(--text-primary)] truncate">
-                              {m.subject || "(件名なし)"}
+                            <span
+                              className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[13.5px] font-bold ${
+                                m.error
+                                  ? "bg-red-100 text-red-800"
+                                  : m.filtered
+                                    ? "bg-violet-100 text-violet-900"
+                                    : count > 0
+                                      ? "bg-emerald-100 text-emerald-900"
+                                      : m.needsLlm
+                                        ? "bg-amber-100 text-amber-900"
+                                        : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {m.error
+                                ? "エラー"
+                                : m.filtered
+                                  ? "設定で除外"
+                                  : count > 0
+                                    ? `物件${count}件`
+                                    : m.needsLlm
+                                      ? "AI判定へ"
+                                      : "対象外"}
                             </span>
-                            <span className="block text-[14px] text-[var(--text-muted)] truncate">
-                              {m.from}
-                              {m.receivedAt ? ` ・ ${formatJaDateTimeShort(m.receivedAt)}` : ""}
-                              {(m.attachments?.length ?? 0) > 0
-                                ? ` ・ 添付${m.attachments?.length}件`
-                                : ""}
-                            </span>
-                          </span>
-                          {open ? (
-                            <ChevronUp className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
-                          )}
-                        </button>
-
-                        {open && (
-                          <div className="smooth-expand px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
-                            {m.error && (
-                              <p className="text-xs font-semibold text-red-700">{m.error}</p>
-                            )}
-
-                            <p className="text-[14px] text-[var(--text-muted)]">
-                              判定: {m.reason}
-                              {/* Once the AI pass has run, "AIでの抽出が必要" is
-                                  stale advice — say what actually read it. */}
-                              {m.engine
-                                ? `（抽出: ${
-                                    m.engine === "stored"
-                                      ? "取込済み（保存されたデータ）"
-                                      : m.engine === "rules"
-                                        ? "ルール解析"
-                                        : m.engine === "gemini"
-                                          ? "AI・添付PDFを直接読取"
-                                          : m.engine === "groq"
-                                            ? "AI・本文/PDFテキスト"
-                                            : "物件は見つかりませんでした"
-                                  }）`
-                                : m.needsLlm
-                                  ? "（AIでの抽出が必要）"
-                                  : ""}
-                            </p>
-
-                            {count > 0 && (
-                              <div className="space-y-1.5">
-                                {m.listings?.map((l, i) => (
-                                  <div
-                                    key={i}
-                                    className="text-[14px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
-                                  >
-                                    {Object.entries(l)
-                                      .filter(([, v]) => v !== null && v !== "")
-                                      .map(([k, v]) => `${k}: ${String(v)}`)
-                                      .join(" ／ ")}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {(m.attachments?.length ?? 0) > 0 && (
-                              <div className="text-[14px] text-[var(--text-secondary)]">
-                                <span className="font-bold flex items-center gap-1 mb-1.5 text-[var(--text-primary)]">
-                                  <FileText className="w-3.5 h-3.5 text-[var(--brand)]" />
-                                  添付ファイル（クリックしてPDFを開く）
-                                </span>
-                                <div className="flex flex-wrap gap-2">
-                                  {m.attachments?.map((a, i) => {
-                                    const isPdf =
-                                      a.mimeType === "application/pdf" ||
-                                      a.filename?.toLowerCase().endsWith(".pdf");
-                                    const isOpening = openingAttachmentId === a.id;
-                                    return (
-                                      <button
-                                        key={i}
-                                        type="button"
-                                        disabled={isOpening || !a.id}
-                                        onClick={() => void handleOpenAttachment(m.provider, m.id, a)}
-                                        className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white hover:border-[var(--brand)] hover:bg-[var(--brand-soft)] transition-colors text-left shadow-2xs"
-                                        title={a.id ? "クリックして別タブで開く" : "添付ファイルIDがありません"}
-                                      >
-                                        {isOpening ? (
-                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--brand)] shrink-0" />
-                                        ) : isPdf ? (
-                                          <FileText className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                        ) : (
-                                          <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
-                                        )}
-                                        <div className="min-w-0 max-w-[260px]">
-                                          <span className="block font-bold text-[14px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
-                                            {a.filename || "(名前なし)"}
-                                          </span>
-                                          <span className="block text-[13.5px] text-[var(--text-muted)]">
-                                            {a.size ? `${Math.round(a.size / 1024)}KB` : a.mimeType}
-                                          </span>
-                                        </div>
-                                        <ExternalLink className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--brand)] shrink-0 ml-1 opacity-70 group-hover:opacity-100" />
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            <div>
-                              <span className="text-[14px] font-bold text-[var(--text-secondary)]">
-                                本文
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold text-[var(--text-primary)] truncate">
+                                {m.subject || "(件名なし)"}
                               </span>
-                              <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
-                                {m.bodyText || "(本文なし)"}
-                              </pre>
-                            </div>
+                              <span className="block text-[14px] text-[var(--text-muted)] truncate">
+                                {m.from}
+                                {m.receivedAt
+                                  ? ` ・ ${formatJaDateTimeShort(m.receivedAt)}`
+                                  : ""}
+                                {(m.attachments?.length ?? 0) > 0
+                                  ? ` ・ 添付${m.attachments?.length}件`
+                                  : ""}
+                              </span>
+                            </span>
+                            {open ? (
+                              <ChevronUp className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
+                            )}
+                          </button>
 
-                            {m.pdfTexts?.map((t, i) => (
-                              <div key={i}>
+                          {open && (
+                            <div className="smooth-expand px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
+                              {m.error && (
+                                <p className="text-xs font-semibold text-red-700">
+                                  {m.error}
+                                </p>
+                              )}
+
+                              <p className="text-[14px] text-[var(--text-muted)]">
+                                判定: {m.reason}
+                                {/* Once the AI pass has run, "AIでの抽出が必要" is
+                                  stale advice — say what actually read it. */}
+                                {m.engine
+                                  ? `（抽出: ${
+                                      m.engine === "stored"
+                                        ? "取込済み（保存されたデータ）"
+                                        : m.engine === "rules"
+                                          ? "ルール解析"
+                                          : m.engine === "gemini"
+                                            ? "AI・添付PDFを直接読取"
+                                            : m.engine === "groq"
+                                              ? "AI・本文/PDFテキスト"
+                                              : "物件は見つかりませんでした"
+                                    }）`
+                                  : m.needsLlm
+                                    ? "（AIでの抽出が必要）"
+                                    : ""}
+                              </p>
+
+                              {count > 0 && (
+                                <div className="space-y-1.5">
+                                  {m.listings?.map((l, i) => (
+                                    <div
+                                      key={i}
+                                      className="text-[14px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
+                                    >
+                                      {Object.entries(l)
+                                        .filter(
+                                          ([, v]) => v !== null && v !== "",
+                                        )
+                                        .map(([k, v]) => `${k}: ${String(v)}`)
+                                        .join(" ／ ")}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {(m.attachments?.length ?? 0) > 0 && (
+                                <div className="text-[14px] text-[var(--text-secondary)]">
+                                  <span className="font-bold flex items-center gap-1 mb-1.5 text-[var(--text-primary)]">
+                                    <FileText className="w-3.5 h-3.5 text-[var(--brand)]" />
+                                    添付ファイル（クリックしてPDFを開く）
+                                  </span>
+                                  <div className="flex flex-wrap gap-2">
+                                    {m.attachments?.map((a, i) => {
+                                      const isPdf =
+                                        a.mimeType === "application/pdf" ||
+                                        a.filename
+                                          ?.toLowerCase()
+                                          .endsWith(".pdf");
+                                      const isOpening =
+                                        openingAttachmentId === a.id;
+                                      return (
+                                        <button
+                                          key={i}
+                                          type="button"
+                                          disabled={isOpening || !a.id}
+                                          onClick={() =>
+                                            void handleOpenAttachment(
+                                              m.provider,
+                                              m.id,
+                                              a,
+                                            )
+                                          }
+                                          className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white hover:border-[var(--brand)] hover:bg-[var(--brand-soft)] transition-colors text-left shadow-2xs"
+                                          title={
+                                            a.id
+                                              ? "クリックして別タブで開く"
+                                              : "添付ファイルIDがありません"
+                                          }
+                                        >
+                                          {isOpening ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--brand)] shrink-0" />
+                                          ) : isPdf ? (
+                                            <FileText className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                          ) : (
+                                            <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                                          )}
+                                          <div className="min-w-0 max-w-[260px]">
+                                            <span className="block font-bold text-[14px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
+                                              {a.filename || "(名前なし)"}
+                                            </span>
+                                            <span className="block text-[13.5px] text-[var(--text-muted)]">
+                                              {a.size
+                                                ? `${Math.round(a.size / 1024)}KB`
+                                                : a.mimeType}
+                                            </span>
+                                          </div>
+                                          <ExternalLink className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--brand)] shrink-0 ml-1 opacity-70 group-hover:opacity-100" />
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              <div>
                                 <span className="text-[14px] font-bold text-[var(--text-secondary)]">
-                                  PDF {i + 1} の抽出テキスト
+                                  本文
                                 </span>
                                 <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
-                                  {t || "(テキストを抽出できませんでした)"}
+                                  {m.bodyText || "(本文なし)"}
                                 </pre>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+
+                              {m.pdfTexts?.map((t, i) => (
+                                <div key={i}>
+                                  <span className="text-[14px] font-bold text-[var(--text-secondary)]">
+                                    PDF {i + 1} の抽出テキスト
+                                  </span>
+                                  <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
+                                    {t || "(テキストを抽出できませんでした)"}
+                                  </pre>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
     </div>
   );
 }

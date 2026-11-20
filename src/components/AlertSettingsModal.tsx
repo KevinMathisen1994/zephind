@@ -13,7 +13,6 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
 
@@ -106,24 +105,24 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Modal Top Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-3xl bg-white shadow-2xl border border-slate-200/80 overflow-hidden">
+        {/* Modal Top Header (Cohesive Zephind / Map Aesthetic) */}
+        <div className="flex items-center justify-between px-6 py-4.5 border-b border-slate-100 bg-white">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-100 shadow-2xs">
               <Bell className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-black tracking-tight text-white">
+                <h2 className="text-base font-bold tracking-tight text-slate-900">
                   お宝物件 即時通知設定
                 </h2>
-                <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-xs font-bold">
-                  Hot Deals Alert
-                </Badge>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/60 text-[11px] font-black tracking-wide">
+                  HOT DEALS ALERT
+                </span>
               </div>
-              <p className="text-xs text-slate-300 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 高スコア物件や大幅値下げ物件がスクレイピングされた瞬間に自動通知
               </p>
             </div>
@@ -131,7 +130,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -139,11 +138,11 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/70">
           {/* Master Enabled Banner */}
-          <div className="flex items-center justify-between p-4 rounded-xl border border-indigo-100 bg-indigo-50/50">
+          <div className="flex items-center justify-between p-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 shadow-2xs">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-800 text-white shadow-xs">
                 <Sparkles className="h-4 w-4" />
               </div>
               <div>
@@ -163,14 +162,14 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                 onChange={(e) => setEnabled(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-800"></div>
             </label>
           </div>
 
           {/* Delivery Channels */}
-          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
+          <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xs">
             <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
-              <Smartphone className="h-4 w-4 text-emerald-600" />
+              <Smartphone className="h-4 w-4 text-emerald-700" />
               通知先の設定 (LINE / Webhook / メール)
             </h3>
 
@@ -180,7 +179,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                 <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   LINE Notify トークン または Webhook URL
                 </label>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-slate-400 font-medium">
                   LINE / Discord / Slack 対応
                 </span>
               </div>
@@ -189,7 +188,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
                 placeholder="例: LINE Notifyトークン または Discord/SlackのWebhook URL"
-                className="w-full h-10 px-3 text-xs font-medium rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition-colors"
+                className="w-full h-10 px-3 text-xs font-medium rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-700 focus:ring-1 focus:ring-emerald-700 transition-colors"
               />
               <p className="mt-1 text-[11px] text-slate-500">
                 ※ LINE Notifyのアクセストークンをそのまま貼り付けるか、Discord / SlackのIncoming Webhook URLを入力してください。
@@ -208,16 +207,16 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                   value={emailAddress}
                   onChange={(e) => setEmailAddress(e.target.value)}
                   placeholder="broker@example.com"
-                  className="w-full h-10 pl-9 pr-3 text-xs font-medium rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition-colors"
+                  className="w-full h-10 pl-9 pr-3 text-xs font-medium rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-700 focus:ring-1 focus:ring-emerald-700 transition-colors"
                 />
               </div>
             </div>
           </div>
 
           {/* Alert Conditions & Trigger Filters */}
-          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
+          <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xs">
             <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
-              <Sliders className="h-4 w-4 text-indigo-600" />
+              <Sliders className="h-4 w-4 text-emerald-700" />
               通知トリガー条件
             </h3>
 
@@ -227,7 +226,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                 <span className="text-xs font-bold text-slate-700">
                   通知を発動する最低AIスコア基準
                 </span>
-                <span className="text-sm font-black text-indigo-600 font-data">
+                <span className="text-sm font-black text-emerald-800 font-data">
                   {minScore}点 以上
                 </span>
               </div>
@@ -238,10 +237,10 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                     key={score}
                     type="button"
                     onClick={() => setMinScore(score)}
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
                       minScore === score
-                        ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                        ? "bg-emerald-800 text-white border-emerald-800 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300"
                     }`}
                   >
                     {score}点{score === 80 ? " (推奨)" : ""}
@@ -254,13 +253,13 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
             </div>
 
             {/* Checkboxes for notification events */}
-            <div className="space-y-2.5 pt-2 border-t border-slate-100">
+            <div className="space-y-2.5 pt-3 border-t border-slate-100">
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={notifyHighScores}
                   onChange={(e) => setNotifyHighScores(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-800 focus:ring-emerald-700 accent-emerald-800"
                 />
                 <div>
                   <span className="text-xs font-bold text-slate-800">
@@ -277,7 +276,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                   type="checkbox"
                   checked={notifyPriceDrops}
                   onChange={(e) => setNotifyPriceDrops(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-800 focus:ring-emerald-700 accent-emerald-800"
                 />
                 <div>
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -295,14 +294,14 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
           {/* Test Status Feedback */}
           {testResult && (
             <div
-              className={`p-3.5 rounded-xl border text-xs font-bold flex items-start gap-2.5 ${
+              className={`p-3.5 rounded-2xl border text-xs font-bold flex items-start gap-2.5 ${
                 testResult.success
                   ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                   : "bg-rose-50 border-rose-200 text-rose-800"
               }`}
             >
               {testResult.success ? (
-                <Check className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <Check className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
               ) : (
                 <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
               )}
@@ -312,18 +311,18 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-white">
           <Button
             type="button"
             variant="outline"
             onClick={handleSendTest}
             disabled={isTesting || (!webhookUrl.trim() && !emailAddress.trim())}
-            className="h-10 gap-2 rounded-xl text-xs font-bold border-slate-300 text-slate-700 hover:bg-slate-50"
+            className="h-10 gap-2 rounded-xl text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
           >
             {isTesting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Send className="h-4 w-4 text-indigo-600" />
+              <Send className="h-4 w-4 text-emerald-700" />
             )}
             テスト通知を送信
           </Button>
@@ -333,7 +332,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
               type="button"
               variant="outline"
               onClick={onClose}
-              className="h-10 rounded-xl text-xs font-bold border-slate-200 text-slate-600"
+              className="h-10 rounded-xl text-xs font-bold border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
             >
               閉じる
             </Button>
@@ -342,7 +341,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="h-10 gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm shadow-indigo-600/30 min-w-[100px]"
+              className="h-10 gap-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs shadow-sm min-w-[100px] transition-all"
             >
               {isSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

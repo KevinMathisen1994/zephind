@@ -158,9 +158,9 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
       <button
         type="button"
         onClick={() => window.dispatchEvent(new Event("zephind:open-alert-settings"))}
-        className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-left text-[12.5px] text-indigo-300 hover:text-white hover:bg-white/[0.06] transition-colors font-medium"
+        className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-left text-[12.5px] text-white hover:bg-white/[0.08] transition-colors font-medium"
       >
-        <Bell className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+        <Bell className="h-3.5 w-3.5 text-white shrink-0" />
         <span>即時通知設定 (LINE/Mail)</span>
       </button>
 
