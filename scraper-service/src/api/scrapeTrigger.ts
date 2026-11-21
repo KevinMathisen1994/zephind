@@ -68,31 +68,16 @@ function cleanListInput(raw: unknown, label: string): string {
   return value;
 }
 
-export const scrapeTriggerRouter = Router();
-
-scrapeTriggerRouter.post("/trigger", route(async (req) => {
-  requireUserId(req);
-
-  // Who pressed the button, from the verified JWT so 実行: 柴田 cannot be forged.
-  const id = req.identity!;
-  const fullName =
-    id.name || id.nickname || [id.givenName, id.familyName].filter(Boolean).join(" ") || "";
-  // Client-supplied name is the LAST resort before the generic label, and is
-  // sanitised: it is rendered on a card, so no control characters, bounded length.
-  const clientName = String(req.body?.triggeredByName ?? "")
-    .replace(/[\x00-\x1f\x7f]/g, "")
-    .trim()
-    .slice(0, 60);
-  const triggeredBy = fullName || id.email || clientName || "ログインユーザー";
-
-  const orderId: string | undefined = req.body?.orderId || undefined;
-  // Verify the caller owns the order they are scoping the run to. Without it any
-  // signed-in user could spend Actions minutes on another account's order.
-  if (orderId) await requireOwned(req, "orders", orderId, "オーダー");
-
+/**
+ * Starts the scrape workflow and stamps the order with its run id. Callers must have
+ * verified the order belongs to the caller. Shared by the UI route and the Claude connector.
+ */
+export async function dispatchScrape(opts: { orderId?: string; areas?: string; sources?: string; triggeredBy: string }):
+  Promise<{ ok: true; runId: number | null; areas: string; sources: string } | { error: string }> {
+  const { orderId, triggeredBy } = opts;
+  const areas = opts.areas ?? "";
+  const sources = opts.sources ?? "";
   const { repo, token } = githubConfig();
-  const areas = cleanListInput(req.body?.areas, "エリアコード");
-  const sources = cleanListInput(req.body?.sources, "取得サイト");
 
   const url = `https://api.github.com/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`;
   let response: Response;
@@ -154,6 +139,47 @@ scrapeTriggerRouter.post("/trigger", route(async (req) => {
   }
 
   return { ok: true, runId, areas, sources };
+}
+
+/** One workflow run's status, for the Claude connector to poll a scrape it started. */
+export async function getRunStatus(runId: number) {
+  const { repo, token } = githubConfig();
+  const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}`, { headers: githubHeaders(token) });
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  const run: any = await res.json();
+  return {
+    status: run.status as string, // queued | in_progress | completed
+    conclusion: (run.conclusion ?? null) as string | null,
+    startedAt: run.run_started_at as string,
+    updatedAt: run.updated_at as string,
+  };
+}
+
+export const scrapeTriggerRouter = Router();
+
+scrapeTriggerRouter.post("/trigger", route(async (req) => {
+  requireUserId(req);
+
+  // Who pressed the button, from the verified JWT so 実行: 柴田 cannot be forged.
+  const id = req.identity!;
+  const fullName =
+    id.name || id.nickname || [id.givenName, id.familyName].filter(Boolean).join(" ") || "";
+  // Client-supplied name is the LAST resort before the generic label, and is
+  // sanitised: it is rendered on a card, so no control characters, bounded length.
+  const clientName = String(req.body?.triggeredByName ?? "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .slice(0, 60);
+  const triggeredBy = fullName || id.email || clientName || "ログインユーザー";
+
+  const orderId: string | undefined = req.body?.orderId || undefined;
+  // Verify the caller owns the order they are scoping the run to. Without it any
+  // signed-in user could spend Actions minutes on another account's order.
+  if (orderId) await requireOwned(req, "orders", orderId, "オーダー");
+
+  const areas = cleanListInput(req.body?.areas, "エリアコード");
+  const sources = cleanListInput(req.body?.sources, "取得サイト");
+  return dispatchScrape({ orderId, areas, sources, triggeredBy });
 }));
 
 /** Last few workflow runs, so the UI can show queued / in progress / finished. */

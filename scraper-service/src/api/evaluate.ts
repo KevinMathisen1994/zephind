@@ -12,7 +12,7 @@ import { route } from "./handler";
 import { getLocalMarket } from "../lib/localMarket";
 import { computeMatchScore, mlitTypeForListing, wardCityCode } from "../lib/scoring.js";
 import {
-  CACHE_TTL_MS, getMlitCache, getPlacesCache, saveMlitCache, savePlacesCache,
+  CACHE_TTL_MS, getPlacesCache, loadMlitYear, savePlacesCache,
 } from "../lib/marketCache";
 import { dispatchHotMatchAlerts, type AlertNotificationItem } from "../services/alertNotifier";
 
@@ -354,36 +354,8 @@ ${
         const currentYear = new Date().getFullYear();
         const yearData: Record<string, any[]> = {};
         for (const year of [currentYear - 1, currentYear - 2]) {
-          const cached = await getMlitCache(args.ward, year);
-          let items: any[];
-          if (cached && Date.now() - (cached.fetchedAt as number) < CACHE_TTL_MS) {
-            items = cached.comparables || [];
-          } else if (!withPlaces) {
-            // Bulk grading never touches the network: cached comps or none.
-            items = [];
-          } else {
-            const mlitUrl = `https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001?year=${year}&area=13&city=${cityCode}&language=ja`;
-            const mlitRes = await fetch(mlitUrl, {
-              headers: { "Ocp-Apim-Subscription-Key": reinfolibKey },
-            });
-            if (!mlitRes.ok) throw new Error(`MLIT API HTTP ${mlitRes.status}`);
-            const mlitData: any = await mlitRes.json();
-            items = (mlitData.data || [])
-              .filter((i: any) => i.TradePrice)
-              .map((i: any) => ({
-                type: i.Type,
-                district: i.DistrictName,
-                station: i.NearestStation,
-                walkMinutes: i.TimeToNearestStation,
-                price: Math.round(parseFloat(i.TradePrice.replace(/,/g, "")) / 10000),
-                area: i.Area ? parseFloat(i.Area) : null,
-                buildYear: i.BuildingYear,
-                structure: i.Structure,
-                period: i.Period,
-              }))
-              .slice(0, 200); // bounded snapshot, refreshed wholesale, not appended to
-            await saveMlitCache({ ward: args.ward, year, comparables: items, fetchedAt: Date.now() });
-          }
+          // Bulk grading never touches the network: cached comps or none.
+          const items = await loadMlitYear(args.ward, cityCode, year, withPlaces);
           yearData[String(year)] = items.filter((i: any) => i.type === targetType);
         }
 

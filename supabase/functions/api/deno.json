@@ -10,6 +10,7 @@
     "pdf-parse": "npm:pdf-parse@1.1.1",
     "winston": "npm:winston@3.19.0",
     "zod": "npm:zod@3.25.76",
-    "pdf-parse/": "npm:/pdf-parse@1.1.1/"
+    "pdf-parse/": "npm:/pdf-parse@1.1.1/",
+    "@modelcontextprotocol/sdk/": "npm:/@modelcontextprotocol/sdk@1.32.2/"
   }
 }

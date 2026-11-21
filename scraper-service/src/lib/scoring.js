@@ -157,7 +157,8 @@ export function wardCityCode(rawWard) {
  */
 export function mlitTypeForListing(propertyType) {
   const t = propertyType || "";
-  if (t.includes("マンション")) return "中古マンション等";
+  // 一棟 trades are recorded as 土地と建物, not 区分 (中古マンション等).
+  if (t.includes("マンション") && !/(一棟|1棟|１棟)/.test(t)) return "中古マンション等";
   if (["土地", "用地", "宅地"].some((x) => t.includes(x)) && !t.includes("戸建")) {
     return "宅地(土地)";
   }

@@ -24,6 +24,7 @@ import { wardLabelToCode } from "../lib/tokyoWards";
 import { Play, RefreshCw, Database, Trash2, ShieldCheck, ExternalLink } from "lucide-react";
 import type { Doc, Id } from "../lib/dataModel";
 import { formatJaDateTime } from "../lib/dateFormat";
+import { AccessSettings } from "../components/AccessSettings";
 
 const SOURCE_LABELS: Record<string, string> = {
   athome: "At Home",
@@ -265,6 +266,8 @@ export default function AdminPage() {
           </p>
         </div>
       </div>
+
+      <AccessSettings />
 
       {/* ── Scraper Health Board ── */}
       <div className="bg-white rounded-2xl border border-[var(--border-subtle)] p-6 space-y-6 shadow-xs">

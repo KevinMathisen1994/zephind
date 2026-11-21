@@ -100,7 +100,7 @@ export async function attachIdentity(req: Request, _res: Response, next: NextFun
   if (token) {
     try {
       req.identity = await verifyBearer(token);
-      recordAuthEvent(`${req.method} ${req.path}`, `accepted sub=${req.identity.subject}`);
+      recordAuthEvent(`${req.method} ${req.path}`, `accepted sub=${req.identity.subject} email=${req.identity.email ? "yes" : "MISSING"}`);
     } catch (err) {
       recordAuthEvent(`${req.method} ${req.path}`, `rejected: ${(err as Error).message}`);
       // Left unauthenticated; requireAuth turns that into a 401. The reason is

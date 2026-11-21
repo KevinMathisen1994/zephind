@@ -41,3 +41,41 @@ export async function savePlacesCache(fields: {
   if (existing) return db.patch("placesCache", existing._id, fields);
   await db.insert("placesCache", fields);
 }
+
+/**
+ * One ward-year of MLIT XIT001 trades (all types), from cache or fetched and cached.
+ * fetchIfMissing=false returns [] on a cache miss, for bulk paths that must not hit the network.
+ */
+export async function loadMlitYear(
+  ward: string,
+  cityCode: string,
+  year: number,
+  fetchIfMissing: boolean,
+): Promise<any[]> {
+  const cached = await getMlitCache(ward, year);
+  if (cached && Date.now() - (cached.fetchedAt as number) < CACHE_TTL_MS) return cached.comparables || [];
+  const key = process.env.REINFOLIB_API_KEY;
+  if (!fetchIfMissing || !key) return [];
+  const res = await fetch(
+    `https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001?year=${year}&area=13&city=${cityCode}&language=ja`,
+    { headers: { "Ocp-Apim-Subscription-Key": key } },
+  );
+  if (!res.ok) throw new Error(`MLIT API HTTP ${res.status}`);
+  const data: any = await res.json();
+  const items = (data.data || [])
+    .filter((i: any) => i.TradePrice)
+    .map((i: any) => ({
+      type: i.Type,
+      district: i.DistrictName,
+      station: i.NearestStation,
+      walkMinutes: i.TimeToNearestStation,
+      price: Math.round(parseFloat(i.TradePrice.replace(/,/g, "")) / 10000),
+      area: i.Area ? parseFloat(i.Area) : null,
+      buildYear: i.BuildingYear,
+      structure: i.Structure,
+      period: i.Period,
+    }))
+    .slice(0, 200); // bounded snapshot, refreshed wholesale, not appended to
+  await saveMlitCache({ ward, year, comparables: items, fetchedAt: Date.now() });
+  return items;
+}

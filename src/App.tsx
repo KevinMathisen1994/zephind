@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignIn, useAuth } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, useAuth, useClerk } from "@clerk/clerk-react";
+import { useApiQuery } from "./hooks/useApi";
+import { api } from "./lib/api";
 import { useRef } from "react";
 import DashboardLayout from "./components/layout/DashboardLayout";
 import AdminPage from "./pages/Admin";
@@ -60,6 +62,31 @@ function LoginSplash() {
   return <SplashScreen force={force.current} />;
 }
 
+/** The backend rejects accounts not on the admin's allowlist; this shows why instead of a broken dashboard. */
+function AccessGate() {
+  const me = useApiQuery(api.access.me);
+  const { signOut } = useClerk();
+  if (!me) return null;
+  if (me.allowed) return <AppRoutes />;
+  return (
+    <div className="login-bg flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-[440px] rounded-3xl bg-white px-6 py-8 text-center shadow-2xl">
+        <h2 className="text-[20px] font-bold text-[var(--text-primary)]">アクセス権がありません</h2>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          {me.email ?? "このアカウント"} はログインを許可されていません。管理者に連絡してください。
+        </p>
+        <button
+          type="button"
+          onClick={() => signOut()}
+          className="mt-6 rounded-xl bg-[var(--brand)] px-5 py-2.5 text-sm font-bold text-white"
+        >
+          別のアカウントでログイン
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <>
@@ -83,7 +110,7 @@ function AppInner() {
         {/* Convex query rejections throw during render; without this the whole
             app white-screens on a config problem. */}
         <AuthErrorBoundary>
-          <AppRoutes />
+          <AccessGate />
         </AuthErrorBoundary>
       </SignedIn>
       <SignedOut>

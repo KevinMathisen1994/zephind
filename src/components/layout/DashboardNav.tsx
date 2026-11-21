@@ -3,7 +3,7 @@ import { useApiQuery as useQuery } from "../../hooks/useApi";
 import { api } from "../../lib/api";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import { isClerkEnabled } from "../../Providers";
-import { LogOut, Plus, Bell } from "lucide-react";
+import { LogOut, Plus, Bell, Sparkles } from "lucide-react";
 
 const navSections = [
   {
@@ -162,6 +162,15 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
       >
         <Bell className="h-3.5 w-3.5 text-white shrink-0" />
         <span>即時通知設定 (LINE/Mail)</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event("zephind:open-claude-connect"))}
+        className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-left text-[12.5px] text-white hover:bg-white/[0.08] transition-colors font-medium"
+      >
+        <Sparkles className="h-3.5 w-3.5 text-white shrink-0" />
+        <span>Claude連携</span>
       </button>
 
       <button

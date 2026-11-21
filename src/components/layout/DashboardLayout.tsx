@@ -3,17 +3,24 @@ import { Outlet, useLocation } from "react-router-dom";
 import DashboardNav from "./DashboardNav";
 import OnboardingTour from "../OnboardingTour";
 import { AlertSettingsModal } from "../AlertSettingsModal";
+import { ClaudeConnectModal } from "../ClaudeConnectModal";
 import { Menu, X } from "lucide-react";
 
 export default function DashboardLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [claudeConnectOpen, setClaudeConnectOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
     const handleOpen = () => setAlertSettingsOpen(true);
+    const handleClaude = () => setClaudeConnectOpen(true);
     window.addEventListener("zephind:open-alert-settings", handleOpen);
-    return () => window.removeEventListener("zephind:open-alert-settings", handleOpen);
+    window.addEventListener("zephind:open-claude-connect", handleClaude);
+    return () => {
+      window.removeEventListener("zephind:open-alert-settings", handleOpen);
+      window.removeEventListener("zephind:open-claude-connect", handleClaude);
+    };
   }, []);
 
   return (
@@ -67,6 +74,7 @@ export default function DashboardLayout() {
         isOpen={alertSettingsOpen}
         onClose={() => setAlertSettingsOpen(false)}
       />
+      <ClaudeConnectModal isOpen={claudeConnectOpen} onClose={() => setClaudeConnectOpen(false)} />
     </div>
   );
 }

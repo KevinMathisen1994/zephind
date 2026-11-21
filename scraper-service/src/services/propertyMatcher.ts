@@ -1,5 +1,6 @@
 import type { PropertyListing, OrderCriteria } from "../types";
 import { logger } from "../logger";
+import { WARD_CODE_MAP } from "../lib/scoring.js";
 
 export interface MatchedListing extends PropertyListing {
   matchedOrderIndices: number[];
@@ -168,6 +169,10 @@ export function propertyTypeMatches(
   return false;
 }
 
+// A Tokyo ward target ("中央区") must not match same-named wards elsewhere: 大阪市中央区, 札幌市中央区 etc. share the names.
+const OUTSIDE_TOKYO_RE = /^(北海道|京都府|大阪府|[^\s都]{2,3}県)|市[^\s市]{1,4}区/;
+const TOKYO_WARDS = new Set(Object.keys(WARD_CODE_MAP).filter((w) => w.endsWith("区")));
+
 function matchesOrder(
   listing: PropertyListing,
   criteria: OrderCriteria,
@@ -211,6 +216,7 @@ function matchesOrder(
 
   if (targetLocations.length > 0) {
     const isMatched = targetLocations.some((target) => {
+      if (TOKYO_WARDS.has(target) && OUTSIDE_TOKYO_RE.test(listing.address || "")) return false;
       if (
         listing.ward &&
         (listing.ward === target ||

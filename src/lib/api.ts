@@ -162,6 +162,32 @@ export const api = {
     }),
   },
 
+  access: {
+    me: endpoint<void, { email: string | null; allowed: boolean; isAdmin: boolean; enforced: boolean }>({
+      method: "GET", key: "access.me", path: () => "/api/access/me",
+    }),
+    list: endpoint({ method: "GET", key: "access.list", path: () => "/api/access/allowlist" }),
+    add: endpoint<{ email: string }>({
+      method: "POST", key: "access.add", path: () => "/api/access/allowlist",
+      body: (a) => a, invalidates: ["access.list", "access.me"],
+    }),
+    remove: endpoint({
+      method: "DELETE", key: "access.remove", path: (a) => `/api/access/allowlist/${id(a)}`,
+      invalidates: ["access.list", "access.me"],
+    }),
+  },
+
+  mcpKeys: {
+    list: endpoint({ method: "GET", key: "mcpKeys", path: () => "/api/mcp-keys" }),
+    create: endpoint<{ label?: string }, { id: string; key: string }>({
+      method: "POST", key: "mcpKeys.create", path: () => "/api/mcp-keys",
+      body: (a) => a, invalidates: ["mcpKeys"],
+    }),
+    remove: endpoint({
+      method: "DELETE", key: "mcpKeys.remove", path: (a) => `/api/mcp-keys/${id(a)}`, invalidates: ["mcpKeys"],
+    }),
+  },
+
   scraperHealth: {
     list: endpoint({ method: "GET", key: "scraperHealth", path: () => "/api/scraper-health" }),
     record: endpoint({

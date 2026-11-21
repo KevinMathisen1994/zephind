@@ -8,6 +8,8 @@ export const logger = winston.createLogger({
   ),
   transports: [
     new winston.transports.Console({
+      // The stdio MCP server (src/mcp.ts) owns stdout, so it routes every level to stderr.
+      stderrLevels: process.env.LOG_TO_STDERR ? ["error", "warn", "info", "http", "verbose", "debug", "silly"] : undefined,
       format: winston.format.combine(
         winston.format.colorize(),
         winston.format.printf(({ timestamp, level, message, ...meta }) => {

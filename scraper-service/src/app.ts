@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { attachIdentity, recentAuthEvents } from "./auth/clerk";
+import { accessRouter, enforceAllowlist } from "./auth/access";
 import { customersRouter } from "./api/customers";
 import { dealsRouter } from "./api/deals";
 import { emailSettingsRouter } from "./api/emailSettings";
@@ -9,6 +10,7 @@ import { ingestRouter } from "./api/ingest";
 import { listingsRouter } from "./api/listings";
 import { mailRouter } from "./api/mail";
 import { matchingRouter } from "./api/matching";
+import { mcpKeysRouter, mcpRouter } from "./api/mcp";
 import { oauthRouter } from "./api/oauth";
 import { ordersRouter } from "./api/orders";
 import { propertiesRouter } from "./api/properties";
@@ -33,6 +35,7 @@ export function createApiApp() {
   // Verifies the Clerk JWT when one is present. It never rejects — each router
   // decides whether it needs an identity, so /scrape and /health stay open.
   app.use(attachIdentity);
+  app.use(enforceAllowlist);
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, timestamp: new Date().toISOString() });
@@ -55,6 +58,7 @@ export function createApiApp() {
 
   // Application API, ported from convex/. Every router here enforces its own
   // per-user access control; see src/auth/authz.ts.
+  app.use("/api/access", accessRouter);
   app.use("/api/orders", ordersRouter);
   app.use("/api/customers", customersRouter);
   app.use("/api/deals", dealsRouter);
@@ -72,6 +76,9 @@ export function createApiApp() {
   // Machine-to-machine, guarded by SCRAPER_INGEST_SECRET rather than Clerk — the
   // scheduled runner has no browser session.
   app.use("/api/ingest", ingestRouter);
+  app.use("/api/mcp-keys", mcpKeysRouter);
+  // Claude connector; the key in the path is the identity, not Clerk.
+  app.use("/api/mcp", mcpRouter);
   // Providers redirect the browser here; no Clerk session, the OAuth state is the
   // identity check.
   app.use("/oauth", oauthRouter);
