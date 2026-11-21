@@ -35,7 +35,10 @@ ordersRouter.patch("/:id", route(async (req) => {
   // Ownership check first: without it any signed-in user could patch any order
   // by guessing its id.
   const { userId } = await requireOwned(req, "orders", req.params.id, "オーダー");
-  await db.patch("orders", req.params.id, pick(req.body ?? {}, ORDER_FIELDS));
+  const fields = pick(req.body ?? {}, ORDER_FIELDS);
+  await db.patch("orders", req.params.id, fields);
+  // Status/progress patches (e.g. "scrape finished") must not re-filter, or they wipe matches the scrape just made.
+  if (!Object.keys(fields).some((k) => !NON_CRITERIA_FIELDS.has(k))) return { ok: true, removedMatches: 0, addedMatches: 0 };
   const removedMatches = await pruneMatches(req.params.id, userId);
   const addedMatches = await addMatchesFromKnownListings(req.params.id, userId);
   return { ok: true, removedMatches, addedMatches };
@@ -51,6 +54,10 @@ ordersRouter.delete("/:id", route(async (req) => {
   if (error) throw new HttpError(500, `delete_order: ${error.message}`);
   return { ok: true };
 }));
+
+const NON_CRITERIA_FIELDS = new Set([
+  "name", "status", "customerId", "isScraping", "scrapingStatus", "activeSource", "scrapeRunId", "lastScrapeAt", "lastScrapeBy",
+]);
 
 const PAGE = 1000; // PostgREST max-rows
 
