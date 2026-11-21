@@ -172,6 +172,9 @@ export function propertyTypeMatches(
 // A Tokyo ward target ("中央区") must not match same-named wards elsewhere: 大阪市中央区, 札幌市中央区 etc. share the names.
 const OUTSIDE_TOKYO_RE = /^(北海道|京都府|大阪府|[^\s都]{2,3}県)|市[^\s市]{1,4}区/;
 const TOKYO_WARDS = new Set(Object.keys(WARD_CODE_MAP).filter((w) => w.endsWith("区")));
+// "中央区", "東京都中央区", "Tokyo 中央区" all mean Tokyo's ward; "札幌市北区" does not.
+const isTokyoWardTarget = (target: string) =>
+  !target.includes("市") && [...TOKYO_WARDS].some((w) => target.endsWith(w));
 
 function matchesOrder(
   listing: PropertyListing,
@@ -216,7 +219,7 @@ function matchesOrder(
 
   if (targetLocations.length > 0) {
     const isMatched = targetLocations.some((target) => {
-      if (TOKYO_WARDS.has(target) && OUTSIDE_TOKYO_RE.test(listing.address || "")) return false;
+      if (isTokyoWardTarget(target) && OUTSIDE_TOKYO_RE.test(listing.address || "")) return false;
       if (
         listing.ward &&
         (listing.ward === target ||
@@ -444,7 +447,8 @@ function matchesOrder(
 
   // Structure types (構造種別)
   if (criteria.structureTypes && criteria.structureTypes.length > 0) {
-    if (!listing.structureType || !criteria.structureTypes.includes(listing.structureType)) {
+    // Portal list pages rarely state 構造; missing is scored as unverified, like yield and age.
+    if (listing.structureType && !criteria.structureTypes.includes(listing.structureType)) {
       incrementReason(reasons, "構造種別不一致");
       return [false, "構造種別不一致"];
     }

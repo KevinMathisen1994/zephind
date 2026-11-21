@@ -4,7 +4,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { Router } from "express";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { db } from "../db";
 import { requireOwned, requireUserId } from "../auth/authz";
 import { isAllowed } from "../auth/access";
@@ -54,13 +54,20 @@ mcpRouter.post("/:key", async (req, res) => {
 
     // Stateless: a fresh server per request, so it works on the edge function with no session store.
     const server = createZephindMcpServer(row.userId);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on("close", () => {
-      void transport.close();
-      void server.close();
-    });
+    // Web-standard transport: the Node one reads req.rawHeaders, which Supabase's edge runtime doesn't provide.
+    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
+    const response = await transport.handleRequest(
+      new Request(`http://localhost${req.originalUrl}`, { method: "POST", headers, body: JSON.stringify(req.body) }),
+      { parsedBody: req.body },
+    );
+    res.status(response.status);
+    response.headers.forEach((v, k) => res.setHeader(k, v));
+    res.send(await response.text());
+    void transport.close();
+    void server.close();
   } catch (err) {
     logger.error(`mcp: ${(err as Error).stack || err}`);
     if (!res.headersSent) res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal error" }, id: null });

@@ -147,11 +147,16 @@ export async function getRunStatus(runId: number) {
   const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}`, { headers: githubHeaders(token) });
   if (!res.ok) throw new Error(`GitHub ${res.status}`);
   const run: any = await res.json();
+  // Listings and matches are written by the "scrape (n)" shard jobs; the later "finalize" job only backfills 掲載日 and evaluates.
+  const jobsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs?per_page=50`, { headers: githubHeaders(token) });
+  const jobs: any[] = jobsRes.ok ? ((await jobsRes.json()) as any).jobs ?? [] : [];
+  const shards = jobs.filter((j) => String(j.name).startsWith("scrape"));
   return {
     status: run.status as string, // queued | in_progress | completed
     conclusion: (run.conclusion ?? null) as string | null,
     startedAt: run.run_started_at as string,
     updatedAt: run.updated_at as string,
+    matchesReady: run.status === "completed" || (shards.length > 0 && shards.every((j) => j.status === "completed")),
   };
 }
 

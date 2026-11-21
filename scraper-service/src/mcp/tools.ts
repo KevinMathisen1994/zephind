@@ -17,7 +17,7 @@ import { toCriteria } from "../services/propertyMatcher";
 
 const criteriaShape = {
   dealType: z.enum(["buy", "rent"]).optional().describe("Default buy"),
-  wards: z.array(z.string()).optional().describe('Areas, e.g. ["世田谷区","杉並区"]'),
+  wards: z.array(z.string()).optional().describe('Ward/city names without prefecture, e.g. ["世田谷区","杉並区"]'),
   propertyTypes: z.array(z.string()).optional().describe('Any of ["ビル","一棟マンション","アパート","マンション","一戸建て","土地","店舗"]. 1棟商業ビル = ビル'),
   priceMin: z.number().optional().describe("万円"),
   priceMax: z.number().optional().describe("万円 (1.5億 = 15000)"),
@@ -100,7 +100,17 @@ export async function searchListings(criteria: Record<string, any>, limit: numbe
           : undefined,
       };
     });
-  return { scanned: candidates.length, matched: matched.length, returned: results.length, results };
+  return {
+    scanned: candidates.length,
+    matched: matched.length,
+    returned: results.length,
+    results,
+    ...(results.length < 3 && {
+      next:
+        "Few or no matches in the current data. Offer the user to save these exact criteria and scrape the portals now " +
+        "(create_order_and_scrape), then check back with scrape_status in 20-30 minutes.",
+    }),
+  };
 }
 
 async function getScopedListing(id: string, ownerId: string | null) {
@@ -195,8 +205,13 @@ export async function scrapeStatus(orderId: string, ownerId: string, limit: numb
   }
   const run = await getRunStatus(order.scrapeRunId);
   const minutes = Math.round((Date.now() - new Date(run.startedAt).getTime()) / 60000);
-  if (run.status !== "completed") return { orderId, status: run.status, minutesElapsed: minutes, next: "Not finished yet; check again later." };
-  return { orderId, status: "completed", conclusion: run.conclusion, ...(await searchListings(toCriteria(order), limit, ownerId)) };
+  if (!run.matchesReady) return { orderId, status: run.status, minutesElapsed: minutes, next: "Not finished yet; check again later." };
+  return {
+    orderId,
+    status: run.status === "completed" ? "completed" : "scraped (date backfill/evaluation still running; results are usable)",
+    conclusion: run.conclusion,
+    ...(await searchListings(toCriteria(order), limit, ownerId)),
+  };
 }
 
 /** Japanese portals still serve Shift_JIS/EUC-JP, so decode by declared charset instead of assuming UTF-8. */
@@ -278,7 +293,8 @@ export function createZephindMcpServer(ownerId: string | null): McpServer {
     {
       description:
         "Search Zephind's property listings for a buyer's criteria and return the best matches ranked by match score (0-100). " +
-        "Prices are in 万円. Each result lists disqualifiers and unverified items (fields the listing doesn't state). " +
+        "Prices are in 万円. Each result lists disqualifiers and unverified items. A listing that doesn't state a field (e.g. 利回り) " +
+        "is kept and flagged as unverified, not excluded. " +
         "Use check_listing_page on promising results to verify them against the live portal page, and market_check to judge the price. " +
         "If nothing fits, offer create_order_and_scrape.",
       // Cast: the SDK's zod-shape inference hits TS2589 on a schema this wide.

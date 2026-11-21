@@ -36,7 +36,8 @@ on:
 # request still queues behind the first instead of duplicating the work.
 # The scheduled run passes no inputs, so it occupies its own "scrape--" group.
 concurrency:
-  group: scrape-${{ github.event.inputs.areas }}-${{ github.event.inputs.sources }}
+  # orderId too: order-scoped runs (e.g. from the Claude connector) send no areas/sources and would queue behind the nightly run.
+  group: scrape-${{ github.event.inputs.areas }}-${{ github.event.inputs.sources }}-${{ github.event.inputs.orderId }}
   cancel-in-progress: false
 
 jobs:

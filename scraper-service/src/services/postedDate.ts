@@ -311,6 +311,8 @@ export async function readPostedDateFromPage(
  * only the urls that are NEW to the database, so a listing's date is fetched
  * once in its lifetime, not on every nightly run.
  */
+const MAX_DEAD_PAGES_IN_A_ROW = 3;
+
 export async function fetchPostedDates(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   page: any,
@@ -330,7 +332,15 @@ export async function fetchPostedDates(
   }
 
   let found = 0;
+  let tried = 0;
+  let deadInARow = 0;
   for (const url of targets) {
+    // A blocked/hanging portal costs ~66s per page; stop after a few so one site can't eat the job timeout.
+    if (deadInARow >= MAX_DEAD_PAGES_IN_A_ROW) {
+      logger.warn(`[${opts.source}] ${deadInARow} detail pages in a row failed to load; skipping the remaining ${targets.length - tried} until a later run`);
+      break;
+    }
+    tried++;
     try {
       try {
         await page.goto(url, {
@@ -345,6 +355,7 @@ export async function fetchPostedDates(
           timeout: (opts.timeoutMs ?? 25000) + 15000,
         });
       }
+      deadInARow = 0;
       const result = await readDetailsFromPage(page);
       if (Object.keys(result).length > 0) {
         dates.set(url, result as any);
@@ -352,12 +363,13 @@ export async function fetchPostedDates(
       }
     } catch {
       // A single unreachable detail page must not abort the batch.
+      deadInARow++;
     }
     if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
   }
 
   logger.info(
-    `[${opts.source}] 詳細・掲載日: ${found}/${targets.length} detail page(s) yielded specifications`,
+    `[${opts.source}] 詳細・掲載日: ${found}/${tried} detail page(s) yielded specifications`,
   );
-  return { dates, attempted: targets.length, skipped };
+  return { dates, attempted: tried, skipped };
 }
