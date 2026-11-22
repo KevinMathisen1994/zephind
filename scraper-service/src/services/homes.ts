@@ -2,6 +2,7 @@ import puppeteer from "../puppeteerStealth";
 import { logger } from "../logger";
 import { config } from "../config";
 import { pace } from "../lib/pace";
+import { scrapeHomesToushi } from "./homesToushi";
 import type { PropertyListing, ScrapeResult } from "../types";
 
 
@@ -795,6 +796,16 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[], deal
           `[Homes Scraper] Page ${p}: ${newListings.length} new listings (total: ${allListings.length + newListings.length})`
         );
         allListings.push(...newListings);
+      }
+    }
+
+    // 一棟アパート/マンション/ビル live on the separate investment site; cli.ts widens those order types to ビル.
+    if (!filterTypes?.length || filterTypes.includes("ビル")) {
+      try {
+        allListings.push(...(await scrapeHomesToushi(areaCode)));
+      } catch (err) {
+        scrapeErrors.push(`toushi: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(`[Homes Scraper] toushi.homes failed for ${wardName}: ${err}`);
       }
     }
 

@@ -155,9 +155,12 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         var href = detailBtn.getAttribute("href") || "";
         url = href.startsWith("http") ? href : "https://www.hatomarksite.com" + href;
       }
-      // office pages mix whole buildings with single units; only units carry a monthly 管理費.
-      var isUnit = pt === "ビル" && /管理費\\s*[\\d,]+円/.test(el.textContent || "");
-      var rowType = isUnit ? "事務所(区分)" : pt;
+      // office/other pages mix types; the card's own tag (一棟売アパート, 店舗事務所, ...) is the real one.
+      var tagEl = el.querySelector(".room-tag");
+      var tag = tagEl ? tagEl.textContent.trim() : "";
+      // Office units read like buildings ("ニュー新橋ビル 521"); only units carry a monthly 管理費.
+      var isUnit = pt === "ビル" && !/一棟/.test(tag) && /管理費\\s*[\\d,]+円/.test(el.textContent || "");
+      var rowType = isUnit ? (tag || "事務所") + "(区分)" : /一棟/.test(tag) ? tag : pt;
 
       results.push({
         address: address,
@@ -220,6 +223,8 @@ export async function scrapeHatomark(areaCode: string, filterTypes?: string[], d
       house: "一戸建て",
       mansion: "マンション",
       office: "ビル",
+      // その他: 一棟売アパート / 一棟売マンション. Fetched for the ビル label because cli.ts widens アパート and 一棟マンション to it.
+      other: "ビル",
     };
     const categories = filterTypes && filterTypes.length > 0
       ? Object.entries(catMap).filter(([, label]) => filterTypes.includes(label)).map(([key]) => key)
