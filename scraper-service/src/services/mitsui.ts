@@ -250,6 +250,10 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       if (!imgSrc || imgSrc === "false") imgSrc = imgEl ? imgEl.getAttribute("src") || "" : "";
       var image = imgSrc && !/^data:|no_?image|dummy|spacer|loading/i.test(imgSrc) ? new URL(imgSrc, location.href).href : "";
       var title = h2.textContent.trim();
+      // 投資・事業用 pages mix 一棟アパート/一棟マンション/店舗・事務所 under one URL; use the card's own tag, not the requested category.
+      var tagEl = (el.closest(".property-index-card") || el).querySelector(".gray-on-property");
+      var tag = tagEl ? tagEl.textContent.trim() : "";
+      var rowType = /(店舗|事務所).*一棟/.test(tag) ? "ビル" : (tag || propertyType);
       
       var ward = "";
       // Strip the prefecture first: /(.{2,4}[区市])/ scanned over
@@ -392,7 +396,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
           walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
           buildingCoverageRatio: bcr !== null ? bcr : undefined,
           floorAreaRatio: far !== null ? far : undefined,
-          propertyType: propertyType,
+          propertyType: rowType,
           layout: layout || undefined,
           age: age || undefined,
           images: image ? [image] : undefined,

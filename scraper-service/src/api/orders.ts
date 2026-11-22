@@ -24,11 +24,14 @@ ordersRouter.post("/", route(async (req) => {
   // discarded — otherwise a caller could create rows owned by someone else.
   const userId = requireUserId(req);
   const fields = pick(req.body ?? {}, ORDER_FIELDS);
-  return db.insert("orders", {
+  const id = await db.insert("orders", {
     ...fields,
     userId,
     status: fields.status || "pending",
   });
+  // Show matches from stored listings right away instead of waiting for the next scrape.
+  await addMatchesFromKnownListings(id, userId);
+  return id;
 }));
 
 ordersRouter.patch("/:id", route(async (req) => {

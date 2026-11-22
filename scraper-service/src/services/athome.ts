@@ -200,7 +200,9 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
       // 0, so an unparsed size (common for buy_other/ビル cards, which often
       // have no 土地面積 row) read as "confirmed 0m²" and got hard-rejected
       // by any such filter instead of being treated as unknown.
-      results.push({ address: address, ward: ward, price: price, area: area || undefined, landSize: area || undefined, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: pt || undefined, layout: layout || undefined, buildYear: buildYear || undefined, structure: structure || undefined, images: images });
+      // buy_other mixes 売ビル with 一棟売アパート/マンション; read the card instead of stamping the requested label.
+      var rowType = pt === "ビル" ? (/アパート/.test(cardText) ? "一棟アパート" : /一棟売?マンション/.test(cardText) ? "一棟マンション" : pt) : pt;
+      results.push({ address: address, ward: ward, price: price, area: area || undefined, landSize: area || undefined, source: "athome", station: station || undefined, walkMinutes: walkMinutes ?? undefined, buildingCoverageRatio: bcr ?? undefined, floorAreaRatio: far ?? undefined, url: detailUrl || undefined, detailUrl: detailUrl || undefined, propertyType: rowType || undefined, layout: layout || undefined, buildYear: buildYear || undefined, structure: structure || undefined, images: images });
       if (detailUrl) urls.push(detailUrl);
     });
     return JSON.stringify({ listings: results, detailUrls: urls });

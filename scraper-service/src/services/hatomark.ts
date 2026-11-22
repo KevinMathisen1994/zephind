@@ -155,6 +155,9 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         var href = detailBtn.getAttribute("href") || "";
         url = href.startsWith("http") ? href : "https://www.hatomarksite.com" + href;
       }
+      // office pages mix whole buildings with single units; only units carry a monthly 管理費.
+      var isUnit = pt === "ビル" && /管理費\\s*[\\d,]+円/.test(el.textContent || "");
+      var rowType = isUnit ? "事務所(区分)" : pt;
 
       results.push({
         address: address,
@@ -176,7 +179,7 @@ async function extractListings(page: any, pType: string): Promise<PropertyListin
         buildingCoverageRatio: bcr ?? undefined,
         floorAreaRatio: far ?? undefined,
         url: url || undefined,
-        propertyType: pt,
+        propertyType: rowType,
       });
     });
 

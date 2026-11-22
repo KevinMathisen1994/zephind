@@ -646,6 +646,9 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
       var linkEl = el.querySelector("a.prg-bukkenNameAnchor, a.prg-detailLink, a.detailLink");
       var url = linkEl ? linkEl.getAttribute("href") : null;
       if (url && !url.startsWith("http")) url = "https://www.homes.co.jp" + url;
+      // office pages mix whole buildings (建物全部) with single units (建物一部); a unit is not a ビル.
+      var unitM = propertyType === "ビル" ? (el.textContent || "").match(/購入\\s*([^\\s(（]{1,8})[(（]建物一部/) : null;
+      var rowType = unitM ? unitM[1] + "(建物一部)" : propertyType;
 
       results.push({
         address: address,
@@ -664,7 +667,7 @@ async function extractListings(page: any, propertyType: string): Promise<Propert
         walkMinutes: walkMinutes !== null ? walkMinutes : undefined,
         buildingCoverageRatio: bcr !== null ? bcr : undefined,
         floorAreaRatio: far !== null ? far : undefined,
-        propertyType: propertyType,
+        propertyType: rowType,
         floor: floor !== null ? floor : undefined,
         structure: structure || undefined,
         structureType: structureType || undefined,
