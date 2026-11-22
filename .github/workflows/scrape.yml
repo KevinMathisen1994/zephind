@@ -22,22 +22,11 @@ on:
         required: false
         default: ""
 
-# A long run must never overlap the next one; queued duplicates are useless.
-# Key on the WORK, not a single global lock.
-#
-# With one fixed group every dispatch serialized behind the last — and worse,
-# GitHub keeps only ONE pending run per group, so a third dispatch silently
-# cancelled the queued second one. With several people triggering scrapes from
-# their phones that means quietly losing someone's run.
-#
-# Keying on areas+sources means: different requests run in PARALLEL (each run
-# gets its own isolated VM, so there is no Chrome contention between them, and
-# a public repo has unlimited Actions minutes), while an identical repeat
-# request still queues behind the first instead of duplicating the work.
-# The scheduled run passes no inputs, so it occupies its own "scrape--" group.
+# A long run must never overlap the next one with the same work.
+# Keyed on the order (user/Claude runs) or "sweep" (scheduled run, no inputs); any other ad-hoc run gets its own group.
+# Not keyed on areas/sources: an all-Tokyo order lists 62 area codes and blows GitHub's 400-char group limit.
 concurrency:
-  # orderId too: order-scoped runs (e.g. from the Claude connector) send no areas/sources and would queue behind the nightly run.
-  group: scrape-${{ github.event.inputs.areas }}-${{ github.event.inputs.sources }}-${{ github.event.inputs.orderId }}
+  group: scrape-${{ github.event.inputs.orderId || (github.event.inputs.areas == '' && github.event.inputs.sources == '' && 'sweep') || github.run_id }}
   cancel-in-progress: false
 
 jobs:

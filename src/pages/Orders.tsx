@@ -1450,10 +1450,13 @@ export default function OrdersPage() {
             ) {
               continue;
             }
+            // The order's own run says how it ended; a run that failed to start must not read as "completed".
+            const run = r.runs.find((x) => String(x.id) === String((o as { scrapeRunId?: string | number | null }).scrapeRunId));
+            const failed = run != null && ["failure", "startup_failure", "timed_out"].includes(run.conclusion);
             void updateOrder({
               id: o._id,
               isScraping: false,
-              scrapingStatus: "completed",
+              scrapingStatus: failed ? "failed" : run?.conclusion === "cancelled" ? "cancelled" : "completed",
             }).catch(() => {});
           }
         }
@@ -4354,6 +4357,9 @@ export default function OrdersPage() {
                                 )}
                                 {order.dealType === "rent" && (
                                   <Badge variant="neutral">借りる</Badge>
+                                )}
+                                {order.scrapingStatus === "failed" && (
+                                  <Badge variant="destructive">検索失敗</Badge>
                                 )}
                               </div>
                             )}
