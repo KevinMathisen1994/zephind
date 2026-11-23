@@ -802,7 +802,7 @@ export async function scrapeHomes(areaCode: string, filterTypes?: string[], deal
     // 一棟アパート/マンション/ビル live on the separate investment site; cli.ts widens those order types to ビル.
     if (!filterTypes?.length || filterTypes.includes("ビル")) {
       try {
-        allListings.push(...(await scrapeHomesToushi(areaCode)));
+        allListings.push(...(await scrapeHomesToushi(page, areaCode)));
       } catch (err) {
         scrapeErrors.push(`toushi: ${err instanceof Error ? err.message : String(err)}`);
         logger.warn(`[Homes Scraper] toushi.homes failed for ${wardName}: ${err}`);

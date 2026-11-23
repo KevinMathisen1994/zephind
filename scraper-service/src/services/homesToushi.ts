@@ -1,9 +1,9 @@
 /**
  * LIFULL HOME'S 不動産投資 (toushi.homes.co.jp): the 一棟 stock homes.co.jp's own categories don't carry.
- * Static HTML, so fetch + cheerio; each card already states 利回り, 築年月, 構造 and 戸数.
+ * Static HTML parsed with cheerio; each card already states 利回り, 築年月, 構造 and 戸数.
  */
 import * as cheerio from "cheerio";
-import { config } from "../config";
+import type { Page } from "puppeteer";
 import { logger } from "../logger";
 import { pace } from "../lib/pace";
 import { parsePriceMan } from "../lib/mailParse.js";
@@ -56,15 +56,17 @@ export function parseToushiPage(html: string, propertyType: string): PropertyLis
   return out;
 }
 
-export async function scrapeHomesToushi(areaCode: string): Promise<PropertyListing[]> {
+// Loaded through the caller's stealth page: plain fetch from CI (datacenter IPs) got nothing saved in production.
+export async function scrapeHomesToushi(page: Page, areaCode: string): Promise<PropertyListing[]> {
   const all: PropertyListing[] = [];
   for (const [tbg, label] of Object.entries(TYPES)) {
     for (let p = 1; p <= MAX_PAGES; p++) {
       const url = `https://toushi.homes.co.jp/bukkensearch/ad1[]=${areaCode}&tbg[]=${tbg}/?page=${p}`;
       await pace("toushi.homes", 1500, 3000);
-      const res = await fetch(url, { headers: { "user-agent": config.userAgent } });
-      if (!res.ok) throw new Error(`toushi.homes ${res.status} on ${url}`);
-      const rows = parseToushiPage(await res.text(), label);
+      const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      const status = res?.status() ?? 0;
+      if (status >= 400) throw new Error(`toushi.homes ${status} on ${url}`);
+      const rows = parseToushiPage(await page.content(), label);
       all.push(...rows);
       if (rows.length < PAGE_SIZE) break;
     }
