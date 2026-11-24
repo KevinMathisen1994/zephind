@@ -39,6 +39,7 @@ export interface IngestSummary {
     duplicate?: number;
     noOwner?: number;
     listingRejected?: number;
+    failsStored?: number;
   };
 }
 

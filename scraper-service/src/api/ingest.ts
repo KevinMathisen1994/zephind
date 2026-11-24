@@ -30,6 +30,7 @@ import { evaluateMatchIdsServer } from "./evaluate";
 import { backfillSpecs, enrichListingSpecs } from "../lib/listingSpecs";
 import { scoreListingsBatch } from "../lib/dealScore";
 import { parseBuildYear } from "../services/propertyDetail";
+import { hardFilter, toCriteria } from "../services/propertyMatcher";
 
 /**
  * Length-independent-ish constant-time comparison. Not a defence against a
@@ -326,7 +327,7 @@ ingestRouter.post("/scrape", route(async (req) => {
   // Broken down by cause: "matchesSkipped=55" alone couldn't distinguish
   // "already done" from "this order can never receive matches", which made a
   // normal idempotent re-run look identical to a data-model bug.
-  const skipReasons = { listingRejected: 0, noOwner: 0, duplicate: 0 };
+  const skipReasons = { listingRejected: 0, noOwner: 0, duplicate: 0, failsStored: 0 };
 
   // url -> listing _id, for resolving the match pairs below without re-querying.
   const listingIdByUrl = new Map<string, string>();
@@ -503,11 +504,21 @@ ingestRouter.post("/scrape", route(async (req) => {
   const orderRows = orderIds.length > 0 ? await db.getMany("orders", orderIds) : [];
   const orderById = new Map(orderRows.filter(Boolean).map((o) => [o!._id, o!]));
 
-  const existingPairs = new Set<string>();
+  const existingPairs = new Map<string, { _id: string; status: string }>();
   if (orderIds.length > 0) {
-    const rows = await db.selectIn("matching", "orderId,listingId", "orderId", orderIds);
-    for (const row of rows) existingPairs.add(`${row.orderId}\u0000${row.listingId}`);
+    const rows = await db.selectIn("matching", "_id,orderId,listingId,status", "orderId", orderIds);
+    for (const row of rows) existingPairs.set(`${row.orderId}\u0000${row.listingId}`, row as any);
   }
+
+  // List pages often lack 利回り/築年 that the stored row already has from its detail page,
+  // so the CLI's "unverified" pass is re-judged here against the stored row.
+  const storedIds = [...new Set(matches.map((m) => listingIdByUrl.get(m.listingUrl)).filter(Boolean))] as string[];
+  const stored = new Map((await db.getMany("listings", storedIds)).filter(Boolean).map((l) => [l!._id, l!]));
+  const failsStored = (listingId: string, order: Record<string, any>) => {
+    const l = stored.get(listingId);
+    return !!l && hardFilter([l as any], [toCriteria(order as any)]).passed.length === 0;
+  };
+  const stale: string[] = [];
 
   const toInsert: Record<string, any>[] = [];
   for (const match of matches) {
@@ -527,12 +538,21 @@ ingestRouter.post("/scrape", route(async (req) => {
       continue;
     }
     const key = `${match.orderId}\u0000${listingId}`;
+    if (failsStored(listingId, order)) {
+      matchesSkipped++;
+      skipReasons.failsStored++;
+      // Untouched matches made before the stored row had its specs; anything a user acted on stays.
+      const prev = existingPairs.get(key);
+      if (prev?.status === "matched") stale.push(prev._id);
+      existingPairs.delete(key);
+      continue;
+    }
     if (existingPairs.has(key)) {
       matchesSkipped++;
       skipReasons.duplicate++;
       continue;
     }
-    existingPairs.add(key);
+    existingPairs.set(key, { _id: "", status: "matched" });
     toInsert.push({
       // Ownership comes from the ORDER, never from the caller.
       userId: order.userId,
@@ -541,6 +561,7 @@ ingestRouter.post("/scrape", route(async (req) => {
       status: "matched",
     });
   }
+  if (stale.length > 0) await db.deleteMany("matching", [...new Set(stale)]);
   if (toInsert.length > 0) {
     const insertedIds = await db.insertMany("matching", toInsert);
     matchesCreated += toInsert.length;

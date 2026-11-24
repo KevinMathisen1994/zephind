@@ -680,7 +680,8 @@ async function main(): Promise<number> {
             (summary.matchesSkipped > 0 && summary.matchSkipReasons
               ? `[dup=${summary.matchSkipReasons.duplicate ?? 0} ` +
                 `noOwner=${summary.matchSkipReasons.noOwner ?? 0} ` +
-                `listingRejected=${summary.matchSkipReasons.listingRejected ?? 0}]`
+                `listingRejected=${summary.matchSkipReasons.listingRejected ?? 0} ` +
+                `failsStored=${summary.matchSkipReasons.failsStored ?? 0}]`
               : "") +
             ` ` +
             `(${Math.round((Date.now() - jobStart) / 1000)}s)` +
