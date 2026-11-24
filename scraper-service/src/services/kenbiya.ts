@@ -241,53 +241,51 @@ export async function scrapeKenbiya(areaCode: string, filterTypes?: string[], de
     await page.setUserAgent(config.userAgent);
     await page.setViewport({ width: 1280, height: 800 });
 
-    const maxPages = 4; // 50 items per page, up to 200 items
+    // pp0 mixes every type (目黒区: 520, of which 397 are 区分) and the card icon cannot tell 一棟 from 区分,
+    // so read each type's own list and label rows by it. `labels` are the site labels cli.ts requests.
+    const CATS: { pp: number; type: string; labels: string[] }[] = [
+      { pp: 1, type: "マンション", labels: ["マンション"] },
+      { pp: 2, type: "一棟アパート", labels: ["マンション", "ビル"] },
+      { pp: 3, type: "一棟マンション", labels: ["マンション", "ビル"] },
+      { pp: 4, type: "ビル", labels: ["ビル"] },
+      { pp: 5, type: "土地", labels: ["土地"] },
+      { pp: 6, type: "店舗", labels: ["ビル", "店舗"] },
+      { pp: 8, type: "一戸建て", labels: ["一戸建て"] },
+    ];
+    const maxPages = 10; // 50 per page
+    // Chrome navigation gets HTTP 429 while plain HTTP is served; fetch the HTML and run the same extractor on it.
+    await page.setJavaScriptEnabled(false);
 
-    for (let p = 0; p < maxPages; p++) {
-      const pageUrl = p === 0
-        ? `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/`
-        : `https://www.kenbiya.com/pp0/s/tokyo/${wardSlug}/n-${p + 1}/`;
+    for (const cat of CATS.filter((c) => !filterTypes?.length || c.labels.some((l) => filterTypes.includes(l)))) {
+      for (let p = 0; p < maxPages; p++) {
+        const pageUrl = `https://www.kenbiya.com/pp${cat.pp}/s/tokyo/${wardSlug}/${p === 0 ? "" : `n-${p + 1}/`}`;
+        logger.info(`[Kenbiya Scraper] Loading ${cat.type} page ${p + 1} for ${wardName}: ${pageUrl}`);
 
-      logger.info(`[Kenbiya Scraper] Loading page ${p + 1} for ${wardName}: ${pageUrl}`);
-
-      try {
         await pace("kenbiya");
-        let resp = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-        // kenbiya answers bursts with HTTP 429 and an empty page, which reads
-        // exactly like "0 listings". Back off once, then fail loudly.
-        if (resp?.status() === 429) {
+        let res = await fetch(pageUrl, { headers: { "user-agent": config.userAgent, "accept-language": "ja" } });
+        // kenbiya answers bursts with HTTP 429, which reads exactly like "0 listings". Back off once, then fail loudly.
+        if (res.status === 429) {
           logger.warn(`[Kenbiya Scraper] 429 on ${pageUrl}, waiting 45s before one retry`);
           await new Promise((r) => setTimeout(r, 45_000));
-          await pace("kenbiya");
-          resp = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-          if (resp?.status() === 429) throw new Error(`kenbiya rate-limited (HTTP 429) on ${pageUrl}`);
+          res = await fetch(pageUrl, { headers: { "user-agent": config.userAgent, "accept-language": "ja" } });
+          if (res.status === 429) throw new Error(`kenbiya rate-limited (HTTP 429) on ${pageUrl}`);
         }
-      } catch (err) {
-        if (String((err as Error).message).includes("rate-limited")) throw err;
-        logger.warn(`[Kenbiya Scraper] Failed to load ${pageUrl}`);
-        break;
+        if (!res.ok) {
+          logger.warn(`[Kenbiya Scraper] HTTP ${res.status} on ${pageUrl}`);
+          break;
+        }
+        const html = (await res.text()).replace(/<head[^>]*>/i, (h) => `${h}<base href="${pageUrl}">`);
+        await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 45000 });
+
+        const listings = (await extractListings(page)).map((l) => ({ ...l, propertyType: cat.type }));
+        logger.info(`[Kenbiya Scraper] Found ${listings.length} ${cat.type} listings on page ${p + 1}`);
+        if (listings.length === 0) break;
+
+        const existingUrls = new Set(allListings.map((l) => l.url));
+        const newListings = listings.filter((l) => !existingUrls.has(l.url));
+        allListings.push(...newListings);
+        if (newListings.length === 0 || listings.length < 50) break;
       }
-
-      try {
-        await page.waitForSelector("li.js-repeaterListCard, li.item", { timeout: 10000 });
-      } catch {
-        logger.warn(`[Kenbiya Scraper] No listings on page ${p + 1} for ${wardName}`);
-        break;
-      }
-
-      await new Promise((r) => setTimeout(r, 1000));
-
-      const listings = await extractListings(page);
-      logger.info(`[Kenbiya Scraper] Found ${listings.length} listings on page ${p + 1}`);
-
-      if (listings.length === 0) break;
-
-      // Dedup by URL
-      const existingUrls = new Set(allListings.map((l) => l.url));
-      const newListings = listings.filter((l) => !existingUrls.has(l.url));
-      allListings.push(...newListings);
-
-      if (newListings.length === 0) break;
     }
 
     logger.info(
