@@ -64,6 +64,8 @@ export async function runScraper(
   // not-yet-updated scrapeX function.
   dealType?: "buy" | "rent",
 ): Promise<ScrapeResult> {
+  // No filter means every type; most scrapers otherwise default to ["土地"] and fetch land only.
+  if (!requestedTypes?.length) requestedTypes = ["土地", "一戸建て", "マンション", "ビル", "店舗"];
   switch (source) {
     case "athome":   return await scrapeAtHome(code, requestedTypes, dealType);
     case "rakuten":  return await scrapeRakuten(code, requestedTypes, dealType);

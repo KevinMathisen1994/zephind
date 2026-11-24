@@ -607,19 +607,24 @@ async function main(): Promise<number> {
           results.push(await runScraper(source, areaCode, requestedTypes, dt));
         }
         const scraped = results.flatMap((r) => r.listings ?? []);
+        // A blocked site (e.g. hatomark's WAF 403 on CI) returns 0 listings plus errors; that is a failure, not "no stock".
+        const scrapeErrs = results.flatMap((r) => r.errors ?? []);
+        if (scraped.length === 0 && scrapeErrs.length > 0) throw new Error(scrapeErrs.slice(0, 3).join(" | "));
 
         await attachOwnerChangeSpecs(source, scraped, criteria);
 
         // Reuse the existing matcher — do not reimplement matching here.
-        const { passed, stats } = hardFilter(scraped, criteria);
+        const { passed: listPassed, stats } = hardFilter(scraped, criteria);
 
         // 掲載日 only for listings that survived matching: fetching a detail page
         // for a listing nobody asked for would be the most wasteful thing in the
         // whole run.
-        const datePromise = dateLock.then(() => enrichPostedDates(client, source, passed, dateState));
+        const datePromise = dateLock.then(() => enrichPostedDates(client, source, listPassed, dateState));
         dateLock = datePromise.catch(() => {});
         const dateResult = await datePromise;
         datesFilled += dateResult.filled;
+        // Detail pages fill 築年/構造 the list page lacked; a listing that passed as "unverified" may now fail.
+        const passed = dateResult.filled > 0 ? hardFilter(listPassed, criteria).passed : listPassed;
 
         // Only listings that satisfy at least one order are persisted, which is
         // what the browser flow stored too. With zero orders hardFilter passes

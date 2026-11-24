@@ -116,7 +116,9 @@ async function extractJigyoListings(page: any): Promise<{ listings: PropertyList
       url,
       station,
       walkMinutes,
-      propertyType: p?.labelList?.[0]?.detailText || "ビル",
+      // Mixed-use buildings carry several tags (["店舗", "マンション一棟売"]); the 一棟 one is the building type.
+      propertyType: (p?.labelList ?? []).map((l: any) => l?.detailText).find((t: string) => /一棟/.test(t || "")) || p?.labelList?.[0]?.detailText || "ビル",
+      yield: parseFloat(p?.yieldPrice) || undefined,
       images: p?.thumbnailImage?.[0]?.src ? [p.thumbnailImage[0].src] : undefined,
     });
   }
@@ -595,25 +597,26 @@ export async function scrapeTokyu(areaCode: string, filterTypes?: string[], deal
     const prefCode = areaCode.substring(0, 2);
     const cityCode = areaCode.substring(2);
 
-    if (typesToScrape.includes("ビル")) {
+    // jigyo = 事業用; fudosan-toushi = 投資用 (一棟マンション/アパート live only there). Same list layout.
+    for (const section of typesToScrape.includes("ビル") ? ["jigyo", "fudosan-toushi"] : []) {
       let currentPage = 1;
       let fetchedSoFar = 0;
       let hasNextPage = true;
 
       while (hasNextPage) {
         const pageParam = currentPage > 1 ? `?page=${currentPage}` : "";
-        const url = `https://www.livable.co.jp/jigyo/tatemono-tokyo-select-area/a${areaCode}/${pageParam}`;
-        logger.info(`[Tokyu Scraper] Fetching (jigyo): ${url}`);
+        const url = `https://www.livable.co.jp/${section}/tatemono-tokyo-select-area/a${areaCode}/${pageParam}`;
+        logger.info(`[Tokyu Scraper] Fetching (${section}): ${url}`);
 
         try {
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
         } catch {
-          logger.warn(`[Tokyu Scraper] jigyo page ${currentPage} failed to load`);
+          logger.warn(`[Tokyu Scraper] ${section} page ${currentPage} failed to load`);
           break;
         }
 
         const { listings, totalCount } = await extractJigyoListings(page);
-        logger.info(`[Tokyu Scraper] jigyo page ${currentPage}: ${listings.length} listings (total known: ${totalCount})`);
+        logger.info(`[Tokyu Scraper] ${section} page ${currentPage}: ${listings.length} listings (total known: ${totalCount})`);
 
         if (listings.length === 0) break;
 

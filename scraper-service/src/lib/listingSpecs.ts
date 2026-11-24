@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { hardFilter, toCriteria } from "../services/propertyMatcher";
 import { logger } from "../logger";
 import { config } from "../config";
 import {
@@ -186,6 +187,24 @@ async function saveSpecs(id: string, specs: Record<string, string>, existing: Re
   return false;
 }
 
+/**
+ * Specs fill 利回り/築年/構造 that the list page lacked, so a listing matched as "unverified"
+ * may now fail its order. Only untouched ("matched") rows go; anything a user acted on stays.
+ */
+async function pruneFailedMatches(listingId: string): Promise<void> {
+  const listing = await db.get("listings", listingId);
+  const matches = (await db.list("matching", { where: { listingId } })).filter((m: any) => m.status === "matched");
+  if (!listing || matches.length === 0) return;
+  const orders = await db.getMany("orders", [...new Set(matches.map((m: any) => m.orderId as string))]);
+  const stale = matches
+    .filter((m: any) => {
+      const order = orders.find((o: any) => o?._id === m.orderId);
+      return order && hardFilter([listing as any], [toCriteria(order)]).passed.length === 0;
+    })
+    .map((m: any) => m._id as string);
+  if (stale.length) await db.deleteMany("matching", stale);
+}
+
 /** Fetch and store specs for these listings. Never throws: a missing spec is not an error. */
 export async function enrichListingSpecs(listingIds: string[], opts: { delayMs?: number } = {}): Promise<number> {
   if (listingIds.length === 0) return 0;
@@ -198,7 +217,10 @@ export async function enrichListingSpecs(listingIds: string[], opts: { delayMs?:
       if (!html) continue; // transient fetch failure: leave specs null so it is retried
       const specs = parseSpecPairs(html);
       if (Object.keys(specs).length > 0) {
-        if (await saveSpecs(row._id, specs, row, parseOgImage(html, row.url))) saved++;
+        if (await saveSpecs(row._id, specs, row, parseOgImage(html, row.url))) {
+          saved++;
+          await pruneFailedMatches(row._id);
+        }
       } else {
         // {} marks "page has no spec table" so the backfill queue cannot stall on it.
         const image = row.images?.length ? undefined : parseOgImage(html, row.url);

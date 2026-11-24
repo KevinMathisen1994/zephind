@@ -452,9 +452,16 @@ export async function scrapeMitsui(areaCode: string, filterTypes?: string[], dea
           // a few seconds, so a 45s wait already means the page has stalled.
           // A longer limit just multiplies dead time across categories — at 90s
           // the whole scrape blew past 4 minutes.
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+          // Lists are server-rendered and answer plain HTTP in <1s, while Chrome navigation to page 2+ stalls
+          // past the timeout; load the HTML ourselves and run the same in-page extractor on it.
+          const res = await fetch(url, { headers: { "user-agent": config.userAgent }, signal: AbortSignal.timeout(45000) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const html = (await res.text()).replace(/<head[^>]*>/i, (h) => `${h}<base href="${url}">`);
+          await page.setJavaScriptEnabled(false);
+          await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 45000 });
         } catch (navErr: any) {
           logger.warn(`[Mitsui Scraper] Page ${currentPage} (${type}) failed to load: ${navErr?.message}`);
+          scrapeErrors.push(`${type}/page${currentPage}: ${navErr?.message}`);
           break;
         }
 

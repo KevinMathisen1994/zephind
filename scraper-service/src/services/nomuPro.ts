@@ -227,8 +227,8 @@ export async function scrapeNomuPro(areaCode: string, filterTypes?: string[], de
     let hasNextPage = true;
 
     while (hasNextPage) {
-      // nomu.com/pro/all/area/13106/?p=1
-      const url = `https://www.nomu.com/pro/all/area/${areaCode}/?p=${currentPage}`;
+      // The site's pager uses pager_page; ?p= is ignored and silently re-serves page 1.
+      const url = `https://www.nomu.com/pro/all/area/${areaCode}/?pager_page=${currentPage}`;
       logger.info(`[Nomu Pro Scraper] Fetching: ${url}`);
       
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
