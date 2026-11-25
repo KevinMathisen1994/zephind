@@ -2901,6 +2901,14 @@ export default function OrdersPage() {
     ).length ?? 0;
   const sumSummary = (field: "total" | "new24h" | "high") =>
     (matchSummary ?? []).reduce((n, s) => n + s[field], 0);
+  const summaryLoading = matchSummary === undefined;
+  // Placeholder for counts that depend on matchSummary, so loading never reads as 0.
+  const countOr = (n: React.ReactNode) =>
+    summaryLoading ? (
+      <Skeleton className="inline-block h-[0.9em] w-6 align-middle" />
+    ) : (
+      n
+    );
   const totalMatchesCount = sumSummary("total");
   const newMatches24hCount = sumSummary("new24h");
   const highScoreMatchesCount = sumSummary("high");
@@ -3903,14 +3911,14 @@ export default function OrdersPage() {
                   </span>
                 </div>
                 <div className="text-2xl font-black text-emerald-700 font-data">
-                  +{newMatches24hCount}
+                  +{countOr(newMatches24hCount)}
                   <span className="text-xs font-bold text-emerald-600 ml-1">
                     件
                   </span>
                 </div>
               </div>
               <div className="text-[13.5px] font-semibold text-emerald-700 mt-2 border-t border-emerald-50 pt-1.5">
-                {ordersWithNewMatchesCount}件の物件で新着あり
+                {countOr(ordersWithNewMatchesCount)}件の物件で新着あり
               </div>
             </div>
           </div>
@@ -3925,7 +3933,7 @@ export default function OrdersPage() {
                   </span>
                 </div>
                 <div className="text-2xl font-black text-slate-900 font-data">
-                  {highScoreMatchesCount}
+                  {countOr(highScoreMatchesCount)}
                   <span className="text-xs font-bold text-slate-400 ml-1">
                     件
                   </span>
@@ -3947,14 +3955,14 @@ export default function OrdersPage() {
                   </span>
                 </div>
                 <div className="text-2xl font-black text-slate-900 font-data">
-                  {totalMatchesCount.toLocaleString()}
+                  {countOr(totalMatchesCount.toLocaleString())}
                   <span className="text-xs font-bold text-slate-400 ml-1">
                     件
                   </span>
                 </div>
               </div>
               <div className="text-[13.5px] font-semibold text-slate-500 mt-2 border-t border-slate-100 pt-1.5">
-                {ordersWithMatchesCount}件の物件にマッチ
+                {countOr(ordersWithMatchesCount)}件の物件にマッチ
               </div>
             </div>
           </div>
@@ -3993,9 +4001,13 @@ export default function OrdersPage() {
                 {
                   key: "hasMatches",
                   label: "マッチあり",
-                  count: ordersWithMatchesCount,
+                  count: countOr(ordersWithMatchesCount),
                 },
-                { key: "pending", label: "未検索", count: pendingOrdersCount },
+                {
+                  key: "pending",
+                  label: "未検索",
+                  count: countOr(pendingOrdersCount),
+                },
                 {
                   key: "completed",
                   label: "完了",
@@ -4302,7 +4314,9 @@ export default function OrdersPage() {
 
                         <span className="hidden shrink-0 text-right sm:block">
                           <span className="block font-mono text-[17px] leading-none text-[var(--text-primary)]">
-                            {matchCount}
+                            {orderCounts || orderMatchList
+                              ? matchCount
+                              : countOr(matchCount)}
                             <span className="ml-1 text-[14px] font-normal text-[var(--text-muted)]">
                               件
                             </span>
