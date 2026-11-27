@@ -26,6 +26,8 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
   const currentSettings = useQuery(api.alertSettings.get);
   const saveSettings = useMutation(api.alertSettings.save);
   const sendTest = useMutation(api.alertSettings.sendTest);
+  const testDigest = useMutation(api.alertSettings.testDigest);
+  const [isTestingDigest, setIsTestingDigest] = useState(false);
 
   const [webhookUrl, setWebhookUrl] = useState("");
   const [emailAddress, setEmailAddress] = useState("");
@@ -80,23 +82,42 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
     }
   };
 
+  // Saves first: the report is built on GitHub from the saved settings, not this form.
+  const handleTestDigest = async () => {
+    if (!emailAddress.trim()) {
+      alert("通知先メールアドレスを入力してください。");
+      return;
+    }
+    setIsTestingDigest(true);
+    setTestResult(null);
+    try {
+      await saveSettings({ webhookUrl: webhookUrl.trim(), emailAddress: emailAddress.trim(), minScore, notifyHighScores, notifyPriceDrops, enabled, dailyDigest });
+      const res = await testDigest();
+      setTestResult({ success: true, message: `新着物件レポート（直近24時間）を作成中です。1〜2分で ${res.emailAddress} に届きます。` });
+    } catch (err) {
+      setTestResult({ success: false, message: `レポートのテスト送信に失敗しました: ${(err as Error).message}` });
+    } finally {
+      setIsTestingDigest(false);
+    }
+  };
+
   const handleSendTest = async () => {
     if (!webhookUrl.trim() && !emailAddress.trim()) {
-      alert("Webhook URLまたは通知先メールアドレスを入力してください。");
+      alert("通知先メールアドレスを入力してください。");
       return;
     }
 
     setIsTesting(true);
     setTestResult(null);
     try {
-      await sendTest({
+      const res = (await sendTest({
         webhookUrl: webhookUrl.trim(),
         emailAddress: emailAddress.trim(),
         minScore,
-      });
+      })) as { success: boolean; message: string };
       setTestResult({
-        success: true,
-        message: "テスト通知の送信に成功しました！通知先をご確認ください。",
+        success: res.success,
+        message: res.success ? "テスト通知の送信に成功しました！通知先をご確認ください。" : res.message,
       });
     } catch (err: any) {
       setTestResult({
@@ -118,16 +139,11 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
               <Bell className="h-5 w-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-tight text-slate-900">
-                  お宝物件 即時通知設定
-                </h2>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/60 text-[11px] font-black tracking-wide">
-                  HOT DEALS ALERT
-                </span>
-              </div>
+              <h2 className="text-base font-bold tracking-tight text-slate-900">
+                物件通知設定
+              </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                高スコア物件や大幅値下げ物件がスクレイピングされた瞬間に自動通知
+                高スコア・値下げ物件の即時通知と、毎朝の新着物件レポート
               </p>
             </div>
           </div>
@@ -174,30 +190,8 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
           <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xs">
             <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
               <Smartphone className="h-4 w-4 text-emerald-700" />
-              通知先の設定 (LINE / Webhook / メール)
+              通知先の設定
             </h3>
-
-            {/* Webhook / LINE Notify Token */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  LINE Notify トークン または Webhook URL
-                </label>
-                <span className="text-[11px] text-slate-400 font-medium">
-                  LINE / Discord / Slack 対応
-                </span>
-              </div>
-              <input
-                type="text"
-                value={webhookUrl}
-                onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="例: LINE Notifyトークン または Discord/SlackのWebhook URL"
-                className="w-full h-10 px-3 text-xs font-medium rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-700 focus:ring-1 focus:ring-emerald-700 transition-colors"
-              />
-              <p className="mt-1 text-[11px] text-slate-500">
-                ※ LINE Notifyのアクセストークンをそのまま貼り付けるか、Discord / SlackのIncoming Webhook URLを入力してください。
-              </p>
-            </div>
 
             {/* Email Address */}
             <div>
@@ -336,7 +330,8 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-t border-slate-100 bg-white">
+          <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
@@ -351,6 +346,17 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
             )}
             テスト通知を送信
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleTestDigest}
+            disabled={isTestingDigest || !emailAddress.trim()}
+            className="h-10 gap-2 rounded-xl text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            {isTestingDigest ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 text-emerald-700" />}
+            PDFレポートをテスト送信
+          </Button>
+          </div>
 
           <div className="flex items-center gap-2">
             <Button

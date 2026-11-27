@@ -375,6 +375,21 @@ async function main(): Promise<number> {
   const client = await createIngestClient();
   logger.info(`Cron scrape starting — backend=${client.backendUrl}`);
 
+  // --digestTest=<userId>: the 新着物件レポート test button; emails that user's report and exits.
+  const digestTestUser = argValue("digestTest");
+  if (digestTestUser) {
+    const { sendDigest } = await import("./jobs/dailyDigest");
+    const { db } = await import("./db");
+    const settings = await db.first("alertSettings", { where: { userId: digestTestUser } });
+    if (!settings) {
+      logger.error(`digest test: no alert settings for ${digestTestUser}`);
+      return 1;
+    }
+    const r = await sendDigest(settings as never, Date.now(), { test: true });
+    logger.info(`digest test: ${r.sent ? "sent" : `not sent (${r.error})`}, ${r.total} listing(s)`);
+    return r.sent ? 0 : 1;
+  }
+
   // --backfill-dates: fill in 掲載日 for stored listings and exit, without
   // scraping. Useful to catch up the whole table in one go after adding date
   // support, instead of waiting for nightly runs to trickle through it.

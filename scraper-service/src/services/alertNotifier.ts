@@ -36,6 +36,15 @@ export interface AlertSettingsRecord {
   lastDigestAt?: number | null;
 }
 
+/** Link into Zephind: the listing on its order page, or the Orders page when there is no listing. Empty without APP_URL. */
+export function zephindLink(appUrl: string, listingId?: string, orderId?: string): string {
+  if (!appUrl) return "";
+  const base = appUrl.replace(/\/$/, "");
+  if (!listingId) return `${base}/orders`;
+  const path = orderId ? `/orders/${encodeURIComponent(orderId)}` : "/orders";
+  return `${base}${path}?focusListing=${encodeURIComponent(listingId)}`;
+}
+
 // In-memory cache of alerted match IDs to prevent duplicate alerts within 24h
 const recentAlertsCache = new Set<string>();
 
@@ -70,6 +79,7 @@ export function formatAlertMessage(item: AlertNotificationItem): {
     item.ward,
     item.station ? `${item.station}${item.walkMinutes !== undefined ? ` 徒歩${item.walkMinutes}分` : ""}` : "",
   ].filter(Boolean).join(" ");
+  const link = zephindLink(process.env.APP_URL ?? "", item.listingId, item.orderId);
 
   const textLines = [
     headline,
@@ -79,6 +89,7 @@ export function formatAlertMessage(item: AlertNotificationItem): {
     rentStr ? `想定賃料: ${rentStr}` : "",
     item.orderName ? `合致検索条件: 【${item.orderName}】` : "",
     `AI適合スコア: ${item.score}点 / 100点`,
+    link ? `▶ Zephindで見る: ${link}` : "",
     "",
     "⚡ 速報：他社に先駆けて買付・詳細確認をおすすめします！",
     "※社内CRM・Zephindで収支シミュレーションおよび提案文作成が可能です。",
@@ -92,6 +103,7 @@ export function formatAlertMessage(item: AlertNotificationItem): {
     embeds: [
       {
         title: item.title || item.address || "注目収益物件",
+        url: link || undefined,
         description: locStr,
         color: item.score >= 85 ? 0x10b981 : 0x3b82f6, // Emerald or Blue
         fields: [
@@ -115,7 +127,7 @@ export function formatAlertMessage(item: AlertNotificationItem): {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${headline}*\n*${item.title || item.address || "注目収益物件"}*\n${locStr}`,
+          text: `*${headline}*\n*${item.title || item.address || "注目収益物件"}*\n${locStr}${link ? `\n<${link}|Zephindで見る>` : ""}`,
         },
       },
       {
@@ -139,7 +151,7 @@ export function formatAlertMessage(item: AlertNotificationItem): {
 }
 
 /**
- * Dispatch alert to a webhook (LINE Notify token, Discord, Slack, or generic HTTP POST).
+ * Dispatch alert to a webhook (Discord, Slack, or generic HTTP POST).
  */
 export async function sendWebhookAlert(
   urlOrToken: string,
@@ -149,28 +161,7 @@ export async function sendWebhookAlert(
     const trimmed = urlOrToken.trim();
     const { title, text, discordPayload, slackPayload } = formatAlertMessage(item);
 
-    // 1. Check if it's a LINE Notify token (starts with non-URL alphanumeric string or notify-api)
-    const isLineNotifyToken = !trimmed.startsWith("http") && trimmed.length >= 20;
-    const isLineNotifyUrl = trimmed.includes("notify-api.line.me");
-
-    if (isLineNotifyToken || isLineNotifyUrl) {
-      const token = isLineNotifyToken ? trimmed : trimmed.replace(/.*token=/, "");
-      const res = await fetch("https://notify-api.line.me/api/notify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Bearer ${token}`,
-        },
-        body: new URLSearchParams({ message: `\n${text}` }).toString(),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        return { success: false, status: res.status, error: `LINE Notify Error: ${body}` };
-      }
-      return { success: true, status: 200 };
-    }
-
-    // 2. Check if Discord Webhook
+    // Discord Webhook
     if (trimmed.includes("discord.com/api/webhooks")) {
       const res = await fetch(trimmed, {
         method: "POST",

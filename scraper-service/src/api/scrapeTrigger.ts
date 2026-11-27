@@ -27,10 +27,10 @@ const GITHUB_API_VERSION = "2022-11-28";
 // GitHub rejects API requests with no User-Agent.
 const USER_AGENT = "zephind-backend";
 // Which branch's workflow file + code to run.
-const WORKFLOW_REF = "main";
+export const WORKFLOW_REF = "main";
 
 /** Throws in Japanese: the message is surfaced verbatim in the UI. */
-function githubConfig() {
+export function githubConfig() {
   const repo = process.env.GITHUB_REPO;
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   if (!repo) {
@@ -42,7 +42,7 @@ function githubConfig() {
   return { repo, token };
 }
 
-function githubHeaders(token: string) {
+export function githubHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github+json",

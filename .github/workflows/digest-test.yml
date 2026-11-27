@@ -1,0 +1,46 @@
+name: Digest test
+
+# 物件通知設定 → 新着レポートをテスト送信. Started by the backend (POST /api/alerts/test-digest)
+# because the PDF needs Chrome, which Supabase edge functions cannot run.
+on:
+  workflow_dispatch:
+    inputs:
+      userId:
+        description: "Clerk user id whose report to send"
+        required: true
+
+concurrency:
+  group: digest-test-${{ github.event.inputs.userId }}
+  cancel-in-progress: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: scraper-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scraper-service/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('scraper-service/package-lock.json') }}
+          restore-keys: |
+            puppeteer-${{ runner.os }}-
+      - run: npm ci
+      - name: Send test report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_FROM_EMAIL: ${{ secrets.ALERT_FROM_EMAIL }}
+          APP_URL: ${{ secrets.APP_URL }}
+          # Passed through env, not interpolated into the command, so the input cannot inject shell.
+          DIGEST_USER: ${{ github.event.inputs.userId }}
+        run: npm run scrape:cron -- "--digestTest=$DIGEST_USER"

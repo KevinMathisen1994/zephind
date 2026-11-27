@@ -162,7 +162,7 @@ export default function DashboardNav({ onNavClick }: { onNavClick?: () => void }
         className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-left text-[12.5px] text-white hover:bg-white/[0.08] transition-colors font-medium"
       >
         <Bell className="h-3.5 w-3.5 text-white shrink-0" />
-        <span>即時通知設定 (LINE/Mail)</span>
+        <span>物件通知設定</span>
       </button>
 
       <button

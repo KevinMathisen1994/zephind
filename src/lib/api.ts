@@ -161,6 +161,9 @@ export const api = {
       method: "POST", key: "alertSettings.test", path: () => "/api/alerts/test",
       body: (a) => a,
     }),
+    testDigest: endpoint<void, { ok: true; emailAddress: string }>({
+      method: "POST", key: "alertSettings.testDigest", path: () => "/api/alerts/test-digest",
+    }),
   },
 
   access: {

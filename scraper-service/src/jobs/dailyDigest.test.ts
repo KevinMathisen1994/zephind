@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { jstDay, renderDigestHtml, zephindLink } from "./dailyDigest";
+import { jstDay, renderDigestHtml } from "./dailyDigest";
+import { zephindLink } from "../services/alertNotifier";
 
 // 2026-11-27 20:00 UTC is already 11/28 in JST.
 assert.equal(jstDay(Date.UTC(2026, 10, 27, 20)), "2026/11/28");
 assert.equal(jstDay(Date.UTC(2026, 10, 27, 14)), "2026/11/27");
 
-assert.equal(zephindLink("https://app.example/", "o 1", "l1"), "https://app.example/orders/o%201?focusListing=l1");
-assert.equal(zephindLink("", "o1", "l1"), "");
+assert.equal(zephindLink("https://app.example/", "l1", "o 1"), "https://app.example/orders/o%201?focusListing=l1");
+assert.equal(zephindLink("https://app.example", "l1"), "https://app.example/orders?focusListing=l1");
+assert.equal(zephindLink("https://app.example"), "https://app.example/orders");
+assert.equal(zephindLink("", "l1", "o1"), "");
 
 const html = renderDigestHtml(
   [{
@@ -27,4 +30,7 @@ assert.ok(html.includes('href="https://app.example/orders/o1?focusListing=l1"'))
 assert.ok(html.includes('href="https://suumo.jp/x"'));
 assert.ok(!html.includes("javascript:"));
 assert.ok(html.includes("1オーダー・2件"));
+const junk = renderDigestHtml([{ orderId: "o", orderName: "x", listings: [{ id: "a", address: "多摩市", layout: "土地面積建物面積" }] }], "d", "");
+assert.ok(!junk.includes("土地面積建物面積"));
+assert.equal(junk.split("多摩市").length - 1, 1); // address not repeated when it is the title
 console.log("ok");

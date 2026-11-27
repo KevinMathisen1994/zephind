@@ -61,7 +61,7 @@ import {
   ShieldCheck,
   ArrowLeft,
 } from "lucide-react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { ProposalModal } from "../components/ProposalModal";
 import {
@@ -427,6 +427,9 @@ const SORT_OPTIONS = [
 ] as const;
 
 type SortKey = (typeof SORT_OPTIONS)[number]["key"];
+
+/** Full-width to half-width, lower case, single spaces: "目黒区　ＲＣ" matches "目黒区 rc". */
+const normalizeSearch = (v: string) => v.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 
 /**
  * Quick filters for a long results list, shown as counted chips left of 並び順.
@@ -991,6 +994,7 @@ export default function OrdersPage() {
   const { orderId: routeOrderId } = useParams<{ orderId: string }>();
   const isDetailView = Boolean(routeOrderId);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   // Clerk's Convex JWT template does not map the `name` claim by default, so the
   // SERVER sees only a subject and can only label a search "ログインユーザー". The
   // browser knows the real name, so it is sent along for display only — see
@@ -1629,8 +1633,51 @@ export default function OrdersPage() {
         }, 2500);
       }, 400);
     }
-    clearParam();
+    // focusListing is a one-shot jump; the open property stays in the URL as ?listing=.
+    const next = new URLSearchParams(searchParams);
+    next.delete("focusListing");
+    if (target) next.set("listing", focusParam);
+    setSearchParams(next, { replace: true });
   }, [focusParam, focusMatches, matches, routeOrderId]);
+
+  // The open property lives in the URL (?listing=<listingId>) so it can be bookmarked and the back button closes it.
+  const listingParam = searchParams.get("listing");
+  const expandedListingId = expandedMatch
+    ? (matches?.find((m) => m._id === expandedMatch)?.listingId ?? null)
+    : null;
+  // State -> URL: opening pushes a history entry, closing pops it (or drops the param when the page was opened by link).
+  const prevExpandedListingId = useRef(expandedListingId);
+  useEffect(() => {
+    // Only react to the user opening/closing; on first load the URL is the source of truth.
+    if (prevExpandedListingId.current === expandedListingId) return;
+    prevExpandedListingId.current = expandedListingId;
+    const current = searchParams.get("listing");
+    if (expandedListingId === current) return;
+    const next = new URLSearchParams(searchParams);
+    if (expandedListingId) {
+      next.set("listing", expandedListingId);
+      setSearchParams(next, current ? { replace: true } : { state: { listingOpened: true } });
+    } else if ((location.state as { listingOpened?: boolean } | null)?.listingOpened) {
+      navigate(-1);
+    } else {
+      next.delete("listing");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedListingId]);
+  // URL -> state: back/forward and direct links. Opening goes through the focusListing jump so the row's page is shown.
+  useEffect(() => {
+    if (listingParam === expandedListingId) return;
+    if (!listingParam) {
+      handleCloseExpanded();
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("listing");
+    next.set("focusListing", listingParam);
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listingParam]);
 
   // Properties ticked in the results list, carried into the proposal modal so
   // the same list is not presented twice.
@@ -1713,6 +1760,8 @@ export default function OrdersPage() {
   );
   /** Per-order quick filter; absent means すべて. */
   const [listFilter, setListFilter] = useState<Record<string, string>>({});
+  // Per-order text search over the listing list (address, title, station, source…).
+  const [listSearch, setListSearch] = useState<Record<string, string>>({});
   const [, setEvalProgress] = useState<
     Record<string, { current: number; total: number }>
   >({});
@@ -4691,8 +4740,9 @@ export default function OrdersPage() {
                         <CardContent className="p-0 md:p-0 pt-6 md:pt-6 px-5 md:px-6 space-y-2">
                           {matchCount > 0 && orderMatchList ? (
                             <>
-                              <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
-                                <div className="min-w-0 space-y-2">
+                              {/* Same white filter card as the order overview: chips on top, search + sort below. */}
+                              <div className="mb-1 space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-white p-4 shadow-2xs">
+                                <div className="min-w-0 space-y-2 border-b border-slate-100 pb-3">
                                   <div className="text-[17px] font-bold text-[var(--text-primary)]">
                                     物件数
                                     <span className="ml-2 text-[15px] font-normal text-[var(--text-muted)]">
@@ -4735,7 +4785,7 @@ export default function OrdersPage() {
                                               [order._id]: 1,
                                             }));
                                           }}
-                                          className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all flex items-center gap-1.5 ${
+                                          className={`px-3 py-1.5 rounded-lg text-[15px] font-bold border transition-all flex items-center gap-1.5 ${
                                             isDealSort
                                               ? "bg-amber-500 text-white border-amber-600 shadow-sm"
                                               : "border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100/80 hover:border-amber-300"
@@ -4766,15 +4816,19 @@ export default function OrdersPage() {
                                                   [order._id]: 1,
                                                 }));
                                               }}
-                                              className={`px-2.5 py-1 rounded-lg text-[13.5px] font-bold border transition-all ${
+                                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-bold transition-all ${
                                                 isActive
-                                                  ? "bg-[var(--brand)] text-white border-[var(--brand)]"
-                                                  : "border-transparent bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                                  ? "bg-emerald-700 text-white shadow-xs"
+                                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200/80"
                                               }`}
                                             >
-                                              {chip.label}
+                                              <span>{chip.label}</span>
                                               <span
-                                                className={`ml-1 font-bold ${isActive ? "text-white/90" : "text-[var(--text-muted)]"}`}
+                                                className={`text-[13.5px] px-1.5 rounded-full font-black ${
+                                                  isActive
+                                                    ? "bg-white/20 text-white"
+                                                    : "bg-white text-slate-700 border border-slate-200"
+                                                }`}
                                               >
                                                 {chip.count}
                                               </span>
@@ -4784,6 +4838,22 @@ export default function OrdersPage() {
                                       </div>
                                     );
                                   })()}
+                                </div>
+
+                                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                                <div className="relative flex-1">
+                                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                  <input
+                                    type="search"
+                                    value={listSearch[order._id] ?? ""}
+                                    onChange={(e) => {
+                                      setListSearch((prev) => ({ ...prev, [order._id]: e.target.value }));
+                                      setCurrentPage((prev) => ({ ...prev, [order._id]: 1 }));
+                                    }}
+                                    placeholder="住所・駅・物件名・サイトで検索"
+                                    aria-label="物件を検索"
+                                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/50 pl-9 pr-3 text-[15.5px] font-medium transition-colors hover:bg-white focus:border-emerald-600 focus:bg-white focus:outline-none"
+                                  />
                                 </div>
 
                                 <label className="flex items-center gap-2 text-[14.5px] font-bold text-[var(--text-muted)]">
@@ -4802,7 +4872,7 @@ export default function OrdersPage() {
                                         [order._id]: 1,
                                       }));
                                     }}
-                                    className="h-9 px-2.5 bg-white text-[var(--text-primary)] text-[14.5px] font-medium rounded-lg border border-[var(--border-subtle)] cursor-pointer focus:outline-none"
+                                    className="h-10 px-2.5 bg-white text-[var(--text-primary)] text-[15px] font-medium rounded-lg border border-slate-200 cursor-pointer focus:outline-none"
                                   >
                                     {SORT_OPTIONS.map((o) => (
                                       <option key={o.key} value={o.key}>
@@ -4811,6 +4881,7 @@ export default function OrdersPage() {
                                     ))}
                                   </select>
                                 </label>
+                                </div>
                               </div>
 
                               {(() => {
@@ -4827,8 +4898,19 @@ export default function OrdersPage() {
                                   l?.price && l.price > 0 ? l.price : undefined;
                                 const activeFilter =
                                   listFilter[order._id] ?? "all";
+                                const searchTerms = normalizeSearch(listSearch[order._id] ?? "")
+                                  .split(" ")
+                                  .filter(Boolean);
                                 const visibleMatches = orderMatchList.filter(
                                   (m) => {
+                                    if (searchTerms.length > 0) {
+                                      const l = matchedListing(m.listingId ?? "");
+                                      const hay = normalizeSearch(
+                                        [l?.title, l?.address, l?.ward, l?.station, l?.source, SOURCE_LABELS[l?.source ?? ""], l?.propertyType, l?.layout, l?.structure].join(" "),
+                                      );
+                                      // Every word must appear somewhere, so "目黒 RC" narrows instead of widening.
+                                      if (!searchTerms.every((t) => hay.includes(t))) return false;
+                                    }
                                     // Not seen by any scrape for 14 days: the portal has most likely
                                     // taken it down. No lastSeenAt (older rows) stays visible.
                                     if (

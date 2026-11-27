@@ -6,7 +6,7 @@
 import puppeteer from "puppeteer";
 import { db } from "../db";
 import { logger } from "../logger";
-import { type AlertSettingsRecord, formatPriceText, sendEmail } from "../services/alertNotifier";
+import { type AlertSettingsRecord, formatPriceText, sendEmail, zephindLink } from "../services/alertNotifier";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JST_MS = 9 * 60 * 60 * 1000;
@@ -40,19 +40,19 @@ const esc = (v: unknown) =>
 // Scraped URLs are untrusted; only http(s) may become a link.
 const safeUrl = (u?: string) => (u && /^https?:\/\//i.test(u) ? u : "");
 
-export const zephindLink = (appUrl: string, orderId: string, listingId: string) =>
-  appUrl ? `${appUrl.replace(/\/$/, "")}/orders/${encodeURIComponent(orderId)}?focusListing=${encodeURIComponent(listingId)}` : "";
 
 export function renderDigestHtml(groups: DigestGroup[], day: string, appUrl: string): string {
   const total = groups.reduce((n, g) => n + g.listings.length, 0);
   const sections = groups.map((g) => {
     const rows = g.listings.map((l, i) => {
-      const zephind = zephindLink(appUrl, g.orderId, l.id);
+      const zephind = zephindLink(appUrl, l.id, g.orderId);
       const src = safeUrl(l.url);
-      const size = [l.area ? `${l.area}㎡` : "", l.landSize ? `土地${l.landSize}㎡` : "", l.layout ?? ""].filter(Boolean).join(" / ");
+      // Some scrapers store a field label (e.g. "土地面積建物面積") as the layout; show only real layouts.
+      const layout = l.layout && !/面積/.test(l.layout) ? l.layout : "";
+      const size = [l.area ? `${l.area}㎡` : "", l.landSize ? `土地${l.landSize}㎡` : "", layout].filter(Boolean).join(" / ");
       return `<tr>
         <td class="n">${i + 1}</td>
-        <td><div class="t">${esc(l.title || l.address || "（タイトルなし）")}</div><div class="s">${esc([l.propertyType, l.ward, l.address].filter(Boolean).join("・"))}</div></td>
+        <td><div class="t">${esc(l.title || l.address || "（タイトルなし）")}</div><div class="s">${esc([l.propertyType, l.ward, l.title ? l.address : ""].filter(Boolean).join("・"))}</div></td>
         <td class="p">${l.price ? esc(formatPriceText(l.price)) : "—"}</td>
         <td>${esc(size || "—")}<div class="s">${esc(l.station ?? "")}</div></td>
         <td class="c">${l.score != null ? esc(l.score) : "—"}</td>
@@ -81,7 +81,7 @@ ${sections}
 </body></html>`;
 }
 
-async function renderPdf(html: string): Promise<Buffer> {
+export async function renderPdf(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
@@ -95,7 +95,7 @@ async function renderPdf(html: string): Promise<Buffer> {
 }
 
 /** New matches for one user since `since`, grouped by order (orders in name order, newest match first). */
-async function collectGroups(userId: string, since: number): Promise<DigestGroup[]> {
+export async function collectGroups(userId: string, since: number): Promise<DigestGroup[]> {
   const { data: matches, error } = await db.raw
     .from("matching")
     .select("orderId,listingId,score,_creationTime")
@@ -122,11 +122,37 @@ async function collectGroups(userId: string, since: number): Promise<DigestGroup
   return [...groups.values()].sort((a, b) => a.orderName.localeCompare(b.orderName, "ja"));
 }
 
+/**
+ * Builds and emails one user's report. A test covers the last 24h, says so in the subject, and does not
+ * count as the day's report. Returns false only when the email could not be sent (so the caller can retry).
+ */
+export async function sendDigest(s: AlertSettingsRecord, now: number, opts: { test?: boolean } = {}): Promise<{ sent: boolean; total: number; error?: string }> {
+  if (!s.emailAddress) return { sent: false, total: 0, error: "通知先メールアドレスが未設定です" };
+  const appUrl = process.env.APP_URL ?? "";
+  const today = jstDay(now);
+  const groups = await collectGroups(s.userId, opts.test ? now - DAY_MS : (s.lastDigestAt ?? now - DAY_MS));
+  const total = groups.reduce((n, g) => n + g.listings.length, 0);
+  // A test with nothing new still sends, so the person pressing the button sees that it works.
+  if (total === 0 && !opts.test) return { sent: false, total };
+  const summary = groups.map((g) => `・${g.orderName}: ${g.listings.length}件`).join("\n");
+  const prefix = opts.test ? "【テスト】" : "";
+  const result = await sendEmail({
+    to: s.emailAddress,
+    subject: `${prefix}【Zephind】新着物件レポート ${today}（${total}件）`,
+    text: `本日の新着物件は${total}件です。${total ? "詳細は添付PDFをご覧ください。" : ""}\n\n${summary}\n${appUrl ? `\n${appUrl.replace(/\/$/, "")}/orders` : ""}`,
+    html: `<p>本日の新着物件は<b>${total}件</b>です。${total ? "詳細は添付PDFをご覧ください。" : ""}</p><ul>${groups
+      .map((g) => `<li>${esc(g.orderName)}: ${g.listings.length}件</li>`).join("")}</ul>`,
+    attachments: total
+      ? [{ filename: `zephind_新着物件_${today.replace(/\//g, "")}.pdf`, content: await renderPdf(renderDigestHtml(groups, today, appUrl)) }]
+      : undefined,
+  });
+  return { sent: result.success, total, error: result.error };
+}
+
 /** Sends today's digest to every opted-in user who has not had one yet today (JST). */
 export async function sendDailyDigests(now = Date.now()): Promise<number> {
   const { data, error } = await db.raw.from("alertSettings").select("*").eq("enabled", true).eq("dailyDigest", true);
   if (error) throw new Error(`digest settings: ${error.message}`);
-  const appUrl = process.env.APP_URL ?? "";
   const today = jstDay(now);
   let sent = 0;
 
@@ -134,26 +160,13 @@ export async function sendDailyDigests(now = Date.now()): Promise<number> {
     if (!s._id || !s.emailAddress) continue;
     if (s.lastDigestAt && jstDay(s.lastDigestAt) === today) continue;
     try {
-      const groups = await collectGroups(s.userId, s.lastDigestAt ?? now - DAY_MS);
-      const total = groups.reduce((n, g) => n + g.listings.length, 0);
-      if (total > 0) {
-        const pdf = await renderPdf(renderDigestHtml(groups, today, appUrl));
-        const summary = groups.map((g) => `・${g.orderName}: ${g.listings.length}件`).join("\n");
-        const result = await sendEmail({
-          to: s.emailAddress,
-          subject: `【Zephind】新着物件レポート ${today}（${total}件）`,
-          text: `本日の新着物件は${total}件です。詳細は添付PDFをご覧ください。\n\n${summary}\n${appUrl ? `\n${appUrl.replace(/\/$/, "")}/orders` : ""}`,
-          html: `<p>本日の新着物件は<b>${total}件</b>です。詳細は添付PDFをご覧ください。</p><ul>${groups
-            .map((g) => `<li>${esc(g.orderName)}: ${g.listings.length}件</li>`).join("")}</ul>`,
-          attachments: [{ filename: `zephind_新着物件_${today.replace(/\//g, "")}.pdf`, content: pdf }],
-        });
-        // Not marked as sent, so the next scheduled run retries.
-        if (!result.success) {
-          logger.warn(`[digest] ${s.emailAddress}: ${result.error}`);
-          continue;
-        }
-        sent++;
+      const r = await sendDigest(s, now);
+      // Not marked as sent, so the next scheduled run retries.
+      if (r.total > 0 && !r.sent) {
+        logger.warn(`[digest] ${s.emailAddress}: ${r.error}`);
+        continue;
       }
+      if (r.sent) sent++;
       // Also marked on a day with nothing new, so tomorrow's digest starts from here.
       await db.patch("alertSettings", s._id, { lastDigestAt: now });
     } catch (err) {

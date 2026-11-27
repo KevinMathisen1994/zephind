@@ -815,7 +815,12 @@ export async function evaluateMatchIdsServer(matchIds: string[]): Promise<number
         const itemArgs = chunk[j];
         const res = results[j];
         if (res && res.score != null) {
+          const match = validMatches.find((m) => m._id === itemArgs.matchId);
           alertItems.push({
+            // userId scopes the alert to the order's owner; without it every user with alerts on received it.
+            userId: match?.userId,
+            orderId: match?.orderId,
+            listingId: match?.listingId,
             matchId: itemArgs.matchId,
             title: itemArgs.title || itemArgs.address,
             address: itemArgs.address,
