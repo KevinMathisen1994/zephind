@@ -79,16 +79,28 @@ export default function BlankPdfPage() {
   const canRedo = ed.future.length > 0;
   // Edits only live in memory, so anything drawn is lost on leaving.
   const dirty = pdf !== null && anns.length > 0;
+  const closePdf = useCallback(() => {
+    void pdf?.doc.destroy();
+    setPdf(null);
+    setEd({ anns: [], past: [], future: [] });
+    setSelectedId(null);
+    setEditingIdRaw(null);
+    setMessage(null);
+  }, [pdf]);
   useEffect(() => {
-    if (!dirty) return;
-    const onUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    if (!pdf) return;
+    const onUnload = (e: BeforeUnloadEvent) => { if (dirty) e.preventDefault(); };
     // Capture phase runs before react-router's link handler; BrowserRouter has no useBlocker.
     const onClick = (e: MouseEvent) => {
-      const link = (e.target as HTMLElement).closest("a[href]");
-      if (link && !window.confirm(LEAVE_MESSAGE)) {
+      const link = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+      if (!link) return;
+      if (dirty && !window.confirm(LEAVE_MESSAGE)) {
         e.preventDefault();
         e.stopPropagation();
+        return;
       }
+      // Navigating to this same page keeps it mounted, so the menu item resets it by hand.
+      if (new URL(link.href).pathname === window.location.pathname) closePdf();
     };
     window.addEventListener("beforeunload", onUnload);
     document.addEventListener("click", onClick, true);
@@ -96,7 +108,7 @@ export default function BlankPdfPage() {
       window.removeEventListener("beforeunload", onUnload);
       document.removeEventListener("click", onClick, true);
     };
-  }, [dirty]);
+  }, [pdf, dirty, closePdf]);
   const patch = (id: string, p: Partial<Annotation>) => setAnns((prev) => prev.map((a) => (a.id === id ? { ...a, ...p } : a)));
   const selected = anns.find((a) => a.id === selectedId);
   const shownPt = selected?.kind === "text" && pdf ? Math.round((selected.fontSize ?? 0) * pdf.widths[selected.pageIndex]) : fontPt;
@@ -236,8 +248,7 @@ export default function BlankPdfPage() {
               <div className="ml-auto flex items-center gap-2">
                 <Button variant="outline" onClick={() => {
                   if (dirty && !window.confirm(LEAVE_MESSAGE)) return;
-                  void pdf.doc.destroy();
-                  setPdf(null);
+                  closePdf();
                 }}>
                   <FolderOpen className="h-4 w-4" />
                   別のPDFを開く
@@ -406,21 +417,20 @@ function PageView(props: {
   onRemove: (id: string) => void;
 }) {
   const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove } = props;
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasBoxRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   // Double-click is detected by hand: pointer capture on the overlay keeps dblclick off the text element.
   const lastDown = useRef({ id: "", t: 0 });
 
   useEffect(() => {
-    // Render offscreen then copy: StrictMode runs this twice, and pdf.js rejects two renders on one canvas.
+    // Each render gets a fresh canvas that replaces the shown one when done: StrictMode runs this
+    // twice, pdf.js rejects two renders on one canvas, and resizing a shown canvas can leave it half-painted.
     let cancelled = false;
-    void renderPage(doc, pageIndex, Math.min(6, 2 * zoom)).then((src) => {
-      const dst = canvasRef.current;
-      if (cancelled || !dst) return;
-      dst.width = src.width;
-      dst.height = src.height;
-      dst.getContext("2d")!.drawImage(src, 0, 0);
+    void renderPage(doc, pageIndex, Math.min(6, 2 * zoom)).then((canvas) => {
+      if (cancelled || !canvasBoxRef.current) return;
+      canvas.className = "block h-auto w-full";
+      canvasBoxRef.current.replaceChildren(canvas);
     });
     return () => { cancelled = true; };
   }, [doc, pageIndex, zoom]);
@@ -477,7 +487,7 @@ function PageView(props: {
 
   return (
     <div className="relative mx-auto shrink-0 shadow-md" style={{ containerType: "inline-size", width: `calc(min(100%, 1000px) * ${zoom})` }}>
-      <canvas ref={canvasRef} className="block h-auto w-full bg-white" />
+      <div ref={canvasBoxRef} className="bg-white" />
       <div
         ref={overlayRef}
         className={`absolute inset-0 ${tool === "select" ? "" : "cursor-crosshair"}`}
