@@ -10,6 +10,7 @@ import CustomersPage from "./pages/Customers";
 import DealsPage from "./pages/Deals";
 import SavedListingsPage from "./pages/SavedListings";
 import MapIntelligencePage from "./pages/MapIntelligence";
+import BlankPdfPage from "./pages/BlankPdf";
 import { isClerkEnabled } from "./Providers";
 import { AuthErrorBoundary } from "./components/AuthErrorBoundary";
 import SplashScreen from "./components/SplashScreen";
@@ -28,6 +29,7 @@ function AppRoutes() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/deals" element={<DealsPage />} />
         <Route path="/saved" element={<SavedListingsPage />} />
+        <Route path="/blank-pdf" element={<BlankPdfPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="*" element={<Navigate to="/orders" replace />} />
       </Route>

@@ -49,12 +49,14 @@ ordersRouter.patch("/:id", route(async (req) => {
 
 ordersRouter.delete("/:id", route(async (req) => {
   await requireOwned(req, "orders", req.params.id, "オーダー");
-  // Cascade (matches, then listings no other order still references) runs in
-  // one transaction server-side — see supabase/migrations/0002_rpc.sql. Doing
-  // it as separate calls from here would leave orphans on a mid-way failure,
-  // which is exactly what the Convex mutation prevented.
-  const { error } = await db.raw.rpc("delete_order", { p_order_id: req.params.id });
-  if (error) throw new HttpError(500, `delete_order: ${error.message}`);
+  // Batched cascade (0017_delete_order_batch.sql): one statement for 85k matches
+  // timed out. Each batch is atomic, so a failure mid-way leaves a smaller
+  // order that a retry finishes; the order row goes with the last batch.
+  for (;;) {
+    const { data, error } = await db.raw.rpc("delete_order_batch", { p_order_id: req.params.id });
+    if (error) throw new HttpError(500, `delete_order: ${error.message}`);
+    if (data === 0) break;
+  }
   return { ok: true };
 }));
 

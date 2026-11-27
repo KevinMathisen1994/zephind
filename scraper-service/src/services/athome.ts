@@ -109,7 +109,8 @@ async function extractListingsFromPage(page: any, wardName: string, pType?: stri
       var cardText = card.textContent || "";
 
       var titleEl = card.querySelector(".title-wrap__title-text");
-      var address = titleEl ? titleEl.textContent?.trim() || "" : "";
+      // 戸建 titles append station and layout: "杉並区上井草４丁目（上井草駅）2階建４ＬＤＫ".
+      var address = titleEl ? (titleEl.textContent || "").trim().replace(/[（(].*$/, "").trim() : "";
       if (!address) { var m = cardText.match(/(東京都[^\\s]{1,40}?[区市])/); if (m) address = m[1]; }
 
       var price = null;

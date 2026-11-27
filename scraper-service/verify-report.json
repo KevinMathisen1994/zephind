@@ -1,0 +1,327 @@
+{
+  "area": "13115",
+  "types": [
+    "土地",
+    "一戸建て",
+    "マンション",
+    "ビル"
+  ],
+  "at": "2026-11-25T17:33:40.576Z",
+  "results": [
+    {
+      "source": "asahi",
+      "listings": 57,
+      "sampled": 6,
+      "unfetchable": 0,
+      "failed": 0,
+      "batch": [],
+      "errors": [],
+      "secs": 53,
+      "checks": [
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713892004",
+          "price": 6080,
+          "area": 55.1,
+          "address": "ルピナス荻窪カワヨマンション杉並区荻窪５丁目",
+          "problems": []
+        },
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713599892",
+          "price": 8680,
+          "area": 70.77,
+          "address": "東京都杉並区成田東２丁目",
+          "problems": []
+        },
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713844313",
+          "price": 6980,
+          "area": 78.97,
+          "address": "東京都杉並区方南２丁目",
+          "problems": []
+        },
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713889772",
+          "price": 14580,
+          "area": 100.11,
+          "address": "東京都杉並区松庵２丁目",
+          "problems": []
+        },
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713883389",
+          "price": 6940,
+          "area": 68.92,
+          "address": "東京都杉並区和泉３丁目",
+          "problems": []
+        },
+        {
+          "source": "asahi",
+          "url": "https://www.asahi-jutaku.co.jp/buy/detail/713847638",
+          "price": 6480,
+          "area": 48.27,
+          "address": "杉並区桃井４丁目",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "source": "homes",
+      "listings": 547,
+      "sampled": 6,
+      "unfetchable": 0,
+      "failed": 1,
+      "batch": [],
+      "errors": [],
+      "secs": 73,
+      "checks": [
+        {
+          "source": "homes",
+          "url": "https://www.homes.co.jp/tochi/b-35011270000013/",
+          "price": 9690,
+          "area": 72.1,
+          "address": "東京都杉並区阿佐谷南3丁目",
+          "problems": [
+            "price 9690万 not on page",
+            "area 72.1㎡ not on page",
+            "address \"杉並区阿佐谷南3丁目\" not on page"
+          ]
+        },
+        {
+          "source": "homes",
+          "url": "https://toushi.homes.co.jp/bukkendetail/index/4830209/",
+          "title": "西荻窪 一棟売りアパート",
+          "price": 7400,
+          "area": 111.48,
+          "address": "東京都杉並区西荻北1丁目",
+          "problems": []
+        },
+        {
+          "source": "homes",
+          "url": "https://toushi.homes.co.jp/bukkendetail/index/4830131/",
+          "title": "東京都杉並区 一棟売りアパート",
+          "price": 14800,
+          "area": 140.76,
+          "address": "東京都杉並区下井草",
+          "problems": []
+        },
+        {
+          "source": "homes",
+          "url": "https://toushi.homes.co.jp/bukkendetail/index/4817491/",
+          "title": "東京都杉並区 一棟売りアパート",
+          "price": 31850,
+          "area": 595.46,
+          "address": "東京都杉並区上高井戸",
+          "problems": []
+        },
+        {
+          "source": "homes",
+          "url": "https://toushi.homes.co.jp/bukkendetail/index/4829395/",
+          "title": "新高円寺◇1棟アパート",
+          "price": 17280,
+          "area": 140.53,
+          "address": "東京都杉並区松ノ木3丁目",
+          "problems": []
+        },
+        {
+          "source": "homes",
+          "url": "https://toushi.homes.co.jp/bukkendetail/index/4807225/",
+          "title": "ティ・アーモオーシャン",
+          "price": 15570,
+          "area": 114.09,
+          "address": "東京都杉並区下井草2丁目",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "source": "rakuten",
+      "listings": 300,
+      "sampled": 6,
+      "unfetchable": 0,
+      "failed": 0,
+      "batch": [],
+      "errors": [],
+      "secs": 121,
+      "checks": [
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/land/id-35007220000368/",
+          "price": 6580,
+          "area": 73.76,
+          "address": "杉並区今川２丁目",
+          "problems": []
+        },
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/useddetached/id-1074240105067/",
+          "price": 17600,
+          "area": 169.74,
+          "address": "杉並区宮前2丁目",
+          "problems": []
+        },
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/useddetached/id-1491280000157/",
+          "price": 8980,
+          "area": 108.16,
+          "address": "杉並区阿佐谷北４丁目",
+          "problems": []
+        },
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/useddetached/id-1357690021976/",
+          "price": 12490,
+          "area": 106.14,
+          "address": "杉並区西荻北１丁目",
+          "problems": []
+        },
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/usedmansion/id-1471030011731/",
+          "price": 3990,
+          "area": 41.15,
+          "address": "杉並区梅里１丁目",
+          "problems": []
+        },
+        {
+          "source": "rakuten",
+          "url": "https://realestate.rakuten.co.jp/useddetached/id-1020740090351/",
+          "price": 9598,
+          "area": 73.84,
+          "address": "杉並区阿佐谷南２丁目",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "source": "tokyu",
+      "listings": 417,
+      "sampled": 6,
+      "unfetchable": 0,
+      "failed": 0,
+      "batch": [
+        "2 with 万円/㎡ outside 5..2000 (e.g. 3000万 / 654.7㎡)"
+      ],
+      "errors": [],
+      "secs": 50,
+      "checks": [
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/fudosan-toushi/C4826Y125/",
+          "price": 127000,
+          "area": 331.41,
+          "address": "東京都杉並区高井戸東３丁目",
+          "problems": []
+        },
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/mansion/C48268C96/",
+          "price": 4480,
+          "area": 46.04,
+          "address": "東京都杉並区方南１丁目",
+          "problems": []
+        },
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/kodate/C48269A72/",
+          "price": 10480,
+          "area": 103.31,
+          "address": "東京都杉並区和泉２丁目",
+          "problems": []
+        },
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/mansion/C13269N64/",
+          "price": 13800,
+          "area": 75.26,
+          "address": "東京都杉並区浜田山２丁目",
+          "problems": []
+        },
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/mansion/C4826XQ62/",
+          "price": 3990,
+          "area": 43.15,
+          "address": "東京都杉並区西荻北１丁目",
+          "problems": []
+        },
+        {
+          "source": "tokyu",
+          "url": "https://www.livable.co.jp/kodate/C13267296/",
+          "price": 20800,
+          "area": 95.66,
+          "address": "東京都杉並区松庵３丁目",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "source": "athome",
+      "listings": 1742,
+      "sampled": 6,
+      "unfetchable": 0,
+      "failed": 1,
+      "batch": [],
+      "errors": [],
+      "secs": 854,
+      "checks": [
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/kodate/1195133916/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 8980,
+          "area": 66.12,
+          "address": "杉並区 和田３丁目",
+          "problems": []
+        },
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/kodate/1127289313/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 9899,
+          "area": 126.59,
+          "address": "杉並区 成田東１丁目",
+          "problems": []
+        },
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/tochi/1182353534/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 9280,
+          "area": 89.99,
+          "address": "杉並区 宮前３丁目",
+          "problems": []
+        },
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/tochi/1019755387/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 8180,
+          "area": 115.32,
+          "address": "杉並区 桃井４丁目",
+          "problems": []
+        },
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/tochi/1021779791/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 9280,
+          "area": 76.15,
+          "address": "杉並区 南荻窪３丁目",
+          "problems": []
+        },
+        {
+          "source": "athome",
+          "url": "https://www.athome.co.jp/tochi/6991833267/?DOWN=1&BKLISTID=001LPC&SEARCHDIV=1&sref=list_simple",
+          "price": 9800,
+          "area": 135.77,
+          "address": "杉並区 高井戸東２丁目",
+          "problems": [
+            "price 9800万 not on page",
+            "area 135.77㎡ not on page",
+            "address \"杉並区高井戸東２丁目\" not on page"
+          ]
+        }
+      ]
+    }
+  ]
+}

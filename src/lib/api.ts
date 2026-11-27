@@ -258,6 +258,10 @@ export const api = {
     }),
   },
 
+  blankPdf: {
+    detect: endpoint({ method: "POST", key: "blankPdf.detect", path: () => "/api/blank-pdf/detect", body: (a) => a }),
+  },
+
   proposals: {
     list: endpoint({ method: "GET", key: "proposals", path: () => "/api/proposals" }),
     create: endpoint({

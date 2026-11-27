@@ -19,6 +19,7 @@ const navSections = [
     items: [
       { to: "/customers", label: "顧客管理", desc: "買主プロファイル" },
       { to: "/deals", label: "案件・提案管理", desc: "提案履歴と成約進捗" },
+      { to: "/blank-pdf", label: "図面の帯替え", desc: "PDFから元付業者情報を消去" },
     ],
   },
   {
