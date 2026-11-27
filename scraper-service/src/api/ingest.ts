@@ -504,10 +504,16 @@ ingestRouter.post("/scrape", route(async (req) => {
   const orderRows = orderIds.length > 0 ? await db.getMany("orders", orderIds) : [];
   const orderById = new Map(orderRows.filter(Boolean).map((o) => [o!._id, o!]));
 
+  // Existing matches for just this batch's listings: loading every match of every order was
+  // thousands of rows per call (and was capped at 1000, so duplicates slipped in).
   const existingPairs = new Map<string, { _id: string; status: string }>();
-  if (orderIds.length > 0) {
-    const rows = await db.selectIn("matching", "_id,orderId,listingId,status", "orderId", orderIds);
-    for (const row of rows) existingPairs.set(`${row.orderId}\u0000${row.listingId}`, row as any);
+  const batchListingIds = [...new Set(matches.map((m) => listingIdByUrl.get(m.listingUrl)).filter(Boolean))] as string[];
+  if (orderIds.length > 0 && batchListingIds.length > 0) {
+    const wantedOrders = new Set(orderIds);
+    const rows = await db.selectIn("matching", "_id,orderId,listingId,status", "listingId", batchListingIds);
+    for (const row of rows) {
+      if (wantedOrders.has(row.orderId)) existingPairs.set(`${row.orderId}\u0000${row.listingId}`, row as any);
+    }
   }
 
   // List pages often lack 利回り/築年 that the stored row already has from its detail page,

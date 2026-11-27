@@ -116,7 +116,11 @@ export async function collectGroups(userId: string, since: number): Promise<Dige
     const l = listings.get(m.listingId);
     if (!order || !l) continue; // order or listing deleted since
     const g: DigestGroup = groups.get(order._id) ?? { orderId: order._id, orderName: order.name || `オーダー #${order._id.slice(0, 6)}`, listings: [] };
-    if (!g.listings.some((x) => x.id === l._id)) g.listings.push({ ...(l as Omit<DigestListing, "id">), id: l._id, score: m.score });
+    // Same rule as the Orders list: one row per property, even when a portal lists it several times.
+    const key = l.address && l.price && l.area != null ? `${l.address}|${l.price}|${l.area}` : l._id;
+    if (!g.listings.some((x) => x.id === l._id || (x.address && x.price && x.area != null && `${x.address}|${x.price}|${x.area}` === key))) {
+      g.listings.push({ ...(l as Omit<DigestListing, "id">), id: l._id, score: m.score });
+    }
     groups.set(order._id, g);
   }
   return [...groups.values()].sort((a, b) => a.orderName.localeCompare(b.orderName, "ja"));

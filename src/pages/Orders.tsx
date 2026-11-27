@@ -5032,11 +5032,18 @@ export default function OrdersPage() {
                                   }
                                 }
                                 // An open property (?listing=) must be on the shown page, or its row cannot render it.
+                                // A linked listing may be a hidden copy of the same property (same address/price/area),
+                                // so rows match the open listing by that key too.
+                                const propertyKey = (l: Doc<"listings"> | undefined) =>
+                                  l?.address && l.price && l.area != null ? `${l.address}|${l.price}|${l.area}` : null;
                                 const pinnedListing = focusListingId ?? listingParam;
+                                const pinnedKey = pinnedListing ? propertyKey(matchedListing(pinnedListing)) : null;
+                                const isPinnedRow = (m: Doc<"matching">) =>
+                                  !!pinnedListing &&
+                                  (m.listingId === pinnedListing ||
+                                    (pinnedKey !== null && propertyKey(matchedListing(m.listingId ?? "")) === pinnedKey));
                                 const focusIdx = pinnedListing
-                                  ? sortedMatches.findIndex(
-                                      (m) => m.listingId === pinnedListing,
-                                    )
+                                  ? sortedMatches.findIndex(isPinnedRow)
                                   : -1;
                                 const page =
                                   focusIdx >= 0
@@ -5070,7 +5077,8 @@ export default function OrdersPage() {
                                         m.listingId ?? "",
                                       );
                                       const isExpanded =
-                                        expandedMatch === m._id;
+                                        expandedMatch === m._id ||
+                                        (!!listingParam && !!expandedMatch && isPinnedRow(m));
                                       const hasEvaluation =
                                         evaluations[m._id] !== undefined
                                           ? evaluations[m._id]

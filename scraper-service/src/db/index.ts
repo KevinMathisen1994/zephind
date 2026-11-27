@@ -27,6 +27,7 @@ function unwrap<T>(res: { data: T | null; error: any }, what: string): T {
  * 100KB URL and a flat 400 from PostgREST.
  */
 const URL_FILTER_BUDGET = 4000;
+const PAGE_SIZE = 1000; // PostgREST max-rows: a plain select never returns more
 
 function chunkByLength(values: string[]): string[][] {
   const chunks: string[][] = [];
@@ -58,8 +59,14 @@ export async function selectIn(
 ): Promise<Record<string, any>[]> {
   const out: Record<string, any>[] = [];
   for (const chunk of chunkByLength(values)) {
-    const res = await supabase.from(table).select(columns).in(column, chunk);
-    out.push(...((unwrap(res, `selectIn ${table}.${column}`) as Record<string, any>[]) ?? []));
+    // PostgREST returns at most 1000 rows per request; without paging, a chunk matching more
+    // rows silently lost the rest (that is how the scrape's duplicate check missed matches).
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const res = await supabase.from(table).select(columns).in(column, chunk).order("_id").range(from, from + PAGE_SIZE - 1);
+      const rows = (unwrap(res, `selectIn ${table}.${column}`) as Record<string, any>[]) ?? [];
+      out.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+    }
   }
   return out;
 }
@@ -106,7 +113,6 @@ export async function list(table: string, opts: ListOpts = {}): Promise<Doc[]> {
   return (unwrap(res, `list ${table}`) as Doc[]) ?? [];
 }
 
-const PAGE_SIZE = 1000; // PostgREST max-rows: a plain select never returns more
 
 /** Every matching row, paging past the 1000-row cap. Needs `order` for stable pages. */
 export async function listAll(table: string, opts: Omit<ListOpts, "limit" | "offset"> = {}): Promise<Doc[]> {

@@ -167,10 +167,10 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
               </div>
               <div>
                 <div className="text-sm font-bold text-slate-900">
-                  即時アラート通知システム
+                  通知を受け取る
                 </div>
                 <div className="text-xs text-slate-500">
-                  バックグラウンド取得時に条件を満たす優良物件を自動で配信します
+                  オフにすると、即時通知と毎朝のレポートを含むすべての通知が停止します
                 </div>
               </div>
             </div>
@@ -186,6 +186,8 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
             </label>
           </div>
 
+          {/* Everything below only applies while the master switch is on; the backend skips disabled users entirely. */}
+          <fieldset disabled={!enabled} className={`min-w-0 space-y-4 transition-opacity ${enabled ? "" : "opacity-50"}`}>
           {/* Delivery Channels */}
           <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xs">
             <h3 className="text-xs font-black tracking-wider text-slate-800 uppercase flex items-center gap-1.5">
@@ -309,6 +311,8 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
               </label>
             </div>
           </div>
+
+          </fieldset>
 
           {/* Test Status Feedback */}
           {testResult && (
