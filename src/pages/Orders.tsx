@@ -315,6 +315,14 @@ const ALL_TOKYO_WARD_CODES = [
  * badge styling, never the text, so it fails soft.
  */
 const AUTOMATIC_TRIGGER_LABEL = "自動取得（定期実行）";
+
+/** Must match scraper-service/src/lib/autoScrape.ts (sweeps at 3:30 / 11:30 / 19:30). */
+const AUTO_SCRAPE_OPTIONS = [
+  { value: "3", label: "1日3回（3:30・11:30・19:30）", short: "1日3回" },
+  { value: "2", label: "1日2回（3:30・19:30）", short: "1日2回" },
+  { value: "1", label: "1日1回（3:30）", short: "1日1回" },
+  { value: "off", label: "自動検索しない（手動のみ）", short: "停止" },
+] as const;
 const isAutomaticTrigger = (by: string | undefined) =>
   by === AUTOMATIC_TRIGGER_LABEL || /自動/.test(by ?? "");
 
@@ -2589,6 +2597,7 @@ export default function OrdersPage() {
   const [minTotalUnits, setMinTotalUnits] = useState("");
   const [maxFloor, setMaxFloor] = useState("");
   const [excludeFirstFloor, setExcludeFirstFloor] = useState(false);
+  const [autoScrape, setAutoScrape] = useState("3");
   const [minElevators, setMinElevators] = useState("");
   const [structureTypes, setStructureTypes] = useState<string[]>([]);
   const [layoutTypes, setLayoutTypes] = useState<string[]>([]);
@@ -2689,6 +2698,7 @@ export default function OrdersPage() {
     setMinTotalUnits("");
     setMaxFloor("");
     setExcludeFirstFloor(false);
+    setAutoScrape("3");
     setMinElevators("");
     setStructureTypes([]);
     setLayoutTypes([]);
@@ -2772,6 +2782,7 @@ export default function OrdersPage() {
     );
     setMaxFloor(order.maxFloor !== undefined ? String(order.maxFloor) : "");
     setExcludeFirstFloor(!!order.excludeFirstFloor);
+    setAutoScrape(order.autoScrape ?? "3");
     setMinElevators(
       order.minElevators !== undefined ? String(order.minElevators) : "",
     );
@@ -2868,6 +2879,7 @@ export default function OrdersPage() {
         minTotalUnits: minTotalUnits ? Number(minTotalUnits) : undefined,
         maxFloor: maxFloor ? Number(maxFloor) : undefined,
         excludeFirstFloor: excludeFirstFloor || undefined,
+        autoScrape,
         minElevators: minElevators ? Number(minElevators) : undefined,
         structureTypes: structureTypes.length > 0 ? structureTypes : undefined,
         layoutTypes: layoutTypes.length > 0 ? layoutTypes : undefined,
@@ -3850,6 +3862,26 @@ export default function OrdersPage() {
                 </div>
               </div>
 
+              {/* 自動検索の頻度 */}
+              <div className="space-y-1.5 pt-4 border-t border-slate-200">
+                <Label htmlFor="autoScrape" className="text-sm font-bold text-slate-800">
+                  自動検索の頻度
+                </Label>
+                <select
+                  id="autoScrape"
+                  value={autoScrape}
+                  onChange={(e) => setAutoScrape(e.target.value)}
+                  className="h-10 w-full sm:w-80 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium focus:border-emerald-600 focus:outline-none"
+                >
+                  {AUTO_SCRAPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 font-medium">
+                  定期実行でこの条件を検索する回数です。「手動検索」ボタンはいつでも使えます。
+                </p>
+              </div>
+
               {/* Scraping Targets Selection */}
               <div className="space-y-4 pt-4 border-t border-slate-200">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-100">
@@ -4467,6 +4499,7 @@ export default function OrdersPage() {
                                     ? `対象サイト: ${ordSources.map((s) => SOURCE_LABELS[s] || s).join("・")}`
                                     : null;
                                 })(),
+                                `自動検索: ${AUTO_SCRAPE_OPTIONS.find((o) => o.value === (order.autoScrape ?? "3"))?.short ?? "1日3回"}`,
                               ]
                                 .filter(Boolean)
                                 .join(" ・ ")}

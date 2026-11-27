@@ -24,6 +24,7 @@ import {
 } from "./services/postedDate";
 import { createIngestClient, type IngestMatch, type IngestOrder, type IngestSummary } from "./ingestClient";
 import { logger } from "./logger";
+import { dueInSweep, sweepSlot } from "./lib/autoScrape";
 import { config } from "./config";
 import type { OrderCriteria, PropertyListing } from "./types";
 
@@ -443,6 +444,14 @@ async function main(): Promise<number> {
       logger.error(`Order ${onlyOrderId} not found — nothing to match against.`);
       process.exit(1);
     }
+  }
+  // Scheduled sweeps include only orders whose 自動検索の頻度 covers this slot.
+  if (!onlyOrderId && process.env.SCRAPE_EVENT === "schedule") {
+    const slot = sweepSlot(Date.now());
+    const before = orders.length;
+    orders = orders.filter((o) => dueInSweep(o.autoScrape, slot));
+    logger.info(`Sweep slot ${slot}: ${orders.length} of ${before} order(s) due`);
+    if (orders.length === 0) return 0;
   }
   const criteria = orders.map(toCriteria);
   logger.info(`Fetched ${orders.length} order(s) for matching`);

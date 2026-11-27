@@ -25,7 +25,7 @@ export const ORDER_FIELDS = [
   "minTotalUnits", "maxFloor", "excludeFirstFloor", "minElevators",
   "structureTypes", "layoutTypes", "customerId",
   "isScraping", "scrapingStatus", "activeSource", "scrapeRunId",
-  "lastScrapeAt", "lastScrapeBy",
+  "lastScrapeAt", "lastScrapeBy", "autoScrape",
 ] as const;
 
 export const CUSTOMER_FIELDS = [

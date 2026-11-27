@@ -16,6 +16,7 @@ dotenv.config();
 
 export interface IngestOrder {
   _id: string;
+  autoScrape?: string | null;
   userId?: string;
   name?: string;
   ward?: string;

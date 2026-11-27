@@ -129,6 +129,8 @@ export interface Order extends Row {
   minTotalUnits?: number;
   maxFloor?: number;
   excludeFirstFloor?: boolean;
+  /** 自動検索の頻度: "3" | "2" | "1" | "off" per day; unset = 3. */
+  autoScrape?: string | null;
   minElevators?: number;
   structureTypes?: string[];
   layoutTypes?: string[];

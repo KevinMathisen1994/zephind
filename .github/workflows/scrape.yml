@@ -104,6 +104,8 @@ jobs:
           # nightly sweep, which should match every account's orders.
           SCRAPE_ORDER_ID: ${{ github.event.inputs.orderId }}
           SCRAPE_SHARD: ${{ matrix.shard }}/4
+          # Scheduled sweeps skip orders whose 自動検索の頻度 excludes this time slot.
+          SCRAPE_EVENT: ${{ github.event_name }}
         run: npm run scrape:cron
 
   # Once after all shards: 掲載日 backfill + AI evaluation (would double up if each shard did it).
