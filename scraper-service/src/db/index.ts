@@ -153,6 +153,21 @@ export async function insertMany(table: string, docs: Record<string, any>[]): Pr
   return (unwrap(res, `insertMany ${table}`) as { _id: string }[]).map((r) => r._id);
 }
 
+/**
+ * Inserts matches, skipping (orderId, listingId) pairs that already exist. Once the unique index
+ * (migration 0023) is in place a duplicate raises 23505, and the batch is retried with
+ * ON CONFLICT DO NOTHING; before that, it behaves like insertMany. Returns only the new ids.
+ */
+export async function insertMatches(docs: Record<string, any>[]): Promise<string[]> {
+  if (docs.length === 0) return [];
+  const rows = docs.map(strip);
+  let res = await supabase.from("matching").insert(rows).select("_id");
+  if (res.error?.code === "23505") {
+    res = await supabase.from("matching").upsert(rows, { onConflict: "orderId,listingId", ignoreDuplicates: true }).select("_id");
+  }
+  return (unwrap(res, "insertMatches") as { _id: string }[]).map((r) => r._id);
+}
+
 /** Shallow merge into an existing row. Mirrors ctx.db.patch. */
 export async function patch(table: string, id: string, fields: Record<string, any>): Promise<void> {
   const res = await supabase.from(table).update(strip(fields)).eq("_id", id).select("_id");
@@ -210,7 +225,7 @@ function strip(doc: Record<string, any>): Record<string, any> {
 
 export const db = {
   get, getMany, selectIn, list, listAll, first, count,
-  insert, insertMany, patch, patchWhere,
+  insert, insertMany, insertMatches, patch, patchWhere,
   delete: remove, deleteMany: removeMany, deleteWhere: removeWhere,
   raw: supabase,
 };

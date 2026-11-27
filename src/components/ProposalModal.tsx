@@ -297,7 +297,7 @@ export const ProposalModal = ({
               size="icon"
               onClick={() => setShowConfigModal(true)}
               className="h-9 w-9 rounded-xl text-[var(--text-muted)] hover:text-[var(--brand)]"
-              title="メール設定（署名）"
+              title="メール設定（社名ひな形）"
             >
               <Settings className="w-5 h-5" />
             </Button>

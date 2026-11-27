@@ -1,7 +1,18 @@
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument } from "pdf-lib";
-import { wrapLines } from "./wrapText";
+import { type Run, type RunStyle, layoutRuns } from "./richText";
+import type { SignatureFields, SignatureLine, SignatureStyles } from "./signature";
+
+/**
+ * What a placed signature was drawn from, so it can be restyled and reflowed on the page.
+ * w/h/lines are the PNG's; sx/sy are page fractions per PNG px (fixed, so text size never changes);
+ * maxWidth is the wrap width in PNG px once the block has been resized.
+ */
+export interface PlacedSignature {
+  fields: SignatureFields; styles: SignatureStyles; w: number; h: number; lines: SignatureLine[];
+  sx?: number; sy?: number; maxWidth?: number;
+}
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -17,10 +28,17 @@ export interface Annotation {
   w: number;
   h: number;
   color: string;
+  /** Plain text of the box, kept in sync with runs. */
   text?: string;
+  /** Styled pieces of text; absent on boxes made before rich text (then text is one run). */
+  runs?: Run[];
+  align?: "left" | "center" | "right";
   fontSize?: number;
   bold?: boolean;
   label?: string;
+  /** Image that must keep its proportions (signatures): only corner handles. */
+  keepRatio?: boolean;
+  signature?: PlacedSignature;
   /** Border only, no fill. */
   outline?: boolean;
   /** Id from FONTS. */
@@ -54,7 +72,8 @@ export const fontCss = (id?: string) => {
   return f ? `"${f.family}", ${FONT_FAMILY}, ${f.fallback}` : FONT_FAMILY;
 };
 
-const canvasFont = (a: Annotation, px: number) => `${a.bold ? "bold " : ""}${px}px ${fontCss(a.font)}`;
+const canvasFont = (a: Annotation, px: number, bold = a.bold) => `${bold ? "bold " : ""}${px}px ${fontCss(a.font)}`;
+export const runsOf = (a: Annotation): Run[] => a.runs ?? (a.text ? [{ text: a.text }] : []);
 export const LINE_HEIGHT = 1.25;
 /** Outline stroke as a fraction of page width (~1.5pt on A4). */
 export const OUTLINE_WIDTH = 0.0025;
@@ -134,11 +153,32 @@ export function drawAnnotation(ctx: CanvasRenderingContext2D, a: Annotation, W: 
     ctx.fillRect(a.x * W, a.y * H, a.w * W, a.h * H);
     return;
   }
-  const px = (a.fontSize ?? 0.015) * W;
-  ctx.font = canvasFont(a, px);
-  ctx.textBaseline = "top";
-  const text = a.text ?? "";
-  (a.w > 0 ? wrapLines(text, a.w * W, (t) => ctx.measureText(t).width) : text.split("\n")).forEach((line, i) => ctx.fillText(line, a.x * W, a.y * H + i * px * LINE_HEIGHT));
+  const base = a.fontSize ?? 0.015;
+  const fontOf = (s: RunStyle) => canvasFont(a, (s.size ?? base) * W, s.bold ?? a.bold);
+  const measure = (t: string, s: RunStyle) => {
+    ctx.font = fontOf(s);
+    return ctx.measureText(t).width;
+  };
+  const lines = layoutRuns(runsOf(a), base, a.w * W, measure);
+  // Same line box as CSS: each line is LINE_HEIGHT x its largest size (the box size counts too), baselines aligned.
+  ctx.font = canvasFont(a, 100);
+  const m = ctx.measureText("あ");
+  const asc = m.fontBoundingBoxAscent / 100, desc = m.fontBoundingBoxDescent / 100;
+  const boxW = a.w > 0 ? a.w * W : Math.max(0, ...lines.map((l) => l.width));
+  ctx.textBaseline = "alphabetic";
+  let y = a.y * H;
+  for (const line of lines) {
+    const size = line.maxSize * W;
+    const baseline = y + size * (asc + (LINE_HEIGHT - asc - desc) / 2);
+    let x = a.x * W + (a.align === "center" ? (boxW - line.width) / 2 : a.align === "right" ? boxW - line.width : 0);
+    for (const s of line.segs) {
+      ctx.font = fontOf(s.style);
+      ctx.fillStyle = s.style.color ?? a.color;
+      ctx.fillText(s.text, x, baseline);
+      x += ctx.measureText(s.text).width;
+    }
+    y += size * LINE_HEIGHT;
+  }
 }
 
 /**
@@ -155,7 +195,7 @@ export async function exportPdf(doc: PdfDoc, annotations: Annotation[]) {
     // Canvas silently falls back to a system font if the web font is not loaded yet.
     const imgs = new Map<string, HTMLImageElement>();
     for (const a of anns) {
-      if (a.kind === "text") await document.fonts.load(canvasFont(a, 16), a.text);
+      if (a.kind === "text") for (const bold of [false, true]) await document.fonts.load(canvasFont(a, 16, bold), a.text);
       if (a.kind === "image" && a.src) imgs.set(a.id, await loadImage(a.src));
     }
     for (const a of anns) drawAnnotation(ctx, a, canvas.width, canvas.height, imgs.get(a.id));
@@ -172,6 +212,10 @@ async function loadImage(src: string) {
   await img.decode();
   return img;
 }
+
+/** Drag payload for anything placed as an image (saved logos, signatures). width is a page-width fraction. */
+export const IMAGE_MIME = "application/x-zephind-image";
+export interface ImageDrop { src: string; w: number; h: number; name: string; width: number; keepRatio?: boolean; signature?: PlacedSignature }
 
 export interface SavedImage { _id: string; name: string; src: string; w: number; h: number }
 const IMAGE_MAX_PX = 1200;

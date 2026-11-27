@@ -241,8 +241,7 @@ export async function saveEmailListing(args: {
       // Ownership comes from the ORDER, never from the caller.
       .map((o) => ({ userId: o.userId, orderId: o._id, listingId, status: "matched" }));
     if (toInsert.length > 0) {
-      await db.insertMany("matching", toInsert);
-      matchesCreated = toInsert.length;
+      matchesCreated = (await db.insertMatches(toInsert)).length;
     }
   }
 

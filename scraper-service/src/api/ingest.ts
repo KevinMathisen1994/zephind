@@ -569,8 +569,8 @@ ingestRouter.post("/scrape", route(async (req) => {
   }
   if (stale.length > 0) await db.deleteMany("matching", [...new Set(stale)]);
   if (toInsert.length > 0) {
-    const insertedIds = await db.insertMany("matching", toInsert);
-    matchesCreated += toInsert.length;
+    const insertedIds = await db.insertMatches(toInsert);
+    matchesCreated += insertedIds.length;
 
     // Evaluate on the server, not in the browser.
     // The scrape runs 3 times a day, so automatically score the new matches.

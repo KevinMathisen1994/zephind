@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Download, FileText, FileUp, FolderOpen, ImagePlus, Loader2, Upload, X, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Download, FileText, FileUp, FolderOpen, ImagePlus, Loader2, Upload, X, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useApiMutation, useApiQuery } from "../hooks/useApi";
 import { api } from "../lib/api";
 import {
   type Annotation, type PdfDoc, FONTS, FONTS_CSS_URL, LINE_HEIGHT, OUTLINE_WIDTH, fontCss,
-  type SavedImage, exportPdf, fileToSavedImage, findTextBoxes, loadPdf, pageImagesForAi, renderPage,
+  type ImageDrop, IMAGE_MIME, type PlacedSignature, type SavedImage, exportPdf, fileToSavedImage, findTextBoxes, loadPdf, pageImagesForAi, renderPage, runsOf,
 } from "../lib/pdfBlank";
+import {
+  type Run, type RunStyle, clearRunStyle, getSelectionOffsets, normalizeRuns, plainText, readRuns, setSelectionOffsets, styleRange, writeRuns,
+} from "../lib/richText";
 import { mergeNearby } from "../lib/mergeBoxes";
+import { SignatureMenu } from "../components/SignatureMenu";
+import { logoPng, renderSignature } from "../lib/signature";
 import { type Restack, restack } from "../lib/restack";
 
 type Tool = "select" | "box" | "outline" | "text";
@@ -29,6 +34,11 @@ const HANDLES: { c: Handle; cls: string }[] = [
   { c: "e", cls: "top-1/2 -right-1.5 -translate-y-1/2 cursor-ew-resize" },
 ];
 const TEXT_HANDLES = HANDLES.filter((h) => h.c === "e" || h.c === "w");
+const CORNER_HANDLES = HANDLES.filter((h) => h.c.length === 2);
+// Edges rewrap, corners scale.
+// Only one editor is ever mounted, so a module counter is enough to order signature redraws.
+let redrawSeq = 0;
+const SIGNATURE_HANDLES = [...TEXT_HANDLES, ...CORNER_HANDLES];
 const TOOLS = [
   { t: "select", Icon: MousePointer2, label: "選択", key: "V" },
   { t: "box", Icon: Square, label: "ボックス", key: "B" },
@@ -41,14 +51,18 @@ const LEAVE_MESSAGE = "編集内容は保存されていません。破棄して
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const newId = () => crypto.randomUUID();
 const AI_PAD = 0.004;
-const IMAGE_MIME = "application/x-zephind-image";
 const IMAGE_WIDTH = 0.2; // dropped images start at 20% of page width
+// Signature PNG px -> PDF pt, so their small text lands at ~9pt on any page size.
+const SIGNATURE_PT_PER_PX = 9 / 40;
 const LAYER_ITEMS: { to: Restack; label: string }[] = [
   { to: "front", label: "最前面へ移動" },
   { to: "forward", label: "前面へ移動" },
   { to: "backward", label: "背面へ移動" },
   { to: "back", label: "最背面へ移動" },
 ];
+
+// Toolbar buttons must not take focus, or the open text editor closes and loses its selection.
+const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 export default function BlankPdfPage() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
@@ -68,6 +82,18 @@ export default function BlankPdfPage() {
   }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingIdRaw] = useState<string | null>(null);
+  // The open text editor element, and the last text selection made in it (kept after the toolbar takes focus).
+  const editorEl = useRef<HTMLDivElement | null>(null);
+  const [textSel, setTextSel] = useState<{ id: string; start: number; end: number } | null>(null);
+  useEffect(() => {
+    const onSel = () => {
+      const el = editorEl.current;
+      const o = el && editingId ? getSelectionOffsets(el) : null;
+      if (o && editingId) setTextSel((s) => (s?.id === editingId && s.start === o.start && s.end === o.end ? s : { id: editingId, ...o }));
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, [editingId]);
   const [busy, setBusy] = useState<"ai" | "export" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const detect = useApiMutation(api.blankPdf.detect);
@@ -104,10 +130,69 @@ export default function BlankPdfPage() {
   // Leaving a text that was never typed into drops it, whichever way editing ended.
   const setEditingId = useCallback((id: string | null) => {
     if (editingId && editingId !== id) setAnns((list) => list.filter((a) => a.id !== editingId || a.kind !== "text" || a.text?.trim()));
+    if (id && id !== editingId) setTextSel(null);
     setEditingIdRaw(id);
   }, [editingId, setAnns]);
   const commit = useCallback((next: Updater) => setEd((d) => ({ anns: apply(next, d.anns), past: [...d.past, d.anns], future: [] })), []);
   const snapshot = useCallback(() => setEd((d) => ({ ...d, past: [...d.past, d.anns], future: [] })), []);
+
+  // Redraws a placed signature with one line restyled. The PNG's pixels-per-page scale is kept,
+  // so other lines stay the same size on the page; the block grows or shrinks from its top-left.
+  const redrawSignature = async (
+    id: string,
+    next: (s: PlacedSignature, a: Annotation) => { styles: PlacedSignature["styles"]; maxWidth?: number },
+    record: boolean,
+  ) => {
+    const a = anns.find((x) => x.id === id);
+    if (!a?.signature) return;
+    const s = a.signature;
+    const sx = s.sx ?? a.w / s.w, sy = s.sy ?? a.h / s.h;
+    const { styles, maxWidth } = next(s, a);
+    const seq = ++redrawSeq;
+    const r = await renderSignature(s.fields, styles, maxWidth);
+    // Typing fires many renders; drop any that finish after a newer one started.
+    if (seq !== redrawSeq) return;
+    const update = (prev: Annotation[]) => prev.map((x) => (x.id !== id || !x.signature ? x : {
+      ...x, src: r.src, w: r.w * sx, h: r.h * sy,
+      signature: { ...x.signature, styles, maxWidth, sx, sy, w: r.w, h: r.h, lines: r.lines },
+    }));
+    if (record) commit(update);
+    else setAnns(update);
+  };
+  // Double-click: the signature becomes one rich text box (sizes and bold kept per item) plus the logo image.
+  const ungroupSignature = async (id: string) => {
+    const a = anns.find((x) => x.id === id);
+    if (!a?.signature) return;
+    const s = a.signature;
+    const r = await renderSignature(s.fields, s.styles, s.maxWidth);
+    const kx = a.w / r.w, ky = a.h / r.h;
+    // Items on the same drawn line stay on one line, separated by full-width spaces.
+    const rows = [...new Set(r.lines.map((l) => l.y))].map((y) => r.lines.filter((l) => l.y === y).sort((p, q) => p.x - q.x));
+    const runs: Run[] = normalizeRuns(rows.flatMap((row, n) => [
+      ...(n ? [{ text: "\n", size: row[0].size * kx }] : []),
+      ...row.flatMap((l, k) => [
+        ...(k ? [{ text: "　", size: l.size * kx }] : []),
+        { text: l.text, size: l.size * kx, ...(l.bold && { bold: true }) },
+      ]),
+    ]));
+    const smallest = Math.min(...r.lines.map((l) => l.size)) * kx;
+    const left = r.logo ? r.logo.x + r.logo.size + 24 : r.lines.length ? Math.min(...r.lines.map((l) => l.x)) : 0;
+    const top = r.lines.length ? r.lines[0].y + (r.lines[0].h - r.lines[0].size * LINE_HEIGHT) / 2 : 0;
+    const text: Annotation = {
+      id: crypto.randomUUID(), pageIndex: a.pageIndex, kind: "text", runs, text: plainText(runs), font: "noto-sans", color: "#111111",
+      fontSize: smallest, x: a.x + left * kx, y: a.y + top * ky, w: 0, h: 0,
+    };
+    const logo: Annotation[] = r.logo ? [{
+      id: crypto.randomUUID(), pageIndex: a.pageIndex, kind: "image", src: logoPng(), keepRatio: true, label: "ロゴ", color: "",
+      x: a.x + r.logo.x * kx, y: a.y + r.logo.y * ky, w: r.logo.size * kx, h: r.logo.size * ky,
+    }] : [];
+    commit((prev) => prev.flatMap((x) => (x.id === id ? [...logo, text] : [x])));
+    setSelectedId(text.id);
+    setEditingId(text.id);
+  };
+  // After an edge drag: wrap to the new width. Not a new undo step; the drag already recorded one.
+  const reflowSignature = (id: string) =>
+    redrawSignature(id, (s, a) => ({ styles: s.styles, maxWidth: a.w / (s.sx ?? a.w / s.w) }), false);
   const undo = useCallback(() => setEd((d) => d.past.length === 0 ? d : {
     anns: d.past[d.past.length - 1], past: d.past.slice(0, -1), future: [...d.future, d.anns],
   }), []);
@@ -150,7 +235,19 @@ export default function BlankPdfPage() {
   }, [pdf, dirty, closePdf]);
   const patch = (id: string, p: Partial<Annotation>) => setAnns((prev) => prev.map((a) => (a.id === id ? { ...a, ...p } : a)));
   const selected = anns.find((a) => a.id === selectedId);
-  const shownPt = selected?.kind === "text" && pdf ? Math.round((selected.fontSize ?? 0) * pdf.widths[selected.pageIndex]) : fontPt;
+  // A selected range inside the selected text box gets the toolbar's styles, like Word; otherwise the whole box does.
+  const range = selected?.kind === "text" && textSel?.id === selected.id && textSel.start < textSel.end ? textSel : null;
+  const styleAtSel: RunStyle = (() => {
+    if (!range || !selected) return {};
+    let pos = 0;
+    for (const r of runsOf(selected)) {
+      pos += Array.from(r.text).length;
+      if (pos > range.start) return r;
+    }
+    return {};
+  })();
+  const shownPt = selected?.kind === "text" && pdf ? Math.round((styleAtSel.size ?? selected.fontSize ?? 0) * pdf.widths[selected.pageIndex]) : fontPt;
+  const shownBold = styleAtSel.bold ?? !!selected?.bold;
 
   const openFile = async (file?: File) => {
     if (!file) return;
@@ -228,6 +325,14 @@ export default function BlankPdfPage() {
         else undo();
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && TOOLS.some((x) => x.key === e.key.toUpperCase())) {
         setTool(TOOLS.find((x) => x.key === e.key.toUpperCase())!.t);
+      } else if (e.key.startsWith("Arrow") && selectedId && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        // Shift moves 10x. A held key is one undo step: history is recorded on the first press only.
+        const step = e.shiftKey ? 0.01 : 0.001;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        if (!e.repeat) snapshot();
+        setAnns((prev) => prev.map((a) => (a.id === selectedId ? { ...a, x: a.x + dx, y: a.y + dy } : a)));
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         commit((prev) => prev.filter((a) => a.id !== selectedId));
         setSelectedId(null);
@@ -235,20 +340,45 @@ export default function BlankPdfPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingId, selectedId, undo, redo, commit]);
+  }, [editingId, selectedId, undo, redo, commit, snapshot, setAnns]);
 
-  const setStyle = (p: { color?: string; fontPt?: number; bold?: boolean; font?: string }) => {
+  const setStyle = (p: { color?: string; fontPt?: number; bold?: boolean; font?: string; align?: Annotation["align"] }) => {
     if (p.color) setColor(p.color);
     if (p.fontPt) setFontPt(p.fontPt);
     if (p.font) setFont(p.font);
     if (!selected || !pdf) return;
+    const run: RunStyle = {
+      ...(p.color && { color: p.color }),
+      ...(p.fontPt && { size: p.fontPt / pdf.widths[selected.pageIndex] }),
+      ...(p.bold !== undefined && { bold: p.bold }),
+    };
+    if (selected.kind === "text" && range && Object.keys(run).length) {
+      const runs = styleRange(runsOf(selected), range.start, range.end, run);
+      commit((prev) => prev.map((a) => (a.id === selected.id ? { ...a, runs } : a)));
+      // The editor is uncontrolled, so it is redrawn by hand and keeps its selection.
+      const el = editorEl.current;
+      if (el && editingId === selected.id) {
+        writeRuns(el, runs);
+        setSelectionOffsets(el, range.start, range.end);
+      }
+      return;
+    }
+    let runs = selected.kind === "text" ? runsOf(selected) : undefined;
+    // Whole box: drop per-range overrides of the same property so the change shows everywhere.
+    if (runs) for (const k of Object.keys(run) as (keyof RunStyle)[]) runs = clearRunStyle(runs, k);
     commit((prev) => prev.map((a) => a.id !== selected.id ? a : {
       ...a,
+      ...(runs && { runs }),
       ...(p.color && { color: p.color }),
       ...(p.fontPt && { fontSize: p.fontPt / pdf.widths[a.pageIndex] }),
       ...(p.bold !== undefined && { bold: p.bold }),
       ...(p.font && a.kind === "text" && { font: p.font }),
+      ...(p.align && a.kind === "text" && { align: p.align }),
     }));
+    if (runs && editorEl.current && editingId === selected.id) {
+      writeRuns(editorEl.current, runs);
+      if (textSel?.id === selected.id) setSelectionOffsets(editorEl.current, textSel.start, textSel.end);
+    }
   };
 
   return (
@@ -347,7 +477,11 @@ export default function BlankPdfPage() {
                           <div key={img._id} className="group relative">
                             <img
                               src={img.src} alt={img.name} title={img.name} draggable
-                              onDragStart={(e) => { e.dataTransfer.setData(IMAGE_MIME, img._id); e.dataTransfer.effectAllowed = "copy"; }}
+                              onDragStart={(e) => {
+                                const drop: ImageDrop = { src: img.src, w: img.w, h: img.h, name: img.name, width: IMAGE_WIDTH };
+                                e.dataTransfer.setData(IMAGE_MIME, JSON.stringify(drop));
+                                e.dataTransfer.effectAllowed = "copy";
+                              }}
                               className="h-20 w-full cursor-grab rounded-md border border-[var(--border-subtle)] bg-[#f7f6f3] object-contain p-1"
                             />
                             <button
@@ -372,11 +506,13 @@ export default function BlankPdfPage() {
                   </div>
                 )}
               </div>
+              <SignatureMenu />
               <Divider />
               <span className="text-[var(--text-muted)]">塗り</span>
               {["#000000", "#ffffff"].map((c) => (
                 <button
                   key={c}
+                  onMouseDown={keepFocus}
                   onClick={() => setStyle({ color: c })}
                   aria-label={c === "#ffffff" ? "白" : "黒"}
                   className={`h-8 w-8 rounded-md border border-[var(--border-subtle)] ${color === c ? "ring-2 ring-[var(--brand)] ring-offset-1" : ""}`}
@@ -401,23 +537,38 @@ export default function BlankPdfPage() {
                 {FONTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
               <div className="flex h-9 items-center rounded-lg border border-[var(--border-subtle)]">
-                <button aria-label="文字を小さく" onClick={() => setStyle({ fontPt: Math.max(4, shownPt - 1) })} className="flex h-full w-8 items-center justify-center hover:bg-black/5"><Minus className="h-3.5 w-3.5" /></button>
+                <button aria-label="文字を小さく" onMouseDown={keepFocus} onClick={() => setStyle({ fontPt: Math.max(4, shownPt - 1) })} className="flex h-full w-8 items-center justify-center hover:bg-black/5"><Minus className="h-3.5 w-3.5" /></button>
                 <input
                   type="number" min={4} max={96} value={shownPt} aria-label="文字サイズ (pt)"
                   onChange={(e) => setStyle({ fontPt: Number(e.target.value) || 12 })}
                   className="h-full w-10 border-x border-[var(--border-subtle)] text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <span className="px-1.5 text-[var(--text-muted)]">pt</span>
-                <button aria-label="文字を大きく" onClick={() => setStyle({ fontPt: Math.min(96, shownPt + 1) })} className="flex h-full w-8 items-center justify-center border-l border-[var(--border-subtle)] hover:bg-black/5"><Plus className="h-3.5 w-3.5" /></button>
+                <button aria-label="文字を大きく" onMouseDown={keepFocus} onClick={() => setStyle({ fontPt: Math.min(96, shownPt + 1) })} className="flex h-full w-8 items-center justify-center border-l border-[var(--border-subtle)] hover:bg-black/5"><Plus className="h-3.5 w-3.5" /></button>
               </div>
               {selected?.kind === "text" && (
-                <button
-                  onClick={() => setStyle({ bold: !selected.bold })}
-                  aria-pressed={!!selected.bold}
-                  className={`h-9 w-9 rounded-lg border border-[var(--border-subtle)] font-bold ${selected.bold ? "bg-[#f1efea]" : ""}`}
-                >
-                  B
-                </button>
+                <>
+                  <button
+                    onMouseDown={keepFocus}
+                    onClick={() => setStyle({ bold: !shownBold })}
+                    aria-label="太字" aria-pressed={shownBold}
+                    className={`h-9 w-9 rounded-lg border border-[var(--border-subtle)] font-bold ${shownBold ? "bg-[#f1efea]" : ""}`}
+                  >
+                    B
+                  </button>
+                  <div className="flex h-9 items-center rounded-lg border border-[var(--border-subtle)]">
+                    {([["left", "左揃え", AlignLeft], ["center", "中央揃え", AlignCenter], ["right", "右揃え", AlignRight]] as const).map(([v, label, Icon]) => (
+                      <button
+                        key={v} aria-label={label} title={label} aria-pressed={(selected.align ?? "left") === v}
+                        onMouseDown={keepFocus}
+                        onClick={() => setStyle({ align: v })}
+                        className={`flex h-full w-8 items-center justify-center hover:bg-black/5 ${(selected.align ?? "left") === v ? "bg-[#f1efea]" : ""}`}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
               <div className="ml-auto flex items-center gap-1">
                 <IconButton label="縮小" onClick={() => setZoom((z) => Math.max(ZOOMS[0], ZOOMS.findLast((x) => x < z) ?? z))} disabled={zoom <= ZOOMS[0]}><ZoomOut className="h-4 w-4" /></IconButton>
@@ -451,7 +602,8 @@ export default function BlankPdfPage() {
                 tool={tool}
                 selectedId={selectedId}
                 editingId={editingId}
-                onSelect={setSelectedId}
+                onSelect={(id) => { setSelectedId(id); setTextSel(null); }}
+                onEditorEl={(el) => { editorEl.current = el; }}
                 onEdit={setEditingId}
                 onCreate={(a) => {
                   // White text on a white page would be invisible, so new text starts black.
@@ -465,12 +617,15 @@ export default function BlankPdfPage() {
                 patch={patch}
                 onRemove={(id) => setAnns((prev) => prev.filter((a) => a.id !== id))}
                 onMenu={setMenu}
-                onDropImage={(imageId, x, y, pageAspect) => {
-                  const img = images?.find((m) => m._id === imageId);
-                  if (!img) return;
-                  const w = IMAGE_WIDTH, h = (IMAGE_WIDTH * img.h) / img.w / pageAspect;
+                onUngroupSignature={(id) => void ungroupSignature(id)}
+                onSignatureResize={(id) => void reflowSignature(id)}
+                onDropImage={(img, x, y, pageAspect) => {
+                  // Signatures land at a standard text size; other images at a share of the page width.
+                  const w = img.signature ? (img.w * SIGNATURE_PT_PER_PX) / widthPt : img.width;
+                  const h = (w * img.h) / img.w / pageAspect;
+                  if (img.signature) img = { ...img, signature: { ...img.signature, sx: w / img.w, sy: h / img.h } };
                   const id = newId();
-                  commit((prev) => [...prev, { id, pageIndex: i, kind: "image", src: img.src, label: img.name, x: x - w / 2, y: y - h / 2, w, h, color: "" }]);
+                  commit((prev) => [...prev, { id, pageIndex: i, kind: "image", src: img.src, label: img.name, keepRatio: img.keepRatio, signature: img.signature, x: x - w / 2, y: y - h / 2, w, h, color: "" }]);
                   setSelectedId(id);
                   setTool("select");
                   setImgOpen(false);
@@ -478,6 +633,7 @@ export default function BlankPdfPage() {
               />
             ))}
           </div>
+
 
           {/* Portal: a transformed ancestor would make "fixed" relative to it instead of the viewport. */}
           {menu && createPortal(
@@ -539,10 +695,13 @@ function PageView(props: {
   patch: (id: string, p: Partial<Annotation>) => void;
   onRemove: (id: string) => void;
   onMenu: (m: { id: string; x: number; y: number }) => void;
+  onUngroupSignature: (id: string) => void;
+  onEditorEl: (el: HTMLDivElement | null) => void;
+  onSignatureResize: (id: string) => void;
   /** pageAspect is height / width, to keep the image's proportions in page fractions. */
-  onDropImage: (imageId: string, x: number, y: number, pageAspect: number) => void;
+  onDropImage: (img: ImageDrop, x: number, y: number, pageAspect: number) => void;
 }) {
-  const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove, onMenu, onDropImage } = props;
+  const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove, onMenu, onUngroupSignature, onEditorEl, onSignatureResize, onDropImage } = props;
   const canvasBoxRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -617,6 +776,12 @@ function PageView(props: {
     drag.current = null;
     const a = d && anns.find((x) => x.id === d.id);
     if (a?.kind === "box" && (a.w < 0.003 || a.h < 0.003)) onRemove(a.id);
+    if (a?.signature && (d?.mode === "e" || d?.mode === "w")) onSignatureResize(a.id);
+    // Corner drag scales the whole signature, text included: keep the new size as its scale.
+    if (a?.signature && d && d.mode.length === 2) {
+      const s = a.signature, f = a.h / d.orig.h;
+      patch(a.id, { signature: { ...s, sx: (s.sx ?? d.orig.w / s.w) * f, sy: (s.sy ?? d.orig.h / s.h) * f } });
+    }
   };
 
   return (
@@ -632,12 +797,12 @@ function PageView(props: {
           if (e.dataTransfer.types.includes(IMAGE_MIME)) e.preventDefault();
         }}
         onDrop={(e) => {
-          const imageId = e.dataTransfer.getData(IMAGE_MIME);
-          if (!imageId) return;
+          const raw = e.dataTransfer.getData(IMAGE_MIME);
+          if (!raw) return;
           e.preventDefault();
           const r = overlayRef.current!.getBoundingClientRect();
           const p = point(e);
-          onDropImage(imageId, p.x, p.y, r.height / r.width);
+          onDropImage(JSON.parse(raw) as ImageDrop, p.x, p.y, r.height / r.width);
         }}
       >
         {anns.map((a) => {
@@ -659,10 +824,11 @@ function PageView(props: {
               // With a drawing tool, a click on a box or image falls through so text/boxes can be placed on top of it.
               if (tool !== "select" && a.kind !== "text") return;
               const now = Date.now();
-              const isDouble = a.kind === "text" && lastDown.current.id === a.id && now - lastDown.current.t < 400;
+              const isDouble = (a.kind === "text" || !!a.signature) && lastDown.current.id === a.id && now - lastDown.current.t < 400;
               lastDown.current = { id: a.id, t: now };
               if (isDouble) {
                 e.stopPropagation();
+                if (a.signature) return onUngroupSignature(a.id);
                 return onEdit(a.id);
               }
               onSelect(a.id);
@@ -677,8 +843,20 @@ function PageView(props: {
                 className={`absolute cursor-move ${ring}`}
                 style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%`, ...fill }}
               >
-                {a.kind === "image" && <img src={a.src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none" />}
-                {isSel && HANDLES.map(({ c, cls }) => (
+                {a.kind === "image" && (a.signature ? (
+                  // Drawn at its own scale and clipped while an edge is dragged; it reflows on release instead of stretching.
+                  <div className="h-full w-full overflow-hidden">
+                    <img
+                      src={a.src} alt="" draggable={false}
+                      className="pointer-events-none max-w-none select-none"
+                      // Scale from the box height: fixed during edge drags, proportional during corner drags.
+                      style={{ width: `${((a.signature.w * (a.h / a.signature.h) * ((a.signature.sx ?? 1) / (a.signature.sy ?? 1))) / a.w) * 100}%` }}
+                    />
+                  </div>
+                ) : (
+                  <img src={a.src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none" />
+                ))}
+                {isSel && (a.signature ? SIGNATURE_HANDLES : a.keepRatio ? CORNER_HANDLES : HANDLES).map(({ c, cls }) => (
                   <div
                     key={c}
                     className={`absolute h-3 w-3 rounded-sm border border-white bg-[var(--brand)] ${cls}`}
@@ -694,27 +872,50 @@ function PageView(props: {
               // Remount on edit so React never reconciles children the user typed into.
               key={`${a.id}-${editing}`} {...common}
               ref={(el) => {
-                if (!el || !editing || el.dataset.init) return;
+                if (!editing) return;
+                onEditorEl(el);
+                if (!el || el.dataset.init) return;
                 el.dataset.init = "1";
-                el.innerText = a.text ?? "";
+                writeRuns(el, runsOf(a));
                 // Deferred: focusing inside pointerdown is undone by the click's own focus change, which blurs and deletes the new empty text.
                 setTimeout(() => el.focus());
               }}
               contentEditable={editing}
               suppressContentEditableWarning
               // Saved per keystroke: leaving edit mode can unmount this element before blur fires.
-              onInput={(e) => patch(a.id, { text: e.currentTarget.innerText.replace(/\n$/, "") })}
+              onInput={(e) => {
+                const runs = readRuns(e.currentTarget);
+                patch(a.id, { runs, text: plainText(runs) });
+              }}
+              onKeyDown={(e) => {
+                // <br> instead of the browser's <div> per line, so lines map 1:1 to "\n".
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  if (!document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n");
+                }
+              }}
+              onPaste={(e) => {
+                // Plain text only: pasted HTML would bring fonts and colors the export cannot draw.
+                e.preventDefault();
+                document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+              }}
               onBlur={() => onEdit(null)}
               className={`absolute min-w-[1em] ${editing ? "cursor-text" : "cursor-move"} ${ring}`}
               style={{
-                left: `${a.x * 100}%`, top: `${a.y * 100}%`, color: a.color,
-                // A width is set once a side handle is dragged; then it wraps per character like the export (wrapLines).
+                left: `${a.x * 100}%`, top: `${a.y * 100}%`, color: a.color, textAlign: a.align ?? "left",
+                // A width is set once a side handle is dragged; then it wraps per character like the export (layoutRuns).
                 ...(a.w > 0 ? { width: `${a.w * 100}%`, whiteSpace: "pre-wrap", wordBreak: "break-all" } : { whiteSpace: "pre" }),
                 fontSize: `${(a.fontSize ?? 0.015) * 100}cqw`, lineHeight: LINE_HEIGHT,
                 fontFamily: fontCss(a.font), fontWeight: a.bold ? 700 : 400,
               }}
             >
-              {editing ? null : a.text}
+              {editing ? null : runsOf(a).map((r, i) => (
+                <span key={i} style={{
+                  ...(r.size !== undefined && { fontSize: `${r.size * 100}cqw` }),
+                  ...(r.bold !== undefined && { fontWeight: r.bold ? 700 : 400 }),
+                  ...(r.color !== undefined && { color: r.color }),
+                }}>{r.text}</span>
+              ))}
               {isSel && !editing && TEXT_HANDLES.map(({ c, cls }) => (
                 <div
                   key={c}

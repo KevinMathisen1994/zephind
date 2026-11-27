@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseDetection, parseImage } from "./blankPdf";
+import { parseDetection, parseImage, parseSignature } from "./blankPdf";
 
 const r = parseDetection(
   {
@@ -23,4 +23,13 @@ assert.throws(() => parseImage({ ...img, src: "data:image/svg+xml;base64,PHN2Zz4
 assert.throws(() => parseImage({ ...img, src: "javascript:alert(1)" }));
 assert.throws(() => parseImage({ ...img, w: 0 }));
 assert.throws(() => parseImage({ ...img, name: "" }));
+assert.deepEqual(
+  parseSignature({ fields: { companyName: " 株式会社サンプル不動産 ", tel: "03-0000-0000", fax: "", showLogo: true, extra: "x" } }),
+  { name: "株式会社サンプル不動産", fields: { companyName: "株式会社サンプル不動産", tel: "03-0000-0000", showLogo: true, layout: "stacked" } },
+);
+assert.throws(() => parseSignature({ fields: { tel: "03" } })); // company name required
+assert.equal(parseSignature({ fields: { companyName: "a", bigScale: 1.2 } }).fields.bigScale, 1.2);
+assert.throws(() => parseSignature({ fields: { companyName: "a", smallScale: 5 } }));
+assert.throws(() => parseSignature({ fields: { companyName: "x".repeat(101) } }));
+assert.throws(() => parseSignature({ fields: { companyName: "a", tel: 3 } }));
 console.log("ok");

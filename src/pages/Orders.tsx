@@ -1645,12 +1645,30 @@ export default function OrdersPage() {
         setFocusListingId(null);
       }, 400);
     }
-    // focusListing is a one-shot jump; the open property stays in the URL as ?listing=.
-    const next = new URLSearchParams(searchParams);
-    next.delete("focusListing");
-    if (target) next.set("listing", focusParam);
-    setSearchParams(next, { replace: true });
+    // focusListing is a one-shot jump. The order page replaces it, then the property is pushed on top,
+    // so a tab opened from an email/PDF link can go back to the list with the browser's back button.
+    const base = new URLSearchParams(searchParams);
+    base.delete("focusListing");
+    base.delete("listing");
+    setSearchParams(base, { replace: true });
+    if (target) {
+      const next = new URLSearchParams(base);
+      next.set("listing", focusParam);
+      setSearchParams(next, { state: { listingOpened: true } });
+    }
   }, [focusParam, focusMatches, matches, routeOrderId]);
+
+  // A bookmarked ?listing= link gets the same treatment once on load.
+  useEffect(() => {
+    if (!listingParam || focusParam || (location.state as { listingOpened?: boolean } | null)?.listingOpened) return;
+    const base = new URLSearchParams(searchParams);
+    base.delete("listing");
+    setSearchParams(base, { replace: true });
+    const next = new URLSearchParams(base);
+    next.set("listing", listingParam);
+    setSearchParams(next, { state: { listingOpened: true } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
 
 

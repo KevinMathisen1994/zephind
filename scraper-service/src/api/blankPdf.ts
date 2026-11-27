@@ -132,3 +132,46 @@ blankPdfRouter.delete("/images/:id", route(async (req) => {
   await db.delete("pdfImages", req.params.id);
   return { ok: true };
 }));
+
+const SIGNATURE_TEXT_FIELDS = ["companyName", "address", "license", "tel", "fax", "dealType"] as const;
+
+/** Checks a signature from the editor; returns the row fields or throws 400. */
+export function parseSignature(body: any) {
+  const raw = body?.fields ?? {};
+  const fields: Record<string, string | boolean | number> = {};
+  for (const k of SIGNATURE_TEXT_FIELDS) {
+    const v = raw[k];
+    if (v == null || v === "") continue;
+    if (typeof v !== "string" || v.length > 100) throw new HttpError(400, `${k} must be text up to 100 characters`);
+    fields[k] = v.trim();
+  }
+  if (!fields.companyName) throw new HttpError(400, "会社名を入力してください");
+  fields.showLogo = raw.showLogo === true;
+  fields.layout = raw.layout === "compact" ? "compact" : "stacked";
+  for (const k of ["bigScale", "smallScale"]) {
+    const v = raw[k];
+    if (v == null) continue;
+    if (typeof v !== "number" || !(v >= 0.6 && v <= 1.6)) throw new HttpError(400, `${k} must be between 0.6 and 1.6`);
+    fields[k] = v;
+  }
+  return { name: fields.companyName as string, fields };
+}
+
+blankPdfRouter.get("/signatures", route(async (req) => listOwned(req, "pdfSignatures")));
+
+blankPdfRouter.post("/signatures", route(async (req) => {
+  const userId = requireUserId(req);
+  return { id: await db.insert("pdfSignatures", { ...parseSignature(req.body), userId }) };
+}));
+
+blankPdfRouter.put("/signatures/:id", route(async (req) => {
+  await requireOwned(req, "pdfSignatures", req.params.id, "署名");
+  await db.patch("pdfSignatures", req.params.id, parseSignature(req.body));
+  return { ok: true };
+}));
+
+blankPdfRouter.delete("/signatures/:id", route(async (req) => {
+  await requireOwned(req, "pdfSignatures", req.params.id, "署名");
+  await db.delete("pdfSignatures", req.params.id);
+  return { ok: true };
+}));

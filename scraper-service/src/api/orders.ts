@@ -116,7 +116,7 @@ async function addMatchesFromKnownListings(orderId: string, userId: string): Pro
     if ((data ?? []).length < PAGE) break;
   }
   if (toInsert.length === 0) return 0;
-  const ids = await db.insertMany("matching", toInsert);
+  const ids = await db.insertMatches(toInsert);
   void evaluateMatchIdsServer(ids).catch((err) => logger.error(`[Order edit] evaluate failed: ${err}`));
   return ids.length;
 }
