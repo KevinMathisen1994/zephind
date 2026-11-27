@@ -1002,18 +1002,31 @@ export default function OrdersPage() {
     user?.username ||
     user?.primaryEmailAddress?.emailAddress ||
     undefined;
-  const orders = useQuery(api.orders.list);
+  const orders = useQuery(api.orders.list, undefined, {
+    refetchInterval: (list) => ((list as { isScraping?: boolean }[] | undefined)?.some((o) => o.isScraping) ? 3000 : 60_000),
+  });
+  const anyScraping = !!orders?.some((o) => o.isScraping);
   const customers = useQuery(api.customers.list);
   const createOrder = useMutation(api.orders.create);
   const deleteOrder = useMutation(api.orders.remove);
   const updateOrder = useMutation(api.orders.update);
   // The global list is capped by the API (1000 rows) while an account can hold
   // tens of thousands of matches, so an order's own page reads its own rows.
-  const allMatches = useQuery(api.matching.list);
+  // Matches only change during a scrape, so they poll only then.
+  const matchPoll = anyScraping ? 30_000 : false;
+  const allMatches = useQuery(api.matching.list, routeOrderId ? SKIP : undefined, { refetchInterval: matchPoll });
   const routeOrderMatches = useQuery(
     api.matching.byOrder,
     routeOrderId ? { orderId: routeOrderId } : SKIP,
+    { refetchInterval: matchPoll },
   );
+  const matchQueryClient = useQueryClient();
+  const wasScraping = useRef(false);
+  useEffect(() => {
+    // A scrape's last matches land after the final poll, so refetch once when it ends.
+    if (wasScraping.current && !anyScraping) void matchQueryClient.invalidateQueries({ queryKey: ["matching"] });
+    wasScraping.current = anyScraping;
+  }, [anyScraping, matchQueryClient]);
   const matches = routeOrderId ? routeOrderMatches : allMatches;
   // Real counts (lists above hold at most the newest 1000 rows).
   const matchSummary = useQuery(api.matching.summary);

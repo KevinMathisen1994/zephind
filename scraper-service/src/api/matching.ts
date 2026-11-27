@@ -61,8 +61,9 @@ matchingRouter.get("/by-order/:orderId", route(async (req) => {
   // Second filter on the match's own userId: matching.orderId is a plain string
   // column, so owning the order alone would not stop a legacy or mis-owned row
   // from leaking through.
+  // All rows, not the newest 1000: big orders hold 10k+ matches.
   return attachDealFields(
-    await db.list("matching", {
+    await db.listAll("matching", {
       where: { orderId: req.params.orderId, userId },
       order: { by: "_creationTime", desc: true },
     }),

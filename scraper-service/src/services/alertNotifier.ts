@@ -32,6 +32,8 @@ export interface AlertSettingsRecord {
   notifyHighScores?: boolean;
   notifyPriceDrops?: boolean;
   enabled?: boolean;
+  dailyDigest?: boolean;
+  lastDigestAt?: number | null;
 }
 
 // In-memory cache of alerted match IDs to prevent duplicate alerts within 24h
@@ -40,7 +42,7 @@ const recentAlertsCache = new Set<string>();
 /**
  * Format price in Japanese 万円 / 億円 text.
  */
-function formatPriceText(priceMan: number): string {
+export function formatPriceText(priceMan: number): string {
   if (Math.abs(priceMan) < 10000) return `${priceMan.toLocaleString()}万円`;
   const oku = Math.trunc(priceMan / 10000);
   const rest = Math.round(priceMan - oku * 10000);
@@ -216,6 +218,34 @@ export async function sendWebhookAlert(
   }
 }
 
+export interface EmailAttachment { filename: string; content: Buffer }
+
+/** Sends through Resend. Without RESEND_API_KEY nothing can be delivered, so that is reported as a failure. */
+export async function sendEmail(msg: {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  attachments?: EmailAttachment[];
+}): Promise<{ success: boolean; error?: string }> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) return { success: false, error: "RESEND_API_KEY が未設定のためメールを送信できません" };
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendApiKey}` },
+    body: JSON.stringify({
+      from: process.env.ALERT_FROM_EMAIL || "Zephind Alerts <alerts@zephind.com>",
+      to: [msg.to],
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+      attachments: msg.attachments?.map((a) => ({ filename: a.filename, content: a.content.toString("base64") })),
+    }),
+  });
+  if (!res.ok) return { success: false, error: `Resend error: ${await res.text()}` };
+  return { success: true };
+}
+
 /**
  * Dispatch alert to Email.
  */
@@ -225,34 +255,9 @@ export async function sendEmailAlert(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { title, text } = formatAlertMessage(item);
-    logger.info(`[Email Alert] Prepared alert email to ${emailAddress}: ${title}`);
-
-    // If Resend, Sendgrid, or SMTP environment variables are configured, we send via API
-    const resendApiKey = process.env.RESEND_API_KEY;
-    if (resendApiKey) {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: process.env.ALERT_FROM_EMAIL || "Zephind Alerts <alerts@zephind.com>",
-          to: [emailAddress],
-          subject: title,
-          text: text,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        return { success: false, error: `Resend error: ${body}` };
-      }
-      return { success: true };
-    }
-
-    // Log success if no direct mail transport is provisioned in dev
-    logger.info(`[Email Alert] Alert queued for ${emailAddress}`);
-    return { success: true };
+    const result = await sendEmail({ to: emailAddress, subject: title, text });
+    if (!result.success) logger.warn(`[Email Alert] not sent to ${emailAddress}: ${result.error}`);
+    return result;
   } catch (err: any) {
     logger.error("Failed to send email alert", { error: err.message });
     return { success: false, error: err.message };

@@ -96,13 +96,26 @@ export async function list(table: string, opts: ListOpts = {}): Promise<Doc[]> {
   for (const [col, val] of Object.entries(opts.where ?? {})) {
     q = val === null ? q.is(col, null) : q.eq(col, val);
   }
-  if (opts.order) q = q.order(opts.order.by, { ascending: !opts.order.desc, nullsFirst: false });
+  // _id tiebreak keeps pages stable when rows share a _creationTime (batch inserts).
+  if (opts.order) q = q.order(opts.order.by, { ascending: !opts.order.desc, nullsFirst: false }).order("_id");
   if (opts.limit != null) {
     const from = opts.offset ?? 0;
     q = q.range(from, from + opts.limit - 1);
   }
   const res = await q;
   return (unwrap(res, `list ${table}`) as Doc[]) ?? [];
+}
+
+const PAGE_SIZE = 1000; // PostgREST max-rows: a plain select never returns more
+
+/** Every matching row, paging past the 1000-row cap. Needs `order` for stable pages. */
+export async function listAll(table: string, opts: Omit<ListOpts, "limit" | "offset"> = {}): Promise<Doc[]> {
+  const out: Doc[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const rows = await list(table, { ...opts, limit: PAGE_SIZE, offset });
+    out.push(...rows);
+    if (rows.length < PAGE_SIZE) return out;
+  }
 }
 
 /** First match or null. Mirrors ctx.db.query(...).unique()/first(). */
@@ -190,7 +203,7 @@ function strip(doc: Record<string, any>): Record<string, any> {
 }
 
 export const db = {
-  get, getMany, selectIn, list, first, count,
+  get, getMany, selectIn, list, listAll, first, count,
   insert, insertMany, patch, patchWhere,
   delete: remove, deleteMany: removeMany, deleteWhere: removeWhere,
   raw: supabase,

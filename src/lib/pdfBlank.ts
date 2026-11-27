@@ -1,6 +1,7 @@
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument } from "pdf-lib";
+import { wrapLines } from "./wrapText";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -10,7 +11,7 @@ export type PdfDoc = pdfjs.PDFDocumentProxy;
 export interface Annotation {
   id: string;
   pageIndex: number;
-  kind: "box" | "text";
+  kind: "box" | "text" | "image";
   x: number;
   y: number;
   w: number;
@@ -24,6 +25,8 @@ export interface Annotation {
   outline?: boolean;
   /** Id from FONTS. */
   font?: string;
+  /** Image data URL, for kind "image". */
+  src?: string;
 }
 
 export const FONT_FAMILY = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif';
@@ -113,7 +116,11 @@ export async function findTextBoxes(doc: PdfDoc, needles: string[]) {
   return found;
 }
 
-export function drawAnnotation(ctx: CanvasRenderingContext2D, a: Annotation, W: number, H: number) {
+export function drawAnnotation(ctx: CanvasRenderingContext2D, a: Annotation, W: number, H: number, img?: HTMLImageElement) {
+  if (a.kind === "image") {
+    if (img) ctx.drawImage(img, a.x * W, a.y * H, a.w * W, a.h * H);
+    return;
+  }
   ctx.fillStyle = a.color;
   if (a.kind === "box" && a.outline) {
     const lw = OUTLINE_WIDTH * W;
@@ -130,7 +137,8 @@ export function drawAnnotation(ctx: CanvasRenderingContext2D, a: Annotation, W: 
   const px = (a.fontSize ?? 0.015) * W;
   ctx.font = canvasFont(a, px);
   ctx.textBaseline = "top";
-  (a.text ?? "").split("\n").forEach((line, i) => ctx.fillText(line, a.x * W, a.y * H + i * px * LINE_HEIGHT));
+  const text = a.text ?? "";
+  (a.w > 0 ? wrapLines(text, a.w * W, (t) => ctx.measureText(t).width) : text.split("\n")).forEach((line, i) => ctx.fillText(line, a.x * W, a.y * H + i * px * LINE_HEIGHT));
 }
 
 /**
@@ -145,13 +153,42 @@ export async function exportPdf(doc: PdfDoc, annotations: Annotation[]) {
     const canvas = await renderPage(doc, i, EXPORT_SCALE);
     const ctx = canvas.getContext("2d")!;
     // Canvas silently falls back to a system font if the web font is not loaded yet.
+    const imgs = new Map<string, HTMLImageElement>();
     for (const a of anns) {
       if (a.kind === "text") await document.fonts.load(canvasFont(a, 16), a.text);
+      if (a.kind === "image" && a.src) imgs.set(a.id, await loadImage(a.src));
     }
-    for (const a of anns) drawAnnotation(ctx, a, canvas.width, canvas.height);
+    for (const a of anns) drawAnnotation(ctx, a, canvas.width, canvas.height, imgs.get(a.id));
     const jpg = await out.embedJpg(await (await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), "image/jpeg", 0.92))).arrayBuffer());
     const page = out.addPage([canvas.width / EXPORT_SCALE, canvas.height / EXPORT_SCALE]);
     page.drawImage(jpg, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
   }
   return out.save();
+}
+
+async function loadImage(src: string) {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  return img;
+}
+
+export interface SavedImage { _id: string; name: string; src: string; w: number; h: number }
+const IMAGE_MAX_PX = 1200;
+
+/** Downscales so a logo stays a small row in Supabase; JPEG stays JPEG, everything else becomes PNG to keep transparency. */
+export async function fileToSavedImage(file: File): Promise<Omit<SavedImage, "_id">> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(url);
+    const k = Math.min(1, IMAGE_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const src = file.type === "image/jpeg" ? canvas.toDataURL("image/jpeg", 0.9) : canvas.toDataURL("image/png");
+    return { name: file.name, src, w: canvas.width, h: canvas.height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

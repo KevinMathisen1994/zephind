@@ -4,10 +4,14 @@
  * JPEG and does the blanking; this only asks Gemini where the boxes go.
  */
 import { Router, type Request } from "express";
-import { HttpError, requireUserId } from "../auth/authz";
+import { HttpError, listOwned, requireOwned, requireUserId } from "../auth/authz";
+import { db } from "../db";
 import { route } from "./handler";
 
 const MAX_PAGES = 10;
+// The browser downscales to 1200px before upload; this caps a stored row.
+const MAX_IMAGE_CHARS = 4_000_000;
+const DATA_URL = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/;
 
 const PROMPT = `
 These images are pages of a Japanese real-estate sales sheet (販売図面 / マイソク).
@@ -102,4 +106,29 @@ blankPdfRouter.post("/detect", route(async (req: Request) => {
     throw new HttpError(502, `Gemini検出結果がJSON形式ではありません: ${text.slice(0, 200)}`);
   }
   return parseDetection(parsed, pages.map((p: any) => p.pageIndex));
+}));
+
+/** Checks a saved-image upload; returns the row fields or throws 400. */
+export function parseImage(body: any) {
+  const { name, src, w, h } = body ?? {};
+  if (typeof name !== "string" || !name.trim() || name.length > 200) throw new HttpError(400, "name is required");
+  if (typeof src !== "string" || src.length > MAX_IMAGE_CHARS || !DATA_URL.test(src)) {
+    throw new HttpError(400, "src must be a PNG or JPEG data URL under 4MB");
+  }
+  if (![w, h].every((n) => Number.isInteger(n) && n > 0 && n <= 10000)) throw new HttpError(400, "w and h must be pixel sizes");
+  return { name: name.trim(), src, w, h };
+}
+
+blankPdfRouter.get("/images", route(async (req) => listOwned(req, "pdfImages")));
+
+blankPdfRouter.post("/images", route(async (req) => {
+  const userId = requireUserId(req);
+  const id = await db.insert("pdfImages", { ...parseImage(req.body), userId });
+  return { id };
+}));
+
+blankPdfRouter.delete("/images/:id", route(async (req) => {
+  await requireOwned(req, "pdfImages", req.params.id, "画像");
+  await db.delete("pdfImages", req.params.id);
+  return { ok: true };
 }));

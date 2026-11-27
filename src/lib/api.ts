@@ -34,7 +34,8 @@ const withoutId = (a: any) => {
 
 export const api = {
   orders: {
-    list: endpoint({ method: "GET", key: "orders", path: () => "/api/orders", refetchInterval: 3000 }),
+    // Slow fallback so a scrape started elsewhere (cron, another tab) shows up; Orders polls faster while one runs.
+    list: endpoint({ method: "GET", key: "orders", path: () => "/api/orders", refetchInterval: 60_000 }),
     get: endpoint({ method: "GET", key: "orders.get", path: (a) => `/api/orders/${id(a)}` }),
     create: endpoint({
       method: "POST", key: "orders.create", path: () => "/api/orders",
@@ -110,13 +111,13 @@ export const api = {
   },
 
   matching: {
-    // Polled: a scrape run writes matches from a GitHub Actions runner, so they
-    // appear with no action in this tab to trigger a refetch.
-    list: endpoint({ method: "GET", key: "matching", path: () => "/api/matching", refetchInterval: 30_000 }),
-    byOrder: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-order/${encodeURIComponent(a.orderId)}`, refetchInterval: 30_000 }),
-    // Real per-order counts; list/byOrder return only the newest 1000 rows.
+    // Not polled by default (each call is ~1MB, and polling it blew the Supabase egress quota).
+    // Orders polls them only while a scrape is running and refetches once when it ends.
+    list: endpoint({ method: "GET", key: "matching", path: () => "/api/matching" }),
+    byOrder: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-order/${encodeURIComponent(a.orderId)}` }),
+    // Real per-order counts; list returns only the newest 1000 rows.
     summary: endpoint<void, { orderId: string; total: number; new24h: number; high: number; new24hHigh: number }[]>({
-      method: "GET", key: "matching", path: () => "/api/matching/summary", refetchInterval: 30_000,
+      method: "GET", key: "matching", path: () => "/api/matching/summary", refetchInterval: 300_000,
     }),
     byListing: endpoint({ method: "GET", key: "matching", path: (a) => `/api/matching/by-listing/${encodeURIComponent(a.listingId)}` }),
     saveScore: endpoint({
@@ -260,6 +261,15 @@ export const api = {
 
   blankPdf: {
     detect: endpoint({ method: "POST", key: "blankPdf.detect", path: () => "/api/blank-pdf/detect", body: (a) => a }),
+    images: endpoint({ method: "GET", key: "blankPdf.images", path: () => "/api/blank-pdf/images" }),
+    addImage: endpoint({
+      method: "POST", key: "blankPdf.addImage", path: () => "/api/blank-pdf/images",
+      body: (a) => a, invalidates: ["blankPdf.images"],
+    }),
+    removeImage: endpoint({
+      method: "DELETE", key: "blankPdf.removeImage", path: (a) => `/api/blank-pdf/images/${id(a)}`,
+      invalidates: ["blankPdf.images"],
+    }),
   },
 
   proposals: {

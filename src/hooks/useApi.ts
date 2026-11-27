@@ -21,7 +21,11 @@ export function useApiQuery<Args, Result>(
   ep: Endpoint<Args, Result>,
   args?: Args | typeof SKIP,
   /** Keep showing the last result while new args load, instead of going back to undefined. */
-  opts?: { keepPrevious?: boolean },
+  opts?: {
+    keepPrevious?: boolean;
+    /** Overrides the endpoint's poll; a function gets the current data, so a list can poll only while something is running. */
+    refetchInterval?: number | false | ((data: Result | undefined) => number | false);
+  },
 ): Result | undefined {
   const enabled = args !== SKIP;
   const callArgs = (enabled ? args : undefined) as Args;
@@ -37,7 +41,11 @@ export function useApiQuery<Args, Result>(
         body: ep.body ? ep.body(callArgs) : undefined,
       }),
     enabled,
-    refetchInterval: ep.refetchInterval,
+    refetchInterval: (query) => {
+      const ri = opts?.refetchInterval;
+      if (ri === undefined) return ep.refetchInterval ?? false;
+      return typeof ri === "function" ? ri(query.state.data) : ri;
+    },
     placeholderData: opts?.keepPrevious ? keepPreviousData : undefined,
   });
 

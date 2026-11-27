@@ -42,6 +42,7 @@ alertSettingsRouter.put("/settings", route(async (req: Request) => {
     notifyHighScores: body.notifyHighScores !== false,
     notifyPriceDrops: body.notifyPriceDrops !== false,
     enabled: body.enabled !== false,
+    dailyDigest: body.dailyDigest === true,
     updatedAt: Date.now(),
   };
 

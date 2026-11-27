@@ -11,6 +11,7 @@ import {
   Sliders,
   AlertCircle,
   TrendingDown,
+  FileText,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { useApiQuery as useQuery, useApiMutation as useMutation } from "../hooks/useApi";
@@ -32,6 +33,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
   const [notifyHighScores, setNotifyHighScores] = useState(true);
   const [notifyPriceDrops, setNotifyPriceDrops] = useState(true);
   const [enabled, setEnabled] = useState(true);
+  const [dailyDigest, setDailyDigest] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -50,6 +52,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
       setNotifyHighScores(currentSettings.notifyHighScores !== false);
       setNotifyPriceDrops(currentSettings.notifyPriceDrops !== false);
       setEnabled(currentSettings.enabled !== false);
+      setDailyDigest(currentSettings.dailyDigest === true);
     }
   }, [currentSettings]);
 
@@ -66,6 +69,7 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
         notifyHighScores,
         notifyPriceDrops,
         enabled,
+        dailyDigest,
       });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
@@ -286,6 +290,27 @@ export function AlertSettingsModal({ isOpen, onClose }: AlertSettingsModalProps)
                   <p className="text-[11px] text-slate-500">
                     価格改定（値下げ）が行われた売り急ぎ物件を優先的に通知します。
                   </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dailyDigest}
+                  onChange={(e) => setDailyDigest(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-800 focus:ring-emerald-700 accent-emerald-800"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5 text-emerald-700" />
+                    毎朝の新着物件レポート (PDF)
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    毎日最初の自動検索（3:30頃）の後、オーダーごとの新着物件をまとめたPDFを通知先メールアドレスに送信します。
+                  </p>
+                  {dailyDigest && !emailAddress.trim() && (
+                    <p className="mt-1 text-[11px] font-bold text-rose-600">通知先メールアドレスを入力してください。</p>
+                  )}
                 </div>
               </label>
             </div>

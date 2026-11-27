@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, FileText, FileUp, FolderOpen, Loader2, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronDown, Download, FileText, FileUp, FolderOpen, ImagePlus, Loader2, Upload, X, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { useApiMutation } from "../hooks/useApi";
+import { useApiMutation, useApiQuery } from "../hooks/useApi";
 import { api } from "../lib/api";
 import {
   type Annotation, type PdfDoc, FONTS, FONTS_CSS_URL, LINE_HEIGHT, OUTLINE_WIDTH, fontCss,
-  exportPdf, findTextBoxes, loadPdf, pageImagesForAi, renderPage,
+  type SavedImage, exportPdf, fileToSavedImage, findTextBoxes, loadPdf, pageImagesForAi, renderPage,
 } from "../lib/pdfBlank";
 import { mergeNearby } from "../lib/mergeBoxes";
+import { type Restack, restack } from "../lib/restack";
 
 type Tool = "select" | "box" | "outline" | "text";
 interface LoadedPdf { name: string; doc: PdfDoc; widths: number[] }
@@ -26,6 +28,7 @@ const HANDLES: { c: Handle; cls: string }[] = [
   { c: "w", cls: "top-1/2 -left-1.5 -translate-y-1/2 cursor-ew-resize" },
   { c: "e", cls: "top-1/2 -right-1.5 -translate-y-1/2 cursor-ew-resize" },
 ];
+const TEXT_HANDLES = HANDLES.filter((h) => h.c === "e" || h.c === "w");
 const TOOLS = [
   { t: "select", Icon: MousePointer2, label: "選択", key: "V" },
   { t: "box", Icon: Square, label: "ボックス", key: "B" },
@@ -38,6 +41,14 @@ const LEAVE_MESSAGE = "編集内容は保存されていません。破棄して
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const newId = () => crypto.randomUUID();
 const AI_PAD = 0.004;
+const IMAGE_MIME = "application/x-zephind-image";
+const IMAGE_WIDTH = 0.2; // dropped images start at 20% of page width
+const LAYER_ITEMS: { to: Restack; label: string }[] = [
+  { to: "front", label: "最前面へ移動" },
+  { to: "forward", label: "前面へ移動" },
+  { to: "backward", label: "背面へ移動" },
+  { to: "back", label: "最背面へ移動" },
+];
 
 export default function BlankPdfPage() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
@@ -48,6 +59,7 @@ export default function BlankPdfPage() {
   const [fontPt, setFontPt] = useState(12);
   const [font, setFont] = useState<string>(FONTS[0].id);
   const [zoom, setZoom] = useState(1);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: FONTS_CSS_URL });
@@ -59,6 +71,33 @@ export default function BlankPdfPage() {
   const [busy, setBusy] = useState<"ai" | "export" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const detect = useApiMutation(api.blankPdf.detect);
+  const images = useApiQuery(api.blankPdf.images) as SavedImage[] | undefined;
+  const addImage = useApiMutation(api.blankPdf.addImage);
+  const removeImage = useApiMutation(api.blankPdf.removeImage);
+  const [imgOpen, setImgOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const imgMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!imgOpen) return;
+    const close = (e: PointerEvent) => {
+      if (!imgMenuRef.current?.contains(e.target as Node)) setImgOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [imgOpen]);
+
+  const uploadImages = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      for (const f of Array.from(files)) await addImage(await fileToSavedImage(f));
+    } catch (e) {
+      setMessage(`画像の保存に失敗しました: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Live edits (drag, typing) skip history; commit and snapshot record one undo step.
   const setAnns = useCallback((next: Updater) => setEd((d) => ({ ...d, anns: apply(next, d.anns) })), []);
@@ -165,7 +204,7 @@ export default function BlankPdfPage() {
     if (!pdf) return;
     setBusy("export");
     try {
-      const bytes = await exportPdf(pdf.doc, anns.filter((a) => a.kind === "box" || a.text?.trim()));
+      const bytes = await exportPdf(pdf.doc, anns.filter((a) => a.kind !== "text" || a.text?.trim()));
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/pdf" }));
       const link = document.createElement("a");
       link.href = url;
@@ -285,6 +324,54 @@ export default function BlankPdfPage() {
                   </button>
                 ))}
               </div>
+              <div ref={imgMenuRef} className="relative">
+                <button
+                  onClick={() => setImgOpen((o) => !o)}
+                  aria-expanded={imgOpen}
+                  className="flex h-9 items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 hover:bg-black/5"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  画像
+                  <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                </button>
+                {imgOpen && (
+                  <div className="absolute left-0 top-full z-20 mt-1 w-80 rounded-xl border border-[var(--border-subtle)] bg-white p-3 shadow-lg">
+                    <p className="mb-2 text-[12px] text-[var(--text-muted)]">ページへドラッグして配置</p>
+                    {images === undefined ? (
+                      <Loader2 className="mx-auto my-4 h-5 w-5 animate-spin text-[var(--text-muted)]" />
+                    ) : images.length === 0 ? (
+                      <p className="py-4 text-center text-[var(--text-muted)]">保存済みの画像はありません</p>
+                    ) : (
+                      <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto">
+                        {images.map((img) => (
+                          <div key={img._id} className="group relative">
+                            <img
+                              src={img.src} alt={img.name} title={img.name} draggable
+                              onDragStart={(e) => { e.dataTransfer.setData(IMAGE_MIME, img._id); e.dataTransfer.effectAllowed = "copy"; }}
+                              className="h-20 w-full cursor-grab rounded-md border border-[var(--border-subtle)] bg-[#f7f6f3] object-contain p-1"
+                            />
+                            <button
+                              aria-label={`${img.name}を削除`}
+                              onClick={() => { if (window.confirm(`「${img.name}」を削除しますか？`)) void removeImage({ id: img._id }); }}
+                              className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <label className={`mt-3 flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--border-subtle)] hover:bg-black/5 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {uploading ? "アップロード中..." : "画像をアップロード"}
+                      <input
+                        type="file" multiple hidden accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                        onChange={(e) => { void uploadImages(e.target.files); e.target.value = ""; }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
               <Divider />
               <span className="text-[var(--text-muted)]">塗り</span>
               {["#000000", "#ffffff"].map((c) => (
@@ -372,13 +459,49 @@ export default function BlankPdfPage() {
                   commit((prev) => [...prev, { ...a, color: c, fontSize: fontPt / widthPt, ...(a.kind === "text" && { font }) }]);
                   setSelectedId(a.id);
                   if (a.kind === "text") setEditingId(a.id);
+                  setTool("select");
                 }}
                 onDragStart={snapshot}
                 patch={patch}
                 onRemove={(id) => setAnns((prev) => prev.filter((a) => a.id !== id))}
+                onMenu={setMenu}
+                onDropImage={(imageId, x, y, pageAspect) => {
+                  const img = images?.find((m) => m._id === imageId);
+                  if (!img) return;
+                  const w = IMAGE_WIDTH, h = (IMAGE_WIDTH * img.h) / img.w / pageAspect;
+                  const id = newId();
+                  commit((prev) => [...prev, { id, pageIndex: i, kind: "image", src: img.src, label: img.name, x: x - w / 2, y: y - h / 2, w, h, color: "" }]);
+                  setSelectedId(id);
+                  setTool("select");
+                  setImgOpen(false);
+                }}
               />
             ))}
           </div>
+
+          {/* Portal: a transformed ancestor would make "fixed" relative to it instead of the viewport. */}
+          {menu && createPortal(
+            // Backdrop closes the menu on any click, including another right-click.
+            <div className="fixed inset-0 z-50" onPointerDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+              <div
+                role="menu"
+                className="fixed min-w-40 rounded-lg border border-[var(--border-subtle)] bg-white py-1 text-[13.5px] shadow-lg"
+                style={{ left: menu.x, top: menu.y }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {LAYER_ITEMS.map(({ to, label }) => (
+                  <button
+                    key={to} role="menuitem"
+                    className="block w-full px-3 py-1.5 text-left hover:bg-black/5"
+                    onClick={() => { commit((prev) => restack(prev, menu.id, to)); setMenu(null); }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>,
+            document.body,
+          )}
         </>
       )}
     </div>
@@ -415,8 +538,11 @@ function PageView(props: {
   onDragStart: () => void;
   patch: (id: string, p: Partial<Annotation>) => void;
   onRemove: (id: string) => void;
+  onMenu: (m: { id: string; x: number; y: number }) => void;
+  /** pageAspect is height / width, to keep the image's proportions in page fractions. */
+  onDropImage: (imageId: string, x: number, y: number, pageAspect: number) => void;
 }) {
-  const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove } = props;
+  const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove, onMenu, onDropImage } = props;
   const canvasBoxRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -435,7 +561,7 @@ function PageView(props: {
     return () => { cancelled = true; };
   }, [doc, pageIndex, zoom]);
 
-  const point = (e: React.PointerEvent) => {
+  const point = (e: { clientX: number; clientY: number }) => {
     const r = overlayRef.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
   };
@@ -468,6 +594,14 @@ function PageView(props: {
     const dx = p.x - d.startX, dy = p.y - d.startY;
     if (d.mode === "move") {
       patch(d.id, { x: d.orig.x + dx, y: d.orig.y + dy });
+    } else if (d.orig.kind === "image" && d.mode.length === 2) {
+      // Corner drag on an image keeps proportions: the opposite corner stays put.
+      const { x, y, w, h } = d.orig;
+      const m = d.mode;
+      const ax = m.includes("w") ? x + w : x, ay = m.includes("n") ? y + h : y;
+      const px = (m.includes("w") ? x : x + w) + dx, py = (m.includes("n") ? y : y + h) + dy;
+      const nw = Math.max(Math.abs(px - ax), (Math.abs(py - ay) * w) / h), nh = (nw * h) / w;
+      patch(d.id, { x: m.includes("w") ? ax - nw : ax, y: m.includes("n") ? ay - nh : ay, w: nw, h: nh });
     } else {
       // min/abs lets an edge dragged past its opposite flip the box instead of giving negative sizes.
       const { x, y, w, h } = d.orig;
@@ -494,14 +628,36 @@ function PageView(props: {
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes(IMAGE_MIME)) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          const imageId = e.dataTransfer.getData(IMAGE_MIME);
+          if (!imageId) return;
+          e.preventDefault();
+          const r = overlayRef.current!.getBoundingClientRect();
+          const p = point(e);
+          onDropImage(imageId, p.x, p.y, r.height / r.width);
+        }}
       >
         {anns.map((a) => {
           const isSel = a.id === selectedId;
           const ring = isSel ? "outline outline-2 outline-[var(--brand)]" : "outline outline-1 outline-dashed outline-sky-400/70";
           const common = {
             title: a.label,
+            onContextMenu: (e: React.MouseEvent) => {
+              if (a.id === editingId) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect(a.id);
+              onMenu({ id: a.id, x: e.clientX, y: e.clientY });
+            },
             onPointerDown: (e: React.PointerEvent) => {
               if (a.id === editingId) return e.stopPropagation();
+              // Right-click opens the layer menu via onContextMenu; no drag.
+              if (e.button === 2) return e.stopPropagation();
+              // With a drawing tool, a click on a box or image falls through so text/boxes can be placed on top of it.
+              if (tool !== "select" && a.kind !== "text") return;
               const now = Date.now();
               const isDouble = a.kind === "text" && lastDown.current.id === a.id && now - lastDown.current.t < 400;
               lastDown.current = { id: a.id, t: now };
@@ -513,13 +669,15 @@ function PageView(props: {
               startDrag(e, a, "move");
             },
           };
-          if (a.kind === "box") {
+          if (a.kind !== "text") {
+            const fill = a.kind === "image" ? {} : a.outline ? { border: `${OUTLINE_WIDTH * 100}cqw solid ${a.color}` } : { background: a.color };
             return (
               <div
                 key={a.id} {...common}
                 className={`absolute cursor-move ${ring}`}
-                style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%`, ...(a.outline ? { border: `${OUTLINE_WIDTH * 100}cqw solid ${a.color}` } : { background: a.color }) }}
+                style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%`, ...fill }}
               >
+                {a.kind === "image" && <img src={a.src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none" />}
                 {isSel && HANDLES.map(({ c, cls }) => (
                   <div
                     key={c}
@@ -547,14 +705,28 @@ function PageView(props: {
               // Saved per keystroke: leaving edit mode can unmount this element before blur fires.
               onInput={(e) => patch(a.id, { text: e.currentTarget.innerText.replace(/\n$/, "") })}
               onBlur={() => onEdit(null)}
-              className={`absolute min-w-[1em] whitespace-pre ${editing ? "cursor-text" : "cursor-move"} ${ring}`}
+              className={`absolute min-w-[1em] ${editing ? "cursor-text" : "cursor-move"} ${ring}`}
               style={{
                 left: `${a.x * 100}%`, top: `${a.y * 100}%`, color: a.color,
+                // A width is set once a side handle is dragged; then it wraps per character like the export (wrapLines).
+                ...(a.w > 0 ? { width: `${a.w * 100}%`, whiteSpace: "pre-wrap", wordBreak: "break-all" } : { whiteSpace: "pre" }),
                 fontSize: `${(a.fontSize ?? 0.015) * 100}cqw`, lineHeight: LINE_HEIGHT,
                 fontFamily: fontCss(a.font), fontWeight: a.bold ? 700 : 400,
               }}
             >
               {editing ? null : a.text}
+              {isSel && !editing && TEXT_HANDLES.map(({ c, cls }) => (
+                <div
+                  key={c}
+                  contentEditable={false}
+                  className={`absolute h-3 w-3 rounded-sm border border-white bg-[var(--brand)] ${cls}`}
+                  onPointerDown={(e) => {
+                    // Auto-width text has w = 0, so resizing starts from its rendered width.
+                    const w = a.w || e.currentTarget.parentElement!.offsetWidth / overlayRef.current!.offsetWidth;
+                    startDrag(e, { ...a, w }, c);
+                  }}
+                />
+              ))}
             </div>
           );
         })}

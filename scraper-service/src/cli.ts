@@ -400,6 +400,15 @@ async function main(): Promise<number> {
     }
     logger.info(`掲載日 backfill only: ${filled} listing(s) updated`);
     if (finalize) await autoEvaluate();
+    // Scheduled sweeps only, after scoring so the PDF shows AI scores; sendDailyDigests skips users already sent today.
+    if (finalize && process.env.SCRAPE_EVENT === "schedule") {
+      try {
+        const { sendDailyDigests } = await import("./jobs/dailyDigest");
+        logger.info(`新着物件レポート: ${await sendDailyDigests()} email(s) sent`);
+      } catch (err) {
+        logger.warn(`新着物件レポート failed: ${(err as Error).message}`);
+      }
+    }
     return 0;
   }
 

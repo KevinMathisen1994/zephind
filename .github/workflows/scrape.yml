@@ -133,4 +133,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Daily 新着物件レポート email (schedule runs only).
+          SCRAPE_EVENT: ${{ github.event_name }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_FROM_EMAIL: ${{ secrets.ALERT_FROM_EMAIL }}
+          APP_URL: ${{ secrets.APP_URL }}
         run: npm run scrape:cron -- --finalize
