@@ -1497,7 +1497,26 @@ export default function OrdersPage() {
     };
   }, [getRecentRuns]);
 
-  const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
+  // The open property lives only in the URL (?listing=<listingId>): bookmarkable, links open it, back closes it.
+  const listingParam = searchParams.get("listing");
+  const expandedMatch = listingParam
+    ? (matches?.find((m) => m.listingId === listingParam)?._id ?? null)
+    : null;
+  const setExpandedMatch = (matchId: string | null) => {
+    const listingId = matchId ? matches?.find((m) => m._id === matchId)?.listingId : undefined;
+    const next = new URLSearchParams(searchParams);
+    next.delete("focusListing");
+    if (listingId) {
+      next.set("listing", listingId);
+      // Opening from the list pushes, so the back button closes it; switching listings replaces.
+      setSearchParams(next, listingParam ? { replace: true, state: location.state } : { state: { listingOpened: true } });
+    } else if ((location.state as { listingOpened?: boolean } | null)?.listingOpened) {
+      navigate(-1);
+    } else {
+      next.delete("listing");
+      setSearchParams(next, { replace: true });
+    }
+  };
   const [closingMatchId, setClosingMatchId] = useState<string | null>(null);
   // AI reports stay collapsed until asked for.
   const [openReports, setOpenReports] = useState<Set<string>>(new Set());
@@ -1614,7 +1633,7 @@ export default function OrdersPage() {
     const target = matches?.find((m) => m.listingId === focusParam);
     if (!matches) return;
     if (target) {
-      setExpandedMatch(target._id);
+      // Shows the row's page so the opened property can render; the URL change below opens it.
       setFocusListingId(focusParam);
       setListFilter((prev) => ({ ...prev, [routeOrderId]: "all" }));
       setTimeout(() => {
@@ -1624,21 +1643,6 @@ export default function OrdersPage() {
         const fp = focusPageRef.current;
         if (fp) setCurrentPage((prev) => ({ ...prev, [fp.orderId]: fp.page }));
         setFocusListingId(null);
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add(
-          "ring-4",
-          "ring-emerald-500",
-          "scale-[1.01]",
-          "shadow-lg",
-        );
-        setTimeout(() => {
-          el.classList.remove(
-            "ring-4",
-            "ring-emerald-500",
-            "scale-[1.01]",
-            "shadow-lg",
-          );
-        }, 2500);
       }, 400);
     }
     // focusListing is a one-shot jump; the open property stays in the URL as ?listing=.
@@ -1648,44 +1652,7 @@ export default function OrdersPage() {
     setSearchParams(next, { replace: true });
   }, [focusParam, focusMatches, matches, routeOrderId]);
 
-  // The open property lives in the URL (?listing=<listingId>) so it can be bookmarked and the back button closes it.
-  const listingParam = searchParams.get("listing");
-  const expandedListingId = expandedMatch
-    ? (matches?.find((m) => m._id === expandedMatch)?.listingId ?? null)
-    : null;
-  // State -> URL: opening pushes a history entry, closing pops it (or drops the param when the page was opened by link).
-  const prevExpandedListingId = useRef(expandedListingId);
-  useEffect(() => {
-    // Only react to the user opening/closing; on first load the URL is the source of truth.
-    if (prevExpandedListingId.current === expandedListingId) return;
-    prevExpandedListingId.current = expandedListingId;
-    const current = searchParams.get("listing");
-    if (expandedListingId === current) return;
-    const next = new URLSearchParams(searchParams);
-    if (expandedListingId) {
-      next.set("listing", expandedListingId);
-      setSearchParams(next, current ? { replace: true } : { state: { listingOpened: true } });
-    } else if ((location.state as { listingOpened?: boolean } | null)?.listingOpened) {
-      navigate(-1);
-    } else {
-      next.delete("listing");
-      setSearchParams(next, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedListingId]);
-  // URL -> state: back/forward and direct links. Opening goes through the focusListing jump so the row's page is shown.
-  useEffect(() => {
-    if (listingParam === expandedListingId) return;
-    if (!listingParam) {
-      handleCloseExpanded();
-      return;
-    }
-    const next = new URLSearchParams(searchParams);
-    next.delete("listing");
-    next.set("focusListing", listingParam);
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listingParam]);
+
 
   // Properties ticked in the results list, carried into the proposal modal so
   // the same list is not presented twice.
@@ -4771,7 +4738,7 @@ export default function OrdersPage() {
                       {/* Matched Listings Drawer */}
                       {isCardExpanded && (
                         <CardContent className="p-0 md:p-0 pt-6 md:pt-6 px-5 md:px-6 space-y-2">
-                          {matchCount > 0 && orderMatchList ? (
+                          {matchCount > 0 && orderMatchList && listings !== undefined ? (
                             <>
                               {/* Same white filter card as the order overview: chips on top, search + sort below. */}
                               <div className="mb-1 space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-white p-4 shadow-2xs">
@@ -5064,9 +5031,11 @@ export default function OrdersPage() {
                                       );
                                   }
                                 }
-                                const focusIdx = focusListingId
+                                // An open property (?listing=) must be on the shown page, or its row cannot render it.
+                                const pinnedListing = focusListingId ?? listingParam;
+                                const focusIdx = pinnedListing
                                   ? sortedMatches.findIndex(
-                                      (m) => m.listingId === focusListingId,
+                                      (m) => m.listingId === pinnedListing,
                                     )
                                   : -1;
                                 const page =
@@ -7171,6 +7140,12 @@ export default function OrdersPage() {
                                 );
                               })()}
                             </>
+                          ) : orderMatchList === undefined || (matchCount > 0 && listings === undefined) ? (
+                            // Big orders load thousands of rows; without this the empty-state text showed while loading.
+                            <div className="flex items-center justify-center gap-2 py-12 text-[14px] font-medium text-[var(--text-muted)]">
+                              <Loader2 className="h-5 w-5 animate-spin text-emerald-700" />
+                              物件を読み込み中…
+                            </div>
                           ) : (
                             <div className="py-8 text-center text-xs text-[var(--text-muted)] font-medium">
                               マッチする物件はまだありません。「手動検索」を実行して最新物件を取得してください。
