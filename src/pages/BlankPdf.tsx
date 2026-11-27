@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, FileText, FileUp, FolderOpen, Loader2, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2 } from "lucide-react";
+import { Download, FileText, FileUp, FolderOpen, Loader2, Minus, MousePointer2, Plus, Redo2, Sparkles, Square, SquareDashed, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useApiMutation } from "../hooks/useApi";
 import { api } from "../lib/api";
@@ -12,15 +12,19 @@ import { mergeNearby } from "../lib/mergeBoxes";
 type Tool = "select" | "box" | "outline" | "text";
 interface LoadedPdf { name: string; doc: PdfDoc; widths: number[] }
 // `recorded` is set once the undo snapshot for this drag exists, so a plain click adds no history.
-// Resize modes name the corner being dragged; the opposite corner stays fixed.
-interface Drag { id: string; mode: "move" | Corner; startX: number; startY: number; orig: Annotation; recorded: boolean }
+// Resize modes name the edges being dragged (n/s/e/w, two for a corner); the others stay fixed.
+interface Drag { id: string; mode: "move" | Handle; startX: number; startY: number; orig: Annotation; recorded: boolean }
 
-type Corner = "nw" | "ne" | "sw" | "se";
-const CORNERS: { c: Corner; cls: string }[] = [
+type Handle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
+const HANDLES: { c: Handle; cls: string }[] = [
   { c: "nw", cls: "-left-1.5 -top-1.5 cursor-nwse-resize" },
   { c: "ne", cls: "-right-1.5 -top-1.5 cursor-nesw-resize" },
   { c: "sw", cls: "-bottom-1.5 -left-1.5 cursor-nesw-resize" },
   { c: "se", cls: "-bottom-1.5 -right-1.5 cursor-nwse-resize" },
+  { c: "n", cls: "left-1/2 -top-1.5 -translate-x-1/2 cursor-ns-resize" },
+  { c: "s", cls: "left-1/2 -bottom-1.5 -translate-x-1/2 cursor-ns-resize" },
+  { c: "w", cls: "top-1/2 -left-1.5 -translate-y-1/2 cursor-ew-resize" },
+  { c: "e", cls: "top-1/2 -right-1.5 -translate-y-1/2 cursor-ew-resize" },
 ];
 const TOOLS = [
   { t: "select", Icon: MousePointer2, label: "選択", key: "V" },
@@ -31,6 +35,7 @@ const TOOLS = [
 type Updater = Annotation[] | ((prev: Annotation[]) => Annotation[]);
 const apply = (next: Updater, prev: Annotation[]) => (typeof next === "function" ? next(prev) : next);
 const LEAVE_MESSAGE = "編集内容は保存されていません。破棄してもよろしいですか？";
+const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const newId = () => crypto.randomUUID();
 const AI_PAD = 0.004;
 
@@ -42,6 +47,7 @@ export default function BlankPdfPage() {
   const [color, setColor] = useState("#ffffff");
   const [fontPt, setFontPt] = useState(12);
   const [font, setFont] = useState<string>(FONTS[0].id);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: FONTS_CSS_URL });
@@ -316,6 +322,10 @@ export default function BlankPdfPage() {
                 </button>
               )}
               <div className="ml-auto flex items-center gap-1">
+                <IconButton label="縮小" onClick={() => setZoom((z) => Math.max(ZOOMS[0], ZOOMS.findLast((x) => x < z) ?? z))} disabled={zoom <= ZOOMS[0]}><ZoomOut className="h-4 w-4" /></IconButton>
+                <button onClick={() => setZoom(1)} title="100%に戻す" className="h-9 w-12 rounded-lg text-center tabular-nums hover:bg-black/5">{Math.round(zoom * 100)}%</button>
+                <IconButton label="拡大" onClick={() => setZoom((z) => ZOOMS.find((x) => x > z) ?? z)} disabled={zoom >= ZOOMS[ZOOMS.length - 1]}><ZoomIn className="h-4 w-4" /></IconButton>
+                <Divider />
                 <IconButton label="元に戻す (Ctrl+Z)" onClick={undo} disabled={!canUndo}><Undo2 className="h-4 w-4" /></IconButton>
                 <IconButton label="やり直す (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}><Redo2 className="h-4 w-4" /></IconButton>
                 <Divider />
@@ -331,11 +341,13 @@ export default function BlankPdfPage() {
 
           {message && <p className="text-[13.5px] text-[var(--text-muted)]">{message}</p>}
 
-          <div className="flex flex-col items-center gap-6 pb-10">
+          {/* Children center with mx-auto, not items-center, so a zoomed page scrolls instead of clipping its left side. */}
+          <div className="flex flex-col gap-6 overflow-x-auto pb-10">
             {pdf.widths.map((widthPt, i) => (
               <PageView
                 key={`${pdf.name}-${i}`}
                 doc={pdf.doc}
+                zoom={zoom}
                 pageIndex={i}
                 anns={anns.filter((a) => a.pageIndex === i)}
                 tool={tool}
@@ -380,6 +392,7 @@ function overlap(a: { x: number; y: number; w: number; h: number }, b: { x: numb
 
 function PageView(props: {
   doc: PdfDoc;
+  zoom: number;
   pageIndex: number;
   anns: Annotation[];
   tool: Tool;
@@ -392,7 +405,7 @@ function PageView(props: {
   patch: (id: string, p: Partial<Annotation>) => void;
   onRemove: (id: string) => void;
 }) {
-  const { doc, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove } = props;
+  const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -402,7 +415,7 @@ function PageView(props: {
   useEffect(() => {
     // Render offscreen then copy: StrictMode runs this twice, and pdf.js rejects two renders on one canvas.
     let cancelled = false;
-    void renderPage(doc, pageIndex, 2).then((src) => {
+    void renderPage(doc, pageIndex, Math.min(6, 2 * zoom)).then((src) => {
       const dst = canvasRef.current;
       if (cancelled || !dst) return;
       dst.width = src.width;
@@ -410,7 +423,7 @@ function PageView(props: {
       dst.getContext("2d")!.drawImage(src, 0, 0);
     });
     return () => { cancelled = true; };
-  }, [doc, pageIndex]);
+  }, [doc, pageIndex, zoom]);
 
   const point = (e: React.PointerEvent) => {
     const r = overlayRef.current!.getBoundingClientRect();
@@ -446,12 +459,12 @@ function PageView(props: {
     if (d.mode === "move") {
       patch(d.id, { x: d.orig.x + dx, y: d.orig.y + dy });
     } else {
-      // min/abs lets a corner dragged past the anchor flip the box instead of giving negative sizes.
+      // min/abs lets an edge dragged past its opposite flip the box instead of giving negative sizes.
       const { x, y, w, h } = d.orig;
-      const west = d.mode[1] === "w", north = d.mode[0] === "n";
-      const ax = west ? x + w : x, ay = north ? y + h : y;
-      const mx = (west ? x : x + w) + dx, my = (north ? y : y + h) + dy;
-      patch(d.id, { x: Math.min(ax, mx), y: Math.min(ay, my), w: Math.abs(mx - ax), h: Math.abs(my - ay) });
+      const m = d.mode;
+      const x1 = x + (m.includes("w") ? dx : 0), x2 = x + w + (m.includes("e") ? dx : 0);
+      const y1 = y + (m.includes("n") ? dy : 0), y2 = y + h + (m.includes("s") ? dy : 0);
+      patch(d.id, { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) });
     }
   };
 
@@ -463,7 +476,7 @@ function PageView(props: {
   };
 
   return (
-    <div className="relative w-full max-w-[1000px] shadow-md" style={{ containerType: "inline-size" }}>
+    <div className="relative mx-auto shrink-0 shadow-md" style={{ containerType: "inline-size", width: `calc(min(100%, 1000px) * ${zoom})` }}>
       <canvas ref={canvasRef} className="block h-auto w-full bg-white" />
       <div
         ref={overlayRef}
@@ -497,7 +510,7 @@ function PageView(props: {
                 className={`absolute cursor-move ${ring}`}
                 style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%`, ...(a.outline ? { border: `${OUTLINE_WIDTH * 100}cqw solid ${a.color}` } : { background: a.color }) }}
               >
-                {isSel && CORNERS.map(({ c, cls }) => (
+                {isSel && HANDLES.map(({ c, cls }) => (
                   <div
                     key={c}
                     className={`absolute h-3 w-3 rounded-sm border border-white bg-[var(--brand)] ${cls}`}
