@@ -6,7 +6,7 @@ import { Router } from "express";
 import { db } from "../db";
 import { requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
-import { PROVIDER_LABELS, cleanList, ingestSettingsForUser } from "../lib/mailData";
+import { PROVIDER_LABELS, cleanList, ingestSettingsForUser, savePdfTexts } from "../lib/mailData";
 import {
   getAttachmentData, getEmailDetailsForListing, inspectRecentMail, startOAuth, storedMailDetail, syncNow,
 } from "../services/mailIngest";
@@ -146,6 +146,18 @@ mailRouter.post("/inspect/detail", route(async (req) => {
   const { provider, messageId } = req.body ?? {};
   if (!provider || !messageId) throw new Error("provider and messageId are required");
   return storedMailDetail(userId, String(provider), String(messageId));
+}));
+
+mailRouter.post("/inspect/pdf-texts", route(async (req) => {
+  const userId = requireUserId(req);
+  const { provider, messageId, pdfTexts } = req.body ?? {};
+  if (!provider || !messageId) throw new Error("provider and messageId are required");
+  // Client-supplied, so bounded like the sync's own storage: up to 3 PDFs, 20k chars each.
+  if (!Array.isArray(pdfTexts) || pdfTexts.length > 3 || pdfTexts.some((t) => typeof t !== "string")) {
+    throw new Error("pdfTexts must be an array of up to 3 strings");
+  }
+  await savePdfTexts(userId, String(provider), String(messageId), pdfTexts.map((t: string) => t.slice(0, 20000)));
+  return { ok: true };
 }));
 
 mailRouter.post("/attachment", route(async (req) => {

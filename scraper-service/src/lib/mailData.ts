@@ -89,7 +89,8 @@ export async function saveRefreshedToken(
   id: string,
   fields: { accessToken: string; refreshToken: string; expiresAt: number },
 ) {
-  await db.patch("mailAccounts", id, fields);
+  // A refresh that works proves the connection is fine, so it clears an earlier failure's flag.
+  await db.patch("mailAccounts", id, { ...fields, needsReconnect: false, lastError: null });
 }
 
 export async function saveSyncCursor(id: string, syncCursor: string | undefined, lastSyncedAt: number) {
@@ -245,33 +246,37 @@ export async function saveEmailListing(args: {
     }
   }
 
-  if (!existing) {
-    void scoreListingsBatch({ listingIds: [listingId] })
-      .then(async (summary) => {
-        const hit = summary.results[0];
-        if (!hit || hit.result.score < 60) return;
-        const l = hit.listing;
-        await dispatchHotMatchAlerts([
-          {
-            userId: args.userId,
-            listingId,
-            title: l.title || l.address || args.emailSubject,
-            address: l.address,
-            price: l.price,
-            yield: l.yield,
-            score: hit.result.score,
-            ward: l.ward,
-            station: l.station,
-            walkMinutes: l.walkMinutes,
-            source: "メール直接紹介",
-            orderName: hit.result.signals.map((s) => s.reason).slice(0, 2).join(" / ") || "業者メール速報",
-          },
-        ]);
-      })
-      .catch(() => {});
-  }
+  return { listingId, matchesCreated, created: !existing };
+}
 
-  return { listingId, matchesCreated };
+/**
+ * Scores a message's new listings in one batch and alerts on hot ones. One call per message, not per listing:
+ * each cold-cache call scans every listing, and 27 concurrent ones blew the edge worker's CPU limit.
+ */
+export function scoreNewEmailListings(userId: string, listingIds: string[], emailSubject?: string) {
+  if (listingIds.length === 0) return;
+  void scoreListingsBatch({ listingIds })
+    .then(async (summary) => {
+      const hot = summary.results.filter((hit) => hit.result.score >= 60);
+      if (hot.length === 0) return;
+      await dispatchHotMatchAlerts(
+        hot.map(({ listing: l, result }) => ({
+          userId,
+          listingId: l._id,
+          title: l.title || l.address || emailSubject,
+          address: l.address,
+          price: l.price,
+          yield: l.yield,
+          score: result.score,
+          ward: l.ward,
+          station: l.station,
+          walkMinutes: l.walkMinutes,
+          source: "メール直接紹介",
+          orderName: result.signals.map((s) => s.reason).slice(0, 2).join(" / ") || "業者メール速報",
+        })),
+      );
+    })
+    .catch(() => {});
 }
 
 /**
@@ -303,6 +308,7 @@ export interface StoredMail {
   from?: string;
   receivedAt?: number;
   bodyText?: string;
+  bodyHtml?: string | null;
   attachments?: EmailAttachment[];
   pdfTexts?: string[];
   verdict: "listings" | "none" | "filtered";
@@ -311,11 +317,41 @@ export interface StoredMail {
   listings?: any[];
 }
 
+/** Postgres text/jsonb reject NUL, which pdf-parse output often contains. Keeps an escaped "\\u0000" literal intact. */
+export function stripNul<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value).replace(/(?<!\\)((?:\\\\)*)\\u0000/g, "$1"));
+}
+
 export async function markMessageProcessed(provider: string, messageId: string, userId: string, mail: StoredMail) {
   const { error } = await db.raw
     .from("mailProcessed")
-    .upsert({ provider, messageId, userId, processedAt: Date.now(), ...mail });
+    .upsert(stripNul({ provider, messageId, userId, processedAt: Date.now(), ...mail }));
   if (error) throw new Error(`markMessageProcessed: ${error.message}`);
+}
+
+/** PDF text the inspector read in the browser; only fills rows that have none, scoped to the caller's own row. */
+export async function savePdfTexts(userId: string, provider: string, messageId: string, pdfTexts: string[]) {
+  const { error } = await db.raw
+    .from("mailProcessed")
+    .update(stripNul({ pdfTexts }))
+    .eq("userId", userId)
+    .eq("provider", provider)
+    .eq("messageId", messageId)
+    .or("pdfTexts.is.null,pdfTexts.eq.{}");
+  if (error) throw new Error(`savePdfTexts: ${error.message}`);
+}
+
+/** Body fetched later for a row stored before HTML bodies were read. */
+export async function saveMailBody(
+  userId: string, provider: string, messageId: string, body: { bodyText: string; bodyHtml: string },
+) {
+  const { error } = await db.raw
+    .from("mailProcessed")
+    .update(stripNul(body))
+    .eq("userId", userId)
+    .eq("provider", provider)
+    .eq("messageId", messageId);
+  if (error) throw new Error(`saveMailBody: ${error.message}`);
 }
 
 const MAIL_LIST_COLUMNS =
@@ -338,7 +374,7 @@ export async function listStoredMail(userId: string, opts: { limit: number; offs
 export async function getStoredMail(userId: string, provider: string, messageId: string) {
   const { data, error } = await db.raw
     .from("mailProcessed")
-    .select("bodyText, pdfTexts")
+    .select("bodyText, bodyHtml, pdfTexts")
     .eq("userId", userId)
     .eq("provider", provider)
     .eq("messageId", messageId)

@@ -11,6 +11,10 @@ import {
   SKIP,
 } from "../hooks/useApi";
 import { api } from "../lib/api";
+import { runMailSync } from "../lib/mailSync";
+import { base64ToBytes, openAttachmentBytes } from "../lib/mailPdf";
+import { MailRulesModal } from "../components/MailRulesModal";
+import { EmailHtmlFrame } from "../components/EmailHtmlFrame";
 import {
   Card,
   CardContent,
@@ -36,7 +40,6 @@ import {
   X,
   MapPin,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Loader2,
   Building2,
@@ -150,31 +153,6 @@ const LOCAL_SCRAPER_URL =
 
 /** Where a scrape actually executes. */
 type ScrapeRunner = "github" | "local";
-
-/** One row from mailIngest.inspectRecentMail (temporary diagnostic). */
-type InspectedMail = {
-  provider: string;
-  id: string;
-  subject?: string;
-  from?: string;
-  receivedAt?: number;
-  bodyText?: string;
-  attachments?: {
-    id?: string;
-    filename: string;
-    mimeType: string;
-    size: number;
-  }[];
-  pdfTexts?: string[];
-  listings?: Record<string, unknown>[];
-  needsLlm?: boolean;
-  reason?: string;
-  filtered?: boolean;
-  filterReason?: string | null;
-  error?: string;
-  /** Which path produced `listings`. Absent unless the AI pass was run. */
-  engine?: "rules" | "gemini" | "groq" | "none" | "stored";
-};
 
 // Mirrors the comp shape built in convex/evaluate.js (MLIT XIT001 fields,
 // normalized). Kept loose (`scoreDetail` is stored as `v.any()`) since it's
@@ -828,7 +806,6 @@ function EmailListingDetails({
     return null;
   });
   const [loading, setLoading] = useState(false);
-  const [showBody, setShowBody] = useState(false);
 
   useEffect(() => {
     if (
@@ -858,58 +835,77 @@ function EmailListingDetails({
   const from = details?.from ?? listing?.emailFrom;
   const receivedAt = details?.receivedAt ?? listing?.emailReceivedAt;
   const attachments = details?.attachments ?? listing?.emailAttachments ?? [];
-  const bodyText = details?.bodyText ?? listing?.emailBody;
+  // The original HTML lives on the mail record (fetched from Gmail once for older mail); the listing only keeps text.
+  const mailDetail = useQuery(
+    api.mailIngest.inspectMailDetail,
+    messageId ? { provider, messageId } : SKIP,
+  ) as { bodyText?: string; bodyHtml?: string } | undefined;
+  const bodyHtml = mailDetail?.bodyHtml;
+  const bodyText = mailDetail?.bodyText || details?.bodyText || listing?.emailBody;
+
+  const formatSize = (bytes?: number) =>
+    !bytes ? "" : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
   return (
-    <div className="rounded-xl border border-amber-200/90 bg-amber-50/40 p-3.5 space-y-3">
-      {/* Top row: badge + sender + date */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="rounded-3xl border border-[var(--border-subtle)] bg-white p-6 space-y-5 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-bold text-xs shadow-2xs">
-            <Mail className="w-3.5 h-3.5 text-amber-700" />
-            メール連携物件
+          <span className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] font-bold text-[14px]">
+            <Mail className="w-4 h-4" />
+            メール詳細
           </span>
           {loading && (
-            <span className="inline-flex items-center gap-1 text-[14px] font-medium text-amber-800">
-              <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
-              詳細読込中...
+            <span className="inline-flex items-center gap-1 text-[13px] text-[var(--text-muted)]">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              読込中…
             </span>
           )}
         </div>
         {receivedAt && (
-          <span className="text-[14px] font-medium text-amber-900/80">
+          <span className="text-[14px] font-medium text-[var(--text-muted)]">
             受信日時: {formatJaDateTime(receivedAt)}
           </span>
         )}
       </div>
 
-      {/* From and Subject */}
-      <div className="space-y-1.5 text-xs bg-white/70 rounded-lg p-2.5 border border-amber-100">
-        {from && (
-          <div className="flex items-start gap-2">
-            <span className="font-bold text-amber-900 shrink-0">送信元:</span>
-            <span className="text-slate-800 font-medium break-all">{from}</span>
-          </div>
+      <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] p-5">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-2 text-[14px]">
+          {from && (
+            <>
+              <dt className="font-bold text-[var(--text-muted)]">送信元</dt>
+              <dd className="text-[var(--text-primary)] break-all">{from}</dd>
+            </>
+          )}
+          <dt className="font-bold text-[var(--text-muted)]">件名</dt>
+          <dd className="font-bold text-[var(--text-primary)] break-words">
+            {subject || (loading ? "読込中…" : "(件名なし)")}
+          </dd>
+        </dl>
+        {(bodyHtml || bodyText) && (
+          <>
+            <hr className="my-4 border-[var(--border-subtle)]" />
+            {bodyHtml ? (
+              <EmailHtmlFrame html={bodyHtml} />
+            ) : (
+              // pre-wrap keeps a plain-text mail's own line breaks and spacing.
+              <div className="text-[14px] leading-[1.9] whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--text-secondary)] max-h-[520px] overflow-y-auto">
+                {bodyText}
+              </div>
+            )}
+          </>
         )}
-        <div className="flex items-start gap-2">
-          <span className="font-bold text-amber-900 shrink-0">件名:</span>
-          <span className="text-slate-900 font-bold break-all">
-            {subject || (loading ? "読込中..." : "(件名なし)")}
-          </span>
-        </div>
       </div>
 
-      {/* Attachments Section */}
       {attachments.length > 0 ? (
-        <div className="space-y-1.5">
-          <div className="text-[14px] font-bold text-amber-900 flex items-center gap-1">
-            <Paperclip className="w-3.5 h-3.5 text-amber-700" />
-            添付ファイル ({attachments.length}件)
-            <span className="text-[13.5px] font-normal text-amber-800/70 ml-1">
-              — クリックすると別タブでプレビューが開きます
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-baseline gap-x-2 text-[14px]">
+            <span className="inline-flex items-center gap-1.5 font-bold text-[var(--text-primary)]">
+              <Paperclip className="w-4 h-4 text-[var(--text-muted)]" />
+              添付ファイル（{attachments.length}）
             </span>
+            <span className="text-[13px] text-[var(--text-muted)]">— クリックすると別タブでプレビューが開きます</span>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-3">
             {attachments.map((a: any, i: number) => {
               const isPdf =
                 a.mimeType === "application/pdf" ||
@@ -920,76 +916,36 @@ function EmailListingDetails({
                   key={a.id || i}
                   type="button"
                   disabled={isOpening || !a.id}
-                  onClick={() =>
-                    void handleOpenAttachment(provider, messageId, a)
-                  }
-                  className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-white hover:border-amber-400 hover:bg-amber-50/70 transition-all text-left shadow-2xs cursor-pointer"
-                  title={
-                    a.id
-                      ? "クリックして別タブで開く"
-                      : "添付ファイルIDがありません"
-                  }
+                  onClick={() => void handleOpenAttachment(provider, messageId, a)}
+                  title={a.id ? "クリックして別タブで開く" : "添付ファイルIDがありません"}
+                  className="group flex items-center gap-4 w-full sm:w-auto sm:min-w-[320px] max-w-full p-3.5 rounded-2xl border border-[var(--border-subtle)] bg-white hover:border-[var(--brand)] transition-colors text-left disabled:opacity-60"
                 >
-                  {isOpening ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-                  ) : isPdf ? (
-                    <div className="flex items-center justify-center px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-black text-[13.5px] shrink-0 border border-rose-200">
-                      PDF
-                    </div>
-                  ) : (
-                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-                  )}
-                  <div className="min-w-0 max-w-[220px]">
-                    <span className="block font-bold text-[14px] text-slate-800 group-hover:text-amber-900 truncate">
+                  <span className="flex items-center justify-center w-12 h-12 rounded-xl shrink-0 border border-rose-200 bg-rose-50 text-rose-700 font-bold text-[13px]">
+                    {isOpening ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : isPdf ? (
+                      "PDF"
+                    ) : (
+                      <FileText className="w-5 h-5 text-[var(--text-muted)]" />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-bold text-[14px] text-[var(--text-primary)] truncate">
                       {a.filename || "(添付ファイル)"}
                     </span>
-                    <span className="block text-[13.5px] text-slate-500">
-                      {a.size
-                        ? `${Math.round(a.size / 1024)}KB`
-                        : isPdf
-                          ? "PDF文書"
-                          : a.mimeType}
+                    <span className="block text-[13px] text-[var(--text-muted)]">
+                      {formatSize(a.size) || (isPdf ? "PDF文書" : a.mimeType)}
                     </span>
-                  </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-amber-700 opacity-60 group-hover:opacity-100 shrink-0 ml-1" />
+                  </span>
+                  <ExternalLink className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--brand)] shrink-0" />
                 </button>
               );
             })}
           </div>
         </div>
       ) : !loading ? (
-        <div className="text-[14px] text-amber-800/70">
-          ※ 添付ファイルはありません
-        </div>
+        <p className="text-[13px] text-[var(--text-muted)]">添付ファイルはありません</p>
       ) : null}
-
-      {/* Body Toggle */}
-      {bodyText && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowBody((v) => !v)}
-            className="inline-flex items-center gap-1.5 text-[14px] font-bold text-amber-900 hover:text-amber-950 hover:underline cursor-pointer"
-          >
-            {showBody ? (
-              <>
-                <ChevronUp className="w-3.5 h-3.5" />
-                メール本文を閉じる
-              </>
-            ) : (
-              <>
-                <ChevronDown className="w-3.5 h-3.5" />
-                メール本文を表示
-              </>
-            )}
-          </button>
-          {showBody && (
-            <pre className="smooth-expand mt-2 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-white/90 border border-amber-200/80 rounded-xl p-3 max-h-60 overflow-y-auto text-slate-700 font-sans shadow-inner">
-              {bodyText}
-            </pre>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1098,18 +1054,10 @@ export default function OrdersPage() {
   } | null>(null);
   const mailError = (text: string) => setMailNotice({ text, kind: "error" });
 
-  // TEMPORARY: inspector for what the mail sync actually saw. A sync only
-  // reports counts, so "物件情報は見つかりませんでした" cannot be told apart from a
-  const inspectRecentMail = useAction(api.mailIngest.inspectRecentMail);
-  const inspectMailDetail = useAction(api.mailIngest.inspectMailDetail);
   const getAttachmentData = useAction(api.mailIngest.getAttachmentData);
   const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(
     null,
   );
-  const [inspecting, setInspecting] = useState(false);
-  const [inspected, setInspected] = useState<InspectedMail[] | null>(null);
-  const [openMailId, setOpenMailId] = useState<string | null>(null);
-  const [filterMatchedOnly, setFilterMatchedOnly] = useState(true);
 
   const handleOpenAttachment = async (
     provider: string,
@@ -1138,20 +1086,12 @@ export default function OrdersPage() {
       });
 
       if (res?.base64) {
-        const byteCharacters = atob(res.base64);
-        const byteNumbers = new Uint8Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const blob = new Blob([byteNumbers], {
-          type: res.mimeType || "application/pdf",
-        });
-        const blobUrl = URL.createObjectURL(blob);
-        if (newWindow && !newWindow.closed) {
-          newWindow.location.href = blobUrl;
-        } else {
-          window.open(blobUrl, "_blank");
-        }
+        openAttachmentBytes(
+          base64ToBytes(res.base64),
+          res.mimeType || attachment.mimeType,
+          attachment.filename,
+          newWindow,
+        );
       } else {
         newWindow?.close();
         mailError("PDFデータの取得に失敗しました");
@@ -1166,59 +1106,7 @@ export default function OrdersPage() {
     }
   };
 
-  // Which incoming mail the sync bothers reading. Each rule list is edited as
-  // one word/address per line — brokers are added and removed often enough
-  // that a tag editor would be more ceremony than the job needs.
-  const ingestSettings = useQuery(api.mailIngestData.getIngestSettings);
-  const saveIngestSettings = useMutation(api.mailIngestData.saveIngestSettings);
   const [showMailRules, setShowMailRules] = useState(false);
-  const [savingMailRules, setSavingMailRules] = useState(false);
-  const [mailRules, setMailRules] = useState({
-    requiredKeywords: "",
-    blockedKeywords: "",
-    allowedSenders: "",
-    blockedSenders: "",
-    requireAttachment: false,
-  });
-
-  // Seeded from the server row, and re-seeded each time the modal opens so a
-  // cancelled edit does not linger as the next session's starting point.
-  useEffect(() => {
-    if (!showMailRules) return;
-    setMailRules({
-      requiredKeywords: (ingestSettings?.requiredKeywords ?? []).join("\n"),
-      blockedKeywords: (ingestSettings?.blockedKeywords ?? []).join("\n"),
-      allowedSenders: (ingestSettings?.allowedSenders ?? []).join("\n"),
-      blockedSenders: (ingestSettings?.blockedSenders ?? []).join("\n"),
-      requireAttachment: ingestSettings?.requireAttachment ?? false,
-    });
-  }, [showMailRules, ingestSettings]);
-
-  const handleSaveMailRules = async () => {
-    setSavingMailRules(true);
-    try {
-      const lines = (v: string) =>
-        v
-          .split("\n")
-          .map((x) => x.trim())
-          .filter(Boolean);
-      await saveIngestSettings({
-        requiredKeywords: lines(mailRules.requiredKeywords),
-        blockedKeywords: lines(mailRules.blockedKeywords),
-        allowedSenders: lines(mailRules.allowedSenders),
-        blockedSenders: lines(mailRules.blockedSenders),
-        requireAttachment: mailRules.requireAttachment,
-      });
-      setShowMailRules(false);
-      setMailNotice({ text: "取り込み設定を保存しました", kind: "ok" });
-    } catch (err) {
-      mailError(
-        `設定の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      setSavingMailRules(false);
-    }
-  };
 
   const queryClient = useQueryClient();
   const handleConnectMail = async (provider: string) => {
@@ -1294,128 +1182,14 @@ export default function OrdersPage() {
     return () => window.removeEventListener("message", onMessage);
   }, [queryClient]);
 
-  const handleInspectMail = async () => {
-    setInspecting(true);
-    try {
-      // Reads what the sync stored, so no Gmail/PDF work and no 546 risk.
-      const rows = (await inspectRecentMail({
-        limit: 500,
-        daysBack: 90,
-      })) as InspectedMail[];
-      setInspected(rows);
-      setOpenMailId(null);
-    } catch (err) {
-      mailError(
-        `メールの確認に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      setInspecting(false);
-    }
-  };
-
-  // Bodies are not in the list response; load them when a row first opens.
-  const toggleInspectedMail = async (m: InspectedMail) => {
-    if (openMailId === m.id) return setOpenMailId(null);
-    setOpenMailId(m.id);
-    if (m.bodyText !== undefined) return;
-    try {
-      const detail = (await inspectMailDetail({
-        provider: m.provider,
-        messageId: m.id,
-      })) as { bodyText: string; pdfTexts: string[] };
-      setInspected((rows) =>
-        rows?.map((r) =>
-          r.id === m.id && r.provider === m.provider ? { ...r, ...detail } : r,
-        ) ?? rows,
-      );
-    } catch (err) {
-      mailError(
-        `メール本文の取得に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  };
-
   const handleSyncMailNow = async () => {
     setSyncingMail(true);
     setMailNotice(null);
     try {
-      // Server handles a small batch per call (edge function time limit), so loop and sum per account.
-      const totals = new Map<string, any>();
-      let offset = 0;
-      for (;;) {
-        const batch = await syncMailNow({
-          fullSync: true,
-          daysBack: 90,
-          offset,
-        });
-        for (const r of batch.results) {
-          const t = totals.get(r.provider);
-          totals.set(
-            r.provider,
-            t
-              ? {
-                  ...r,
-                  error: r.error ?? t.error,
-                  synced: (t.synced ?? 0) + (r.synced ?? 0),
-                  listingsFound:
-                    (t.listingsFound ?? 0) + (r.listingsFound ?? 0),
-                  filteredOut: (t.filteredOut ?? 0) + (r.filteredOut ?? 0),
-                  alreadyProcessed:
-                    (t.alreadyProcessed ?? 0) + (r.alreadyProcessed ?? 0),
-                  messageErrors: [
-                    ...(t.messageErrors ?? []),
-                    ...(r.messageErrors ?? []),
-                  ],
-                }
-              : r,
-          );
-        }
-        if (batch.results.every((r: any) => r.done || r.error)) break;
-        offset = batch.nextOffset;
-        const total = Math.max(...batch.results.map((r: any) => r.total ?? 0));
-        setMailNotice({
-          text: `同期中… ${Math.min(offset, total)} / ${total}件`,
-          kind: "info",
-        });
-      }
-      const results = [...totals.values()];
-      // "0 listings found" and "every message failed extraction" (e.g. Rax AI
-      // down) used to look identical — surface message counts and any real
-      // errors so a stuck sync is diagnosable instead of looking like "no new
-      // mail" every time.
-      const lines = results.map((r) => {
-        if (r.error === "REAUTH_REQUIRED") {
-          return `${r.provider}: 認証切れです。再接続してください。`;
-        }
-        const parts = [`${r.provider}: メール${r.synced ?? 0}件を確認`];
-        if ((r.listingsFound ?? 0) > 0) {
-          parts.push(`${r.listingsFound}件の物件情報を抽出`);
-        }
-        if ((r.filteredOut ?? 0) > 0) {
-          parts.push(`${r.filteredOut}件を設定により除外`);
-        }
-        if ((r.alreadyProcessed ?? 0) > 0) {
-          parts.push(`${r.alreadyProcessed}件は処理済み`);
-        }
-        if ((r.messageErrors?.length ?? 0) > 0) {
-          parts.push(
-            `${r.messageErrors.length}件でエラー: ${r.messageErrors[0]}`,
-          );
-        }
-        if (
-          (r.synced ?? 0) > 0 &&
-          (r.listingsFound ?? 0) === 0 &&
-          (r.filteredOut ?? 0) === 0 &&
-          (r.messageErrors?.length ?? 0) === 0
-        ) {
-          parts.push("物件情報は見つかりませんでした");
-        }
-        return parts.join(" / ");
-      });
-      const failed = results.some(
-        (r) => r.error || (r.messageErrors?.length ?? 0) > 0,
+      const { text, failed } = await runMailSync(syncMailNow, (progress) =>
+        setMailNotice({ text: progress, kind: "info" }),
       );
-      setMailNotice({ text: lines.join("\n"), kind: failed ? "error" : "ok" });
+      setMailNotice({ text, kind: failed ? "error" : "ok" });
     } catch (err) {
       mailError(
         `同期に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
@@ -3179,20 +2953,6 @@ export default function OrdersPage() {
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
                   今すぐ取り込む
-                </Button>
-                {/* TEMPORARY diagnostic — remove once the mail parser is trusted. */}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={inspecting}
-                  onClick={() => void handleInspectMail()}
-                >
-                  {inspecting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Mail className="h-3.5 w-3.5" />
-                  )}
-                  同期メールを確認
                 </Button>
                 <Button
                   size="sm"
@@ -7042,8 +6802,8 @@ export default function OrdersPage() {
                                       );
                                     })}
 
-                                    {/* Pagination & Display Controls */}
-                                    {totalMatches > 0 && (
+                                    {/* Pagination & Display Controls: hidden when everything fits the smallest page size (10). */}
+                                    {totalMatches > 10 && (
                                       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 mt-4">
                                         <div className="text-xs font-semibold text-slate-500">
                                           全{" "}
@@ -7306,383 +7066,13 @@ export default function OrdersPage() {
       /> */}
 
       {showMailRules && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
-                  <SlidersHorizontal className="w-4 h-4" />
-                  メール取り込み設定
-                </h3>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                  どのメールを物件情報として読み取るかを決めます。1行に1つ入力してください。
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMailRules(false)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto p-5 space-y-4">
-              {[
-                {
-                  key: "requiredKeywords" as const,
-                  label: "必須ワード",
-                  hint: "件名か本文にこのいずれかを含むメールだけを読み取ります。空欄ならすべて読み取ります。",
-                  placeholder: "物件\n物件概要\n売買価格",
-                },
-                {
-                  key: "blockedKeywords" as const,
-                  label: "除外ワード",
-                  hint: "このいずれかを含むメールは読み取りません。",
-                  placeholder: "メルマガ\nセミナー\nPremium deal",
-                },
-                {
-                  key: "allowedSenders" as const,
-                  label: "許可する送信者",
-                  hint: "入力すると、この送信者からのメールだけを読み取ります。@以下だけでも指定できます。",
-                  placeholder: "@baseltd.co.jp\ninagaki@xialead.co.jp",
-                },
-                {
-                  key: "blockedSenders" as const,
-                  label: "除外する送信者",
-                  hint: "この送信者からのメールは読み取りません。",
-                  placeholder: "@marketing.going.com\nnoreply@",
-                },
-              ].map((f) => (
-                <div key={f.key}>
-                  <Label className="text-xs font-bold text-[var(--text-primary)]">
-                    {f.label}
-                  </Label>
-                  <p className="text-[14px] text-[var(--text-muted)] mt-0.5 mb-1.5">
-                    {f.hint}
-                  </p>
-                  <textarea
-                    rows={4}
-                    value={mailRules[f.key]}
-                    placeholder={f.placeholder}
-                    onChange={(e) =>
-                      setMailRules((prev) => ({
-                        ...prev,
-                        [f.key]: e.target.value,
-                      }))
-                    }
-                    className="w-full text-xs rounded-xl border border-[var(--border-subtle)] bg-white px-3 py-2 font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/30"
-                  />
-                </div>
-              ))}
-
-              <label className="flex items-start gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={mailRules.requireAttachment}
-                  onChange={(e) =>
-                    setMailRules((prev) => ({
-                      ...prev,
-                      requireAttachment: e.target.checked,
-                    }))
-                  }
-                  className="mt-0.5 w-4 h-4 accent-[var(--brand)]"
-                />
-                <span>
-                  <span className="block text-xs font-bold text-[var(--text-primary)]">
-                    添付ファイルのあるメールだけを読み取る
-                  </span>
-                  <span className="block text-[14px] text-[var(--text-muted)]">
-                    マイソクを必ず添付する会社だけを対象にしたい場合に使います。本文だけで物件を紹介するメールは除外されます。
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            <div className="p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-3">
-              <p className="text-[14px] text-[var(--text-muted)]">
-                設定の効果は「同期メールを確認」で確認できます。
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowMailRules(false)}
-                  className="h-8 px-3 text-xs font-bold rounded-lg"
-                >
-                  キャンセル
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={savingMailRules}
-                  onClick={() => void handleSaveMailRules()}
-                  className="h-8 px-3 text-xs font-bold rounded-lg gap-1.5"
-                >
-                  {savingMailRules && (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  )}
-                  保存
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <MailRulesModal
+          onClose={() => setShowMailRules(false)}
+          onSaved={() => setMailNotice({ text: "取り込み設定を保存しました", kind: "ok" })}
+          onError={mailError}
+        />
       )}
 
-      {/* TEMPORARY: mail sync inspector. Shows each recent message, what it
-          carried, and what the rule-based parser made of it. */}
-      {inspected &&
-        (() => {
-          const displayedMails = filterMatchedOnly
-            ? inspected.filter((m) => !m.filtered && !m.error)
-            : inspected;
-          const matchedCount = inspected.filter(
-            (m) => !m.filtered && !m.error,
-          ).length;
-
-          return (
-            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-md flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl shadow-ambient border border-[var(--border-subtle)] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
-                <div className="p-5 border-b border-[var(--border-subtle)] bg-[var(--bg-page-subtle)] flex items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
-                      <Mail className="w-4 h-4" />
-                      同期メールの内容（{displayedMails.length}件）
-                    </h3>
-                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      同期で取り込んだ過去3ヶ月のメールを表示
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-semibold cursor-pointer select-none bg-white px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] shadow-xs hover:border-[var(--brand)]">
-                      <input
-                        type="checkbox"
-                        checked={filterMatchedOnly}
-                        onChange={(e) => setFilterMatchedOnly(e.target.checked)}
-                        className="rounded border-gray-300 text-brand focus:ring-brand"
-                      />
-                      設定に一致したメールのみ ({matchedCount}/
-                      {inspected.length})
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setInspected(null)}
-                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-slate-100"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="overflow-y-auto p-4 space-y-2 flex-1">
-                  {displayedMails.length === 0 ? (
-                    <div className="text-center py-12 px-4">
-                      <Mail className="w-10 h-10 text-[var(--text-muted)] mx-auto mb-3 opacity-40" />
-                      <p className="text-sm font-bold text-[var(--text-secondary)]">
-                        {filterMatchedOnly
-                          ? "取り込み設定に合致するメールはありませんでした"
-                          : "表示できるメールがありません"}
-                      </p>
-                      <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
-                        {filterMatchedOnly
-                          ? "「取り込み設定」で設定した必須キーワードや許可送信者などの条件をご確認ください。右上のチェックを外すと除外されたメールも確認できます。"
-                          : "保存済みのメールがありません。「今すぐ取り込む」で同期すると表示されます。"}
-                      </p>
-                    </div>
-                  ) : (
-                    displayedMails.map((m) => {
-                      const open = openMailId === m.id;
-                      const count = m.listings?.length ?? 0;
-                      return (
-                        <div
-                          key={m.id}
-                          className="border border-[var(--border-subtle)] rounded-2xl overflow-hidden"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => void toggleInspectedMail(m)}
-                            className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
-                          >
-                            <span
-                              className={`mt-0.5 shrink-0 px-2 py-0.5 rounded-lg text-[13.5px] font-bold ${
-                                m.error
-                                  ? "bg-red-100 text-red-800"
-                                  : m.filtered
-                                    ? "bg-violet-100 text-violet-900"
-                                    : count > 0
-                                      ? "bg-emerald-100 text-emerald-900"
-                                      : m.needsLlm
-                                        ? "bg-amber-100 text-amber-900"
-                                        : "bg-slate-100 text-slate-600"
-                              }`}
-                            >
-                              {m.error
-                                ? "エラー"
-                                : m.filtered
-                                  ? "設定で除外"
-                                  : count > 0
-                                    ? `物件${count}件`
-                                    : m.needsLlm
-                                      ? "AI判定へ"
-                                      : "対象外"}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-xs font-bold text-[var(--text-primary)] truncate">
-                                {m.subject || "(件名なし)"}
-                              </span>
-                              <span className="block text-[14px] text-[var(--text-muted)] truncate">
-                                {m.from}
-                                {m.receivedAt
-                                  ? ` ・ ${formatJaDateTimeShort(m.receivedAt)}`
-                                  : ""}
-                                {(m.attachments?.length ?? 0) > 0
-                                  ? ` ・ 添付${m.attachments?.length}件`
-                                  : ""}
-                              </span>
-                            </span>
-                            {open ? (
-                              <ChevronUp className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
-                            )}
-                          </button>
-
-                          {open && (
-                            <div className="smooth-expand px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
-                              {m.error && (
-                                <p className="text-xs font-semibold text-red-700">
-                                  {m.error}
-                                </p>
-                              )}
-
-                              <p className="text-[14px] text-[var(--text-muted)]">
-                                判定: {m.reason}
-                                {/* Once the AI pass has run, "AIでの抽出が必要" is
-                                  stale advice — say what actually read it. */}
-                                {m.engine
-                                  ? `（抽出: ${
-                                      m.engine === "stored"
-                                        ? "取込済み（保存されたデータ）"
-                                        : m.engine === "rules"
-                                          ? "ルール解析"
-                                          : m.engine === "gemini"
-                                            ? "AI・添付PDFを直接読取"
-                                            : m.engine === "groq"
-                                              ? "AI・本文/PDFテキスト"
-                                              : "物件は見つかりませんでした"
-                                    }）`
-                                  : m.needsLlm
-                                    ? "（AIでの抽出が必要）"
-                                    : ""}
-                              </p>
-
-                              {count > 0 && (
-                                <div className="space-y-1.5">
-                                  {m.listings?.map((l, i) => (
-                                    <div
-                                      key={i}
-                                      className="text-[14px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-950 break-all"
-                                    >
-                                      {Object.entries(l)
-                                        .filter(
-                                          ([, v]) => v !== null && v !== "",
-                                        )
-                                        .map(([k, v]) => `${k}: ${String(v)}`)
-                                        .join(" ／ ")}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {(m.attachments?.length ?? 0) > 0 && (
-                                <div className="text-[14px] text-[var(--text-secondary)]">
-                                  <span className="font-bold flex items-center gap-1 mb-1.5 text-[var(--text-primary)]">
-                                    <FileText className="w-3.5 h-3.5 text-[var(--brand)]" />
-                                    添付ファイル（クリックしてPDFを開く）
-                                  </span>
-                                  <div className="flex flex-wrap gap-2">
-                                    {m.attachments?.map((a, i) => {
-                                      const isPdf =
-                                        a.mimeType === "application/pdf" ||
-                                        a.filename
-                                          ?.toLowerCase()
-                                          .endsWith(".pdf");
-                                      const isOpening =
-                                        openingAttachmentId === a.id;
-                                      return (
-                                        <button
-                                          key={i}
-                                          type="button"
-                                          disabled={isOpening || !a.id}
-                                          onClick={() =>
-                                            void handleOpenAttachment(
-                                              m.provider,
-                                              m.id,
-                                              a,
-                                            )
-                                          }
-                                          className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white hover:border-[var(--brand)] hover:bg-[var(--brand-soft)] transition-colors text-left shadow-2xs"
-                                          title={
-                                            a.id
-                                              ? "クリックして別タブで開く"
-                                              : "添付ファイルIDがありません"
-                                          }
-                                        >
-                                          {isOpening ? (
-                                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--brand)] shrink-0" />
-                                          ) : isPdf ? (
-                                            <FileText className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                          ) : (
-                                            <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
-                                          )}
-                                          <div className="min-w-0 max-w-[260px]">
-                                            <span className="block font-bold text-[14px] text-[var(--text-primary)] group-hover:text-[var(--brand)] truncate">
-                                              {a.filename || "(名前なし)"}
-                                            </span>
-                                            <span className="block text-[13.5px] text-[var(--text-muted)]">
-                                              {a.size
-                                                ? `${Math.round(a.size / 1024)}KB`
-                                                : a.mimeType}
-                                            </span>
-                                          </div>
-                                          <ExternalLink className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--brand)] shrink-0 ml-1 opacity-70 group-hover:opacity-100" />
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-
-                              <div>
-                                <span className="text-[14px] font-bold text-[var(--text-secondary)]">
-                                  本文
-                                </span>
-                                <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
-                                  {m.bodyText === undefined ? "読み込み中…" : m.bodyText || "(本文なし)"}
-                                </pre>
-                              </div>
-
-                              {m.pdfTexts?.map((t, i) => (
-                                <div key={i}>
-                                  <span className="text-[14px] font-bold text-[var(--text-secondary)]">
-                                    PDF {i + 1} の抽出テキスト
-                                  </span>
-                                  <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
-                                    {t || "(テキストを抽出できませんでした)"}
-                                  </pre>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
     </div>
   );
 }

@@ -85,6 +85,21 @@ const EXPORT_SCALE = 3; // ~216 DPI, keeps small print in 図面 readable
 // pdfjs detaches the buffer it is given, so it always gets a copy.
 export const loadPdf = (bytes: ArrayBuffer) => pdfjs.getDocument({ data: bytes.slice(0) }).promise;
 
+/** All pages' text, for showing what a PDF says without rendering it. */
+export async function pdfText(bytes: ArrayBuffer) {
+  const doc = await loadPdf(bytes);
+  try {
+    const pages: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const { items } = await (await doc.getPage(i)).getTextContent();
+      pages.push(items.map((it) => ("str" in it ? it.str + (it.hasEOL ? "\n" : "") : "")).join(""));
+    }
+    return pages.join("\n\n");
+  } finally {
+    await doc.destroy();
+  }
+}
+
 export async function renderPage(doc: PdfDoc, pageIndex: number, scale: number, canvas = document.createElement("canvas")) {
   const page = await doc.getPage(pageIndex + 1);
   const viewport = page.getViewport({ scale });

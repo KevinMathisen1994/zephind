@@ -34,6 +34,7 @@ import * as mailData from "../lib/mailData";
 // Pure JS modules, deliberately untyped (see tsconfig checkJs).
 import { matchOrders } from "../lib/hardFilter.js";
 import { applyIngestRules, parseEmailListings } from "../lib/mailParse.js";
+import { extractGmailBody, htmlToText } from "../lib/mailBody";
 
 /**
  * Per-provider OAuth + Graph/Gmail endpoints. Client credentials come from env
@@ -393,6 +394,19 @@ titleは資料中の「物件名」があればそれを使い、無ければ住
  * model that can actually see the page says so, which is what stops the
  * invented rows that the text-only path used to produce.
  */
+/**
+ * Gemini sometimes glues the unit onto a bare number (`"price": 148000万円`). The prompt already asks for
+ * 万円/%/㎡, so dropping the suffix keeps the value right. Only tried when strict parsing fails.
+ * shortcut: the repair can also clip a `: 5分`-style fragment inside a string value; upgrade to a tokenizer if that shows up.
+ */
+export function parseGeminiJson(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(text.replace(/(:\s*-?\d+(?:\.\d+)?)[^\d\s,}\]"]+/g, "$1"));
+  }
+}
+
 export async function extractListingsWithGemini(
   emailText: string,
   pdfBuffers: Buffer[],
@@ -432,7 +446,13 @@ ${LISTING_JSON_SHAPE}`,
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { temperature: 0, responseMimeType: "application/json" },
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: "application/json",
+          // Thinking made a 34-listing PDF take ~90s and hit the edge worker's 150s wall clock; extraction doesn't need it.
+          // Pro models reject a zero budget, so only flash gets it.
+          ...(model.includes("flash") ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
       }),
     },
   );
@@ -443,7 +463,7 @@ ${LISTING_JSON_SHAPE}`,
   const text = body.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") || "{}";
   let parsed: any;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseGeminiJson(text);
   } catch {
     throw new Error(`Gemini抽出結果がJSON形式ではありません: ${String(text).slice(0, 300)}`);
   }
@@ -463,8 +483,10 @@ export async function extractListings(
   emailText: string,
   pdfBuffers: Buffer[],
 ): Promise<ExtractionResult> {
+  // pdf-parse burns seconds of CPU (edge workers get ~2s), so skip it when Gemini reads the PDF bytes itself.
+  const geminiReadsPdf = !!process.env.GEMINI_API_KEY && pdfBuffers?.length > 0;
   const pdfTexts: string[] = [];
-  for (const bytes of pdfBuffers || []) {
+  for (const bytes of geminiReadsPdf ? [] : pdfBuffers || []) {
     try {
       pdfTexts.push(await pdfToText(bytes));
     } catch (e) {
@@ -489,6 +511,8 @@ export async function extractListings(
       // re-running the text-only path over the same unreadable text.
       return { listings: fromPdf, engine: fromPdf.length > 0 ? "gemini" : "none", reason: parsed.reason, pdfTexts };
     } catch (e) {
+      // No PDF text was read, so a fallback would see body only; throw so the message stays unmarked and retries.
+      if (geminiReadsPdf) throw e;
       console.error("[MailIngest] Gemini extraction failed, falling back:", e);
     }
   }
@@ -561,6 +585,10 @@ export interface FetchedMessage {
   bodyText: string;
   pdfBuffers: Buffer[];
   attachments: { id: string; filename: string; mimeType: string; size: number }[];
+  /** Original HTML body, shown sandboxed in the mail page; empty for plain-text mail. */
+  bodyHtml?: string;
+  /** In Gmail's spam or trash right now; such mail is skipped without being stored. */
+  junk?: boolean;
 }
 
 async function fetchGmailMessage(accessToken: string, id: string): Promise<FetchedMessage> {
@@ -570,12 +598,16 @@ async function fetchGmailMessage(accessToken: string, id: string): Promise<Fetch
   );
   const msg = await readJson(res, "Gmailメッセージ取得");
   if (!res.ok) throw new Error(`Gmailメッセージ取得に失敗しました: ${JSON.stringify(msg)}`);
+  // Checked on the current labels, so mail moved to 迷惑メール after arriving is skipped too, before any attachment download.
+  if ((msg.labelIds || []).some((l: string) => l === "SPAM" || l === "TRASH")) {
+    return { subject: "", from: "", receivedAt: 0, bodyText: "", pdfBuffers: [], attachments: [], junk: true };
+  }
 
   const headers: Record<string, string> = Object.fromEntries(
     (msg.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value]),
   );
 
-  let bodyText = "";
+  const { bodyText, bodyHtml } = extractGmailBody(msg.payload);
   const pdfParts: string[] = [];
   // Every named part, PDF or not — the inspector shows what a message actually
   // carried, so "the データ is in the Excel sheet" is visible rather than looking
@@ -583,9 +615,6 @@ async function fetchGmailMessage(accessToken: string, id: string): Promise<Fetch
   const attachments: FetchedMessage["attachments"] = [];
   const walk = (part: any) => {
     if (!part) return;
-    if (part.mimeType === "text/plain" && part.body?.data) {
-      bodyText += Buffer.from(part.body.data, "base64url").toString("utf-8") + "\n";
-    }
     if (part.filename) {
       attachments.push({
         id: part.body?.attachmentId || "",
@@ -600,9 +629,6 @@ async function fetchGmailMessage(accessToken: string, id: string): Promise<Fetch
     (part.parts || []).forEach(walk);
   };
   walk(msg.payload);
-  if (!bodyText && msg.payload?.body?.data) {
-    bodyText = Buffer.from(msg.payload.body.data, "base64url").toString("utf-8");
-  }
 
   const pdfBuffers: Buffer[] = [];
   for (const attachmentId of pdfParts.slice(0, 3)) {
@@ -625,6 +651,7 @@ async function fetchGmailMessage(accessToken: string, id: string): Promise<Fetch
     from: headers["from"] || "",
     receivedAt: msg.internalDate ? parseInt(msg.internalDate, 10) : Date.now(),
     bodyText,
+    bodyHtml,
     pdfBuffers,
     attachments,
   };
@@ -638,17 +665,11 @@ async function fetchOutlookMessage(accessToken: string, id: string): Promise<Fet
   const msg = await readJson(res, "Graphメッセージ取得");
   if (!res.ok) throw new Error(`Graphメッセージ取得に失敗しました: ${JSON.stringify(msg)}`);
 
-  // body.contentType is usually "html" — strip tags to plain-ish text rather
-  // than pulling in a full HTML parser dependency for this.
+  // body.contentType is usually "html"; the text keeps its line breaks and the HTML is kept for display.
   const rawBody = msg.body?.content || "";
-  const bodyText =
-    msg.body?.contentType === "html"
-      ? rawBody
-          .replace(/<style[^>]*>.*?<\/style>/gis, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/\s+/g, " ")
-      : rawBody;
+  const isHtml = msg.body?.contentType === "html";
+  const bodyText = isHtml ? htmlToText(rawBody) : rawBody;
+  const bodyHtml = isHtml ? rawBody.slice(0, 300_000) : "";
 
   const pdfBuffers: Buffer[] = [];
   const attachments: FetchedMessage["attachments"] = [];
@@ -678,6 +699,7 @@ async function fetchOutlookMessage(accessToken: string, id: string): Promise<Fet
       : "",
     receivedAt: msg.receivedDateTime ? new Date(msg.receivedDateTime).getTime() : Date.now(),
     bodyText,
+    bodyHtml,
     pdfBuffers,
     attachments,
   };
@@ -736,8 +758,11 @@ async function listNewMessageIds(
       if (res.status === 404) return listNewMessageIds("gmail", accessToken, null, options);
       const body = await readJson(res, "Gmail history取得");
       if (!res.ok) throw new Error(`Gmail history取得に失敗しました: ${JSON.stringify(body)}`);
+      // History reports every added message; the full-sync query's -in:spam -in:trash has to be applied by label here.
       const ids = (body.history || []).flatMap((h: any) =>
-        (h.messagesAdded || []).map((m: any) => m.message.id),
+        (h.messagesAdded || [])
+          .filter((m: any) => !(m.message.labelIds || []).some((l: string) => l === "SPAM" || l === "TRASH"))
+          .map((m: any) => m.message.id),
       );
       const profileRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -824,7 +849,12 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
   // shortcut: offset over a fresh newest-first list, so mail arriving mid-sync can be missed until the next sync.
   const offset = options.batchSize ? options.offset ?? 0 : 0;
   const ids = options.batchSize ? allIds.slice(offset, offset + options.batchSize) : allIds;
-  const done = offset + ids.length >= allIds.length;
+  // Each PDF costs a Gemini call (~20-90s wall time), so a batch stops early once this many PDFs were read.
+  const pdfBudget = options.batchSize ? options.pdfBudget ?? 4 : Infinity;
+  let pdfsRead = 0;
+  let consumed = 0;
+  // Gemini on a big PDF takes ~90s; stop taking new mail well before the worker is killed.
+  const deadline = options.batchSize ? Date.now() + 60_000 : Infinity;
 
   let listingsFound = 0;
   let messagesWithListings = 0;
@@ -832,22 +862,33 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
   const messageErrors: string[] = [];
   const subjectsSeen: string[] = [];
   const processed = await mailData.processedMessageIds(account.userId, account.provider, ids);
-  const alreadyProcessed = [...processed.values()].filter(Boolean).length;
+  // Counted in the loop: overlapping batches would double-count a per-batch total.
+  let alreadyProcessed = 0;
 
   for (const id of ids) {
     const hasContent = processed.get(id);
-    if (hasContent) continue;
+    if (consumed > 0 && (pdfsRead >= pdfBudget || Date.now() > deadline)) break;
+    consumed++;
+    if (hasContent) {
+      alreadyProcessed++;
+      continue;
+    }
     try {
       const msg =
         account.provider === "gmail"
           ? await fetchGmailMessage(accessToken, id)
           : await fetchOutlookMessage(accessToken, id);
+      if (msg.junk) continue;
       subjectsSeen.push(msg.subject || "(件名なし)");
+      const rule = applyIngestRules(msg, ingestSettings);
+      if (rule.accepted) pdfsRead += msg.pdfBuffers?.length ?? 0;
       const header = {
         subject: msg.subject,
         from: msg.from,
         receivedAt: msg.receivedAt,
         bodyText: (msg.bodyText || "").slice(0, MAX_STORED_BODY),
+        // "" = checked, no HTML part; null is left for rows stored before HTML was read (backfilled on open).
+        bodyHtml: msg.bodyHtml ?? "",
         attachments: (msg.attachments || []).map((a) => ({
           id: a.id || "",
           filename: a.filename || "attachment",
@@ -856,7 +897,6 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
         })),
       };
 
-      const rule = applyIngestRules(msg, ingestSettings);
       if (!rule.accepted) {
         filteredOut++;
         console.log(`[MailIngest] 設定により除外: ${rule.reason}`);
@@ -872,7 +912,8 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
         const stored = await mailData.listingsForMessage(account.userId, account.provider, id);
         await mailData.markMessageProcessed(account.provider, id, account.userId, {
           ...header,
-          pdfTexts: await pdfTextsOf(msg.pdfBuffers),
+          // Not re-parsed: pdf-parse CPU kills the edge worker, and these rows already have their listings.
+          pdfTexts: [],
           verdict: stored.length > 0 ? "listings" : "none",
           engine: "stored",
           // The listing rows already carry the body; no need to store it twice.
@@ -899,14 +940,17 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
       }
       messagesWithListings++;
 
+      const newListingIds: string[] = [];
       for (let i = 0; i < extracted.length; i++) {
         const item = extracted[i];
         if (!item.address && !item.title) continue;
 
-        const pseudoUrl = `email:${account.provider}:${id}:${i}`;
+        // userId suffix: two accounts on one mailbox got the same url, and the second was silently skipped as not its row.
+        // Readers only use the first three parts, so older urls without it still parse.
+        const pseudoUrl = `email:${account.provider}:${id}:${i}:${account.userId}`;
         const { matchedOrderIndices } = matchOrdersAgainst(item, orders);
 
-        await mailData.saveEmailListing({
+        const saved = await mailData.saveEmailListing({
           url: pseudoUrl,
           userId: account.userId,
           listing: item,
@@ -922,8 +966,10 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
           })),
           matchedOrderIds: matchedOrderIndices.map((idx: number) => orders[idx].orderId),
         });
+        if (saved.created) newListingIds.push(saved.listingId);
         listingsFound++;
       }
+      mailData.scoreNewEmailListings(account.userId, newListingIds, msg.subject);
       await mailData.markMessageProcessed(account.provider, id, account.userId, stored);
     } catch (e: any) {
       const message = e instanceof Error ? e.message : String(e);
@@ -937,7 +983,8 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
           "Groqの1日の利用上限に達したため、残りのメールは処理せず同期を中断しました。時間をおいて再度「今すぐ同期」をお試しください。",
         );
         return {
-          synced: ids.length,
+          synced: consumed,
+          consumed,
           subjectsSeen: subjectsSeen.slice(0, 10),
           messagesWithListings,
           listingsFound,
@@ -951,11 +998,13 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
     }
   }
 
+  const done = offset + consumed >= allIds.length;
   // Cursor only after the last batch, else the next incremental sync skips unprocessed mail.
   if (done) await mailData.saveSyncCursor(account._id, nextCursor, Date.now());
 
   return {
-    synced: ids.length,
+    synced: consumed,
+    consumed,
     subjectsSeen: subjectsSeen.slice(0, 10),
     messagesWithListings,
     listingsFound,
@@ -970,18 +1019,6 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
 const SYNC_BATCH_SIZE = 10;
 const MAX_STORED_BODY = 20000;
 const MAX_STORED_PDF_TEXT = 20000;
-
-async function pdfTextsOf(buffers: Buffer[] | undefined): Promise<string[]> {
-  const out: string[] = [];
-  for (const b of buffers || []) {
-    try {
-      out.push((await pdfToText(b)).slice(0, MAX_STORED_PDF_TEXT));
-    } catch {
-      out.push("");
-    }
-  }
-  return out;
-}
 
 /** One batch per account per call; the client repeats with `nextOffset` until every result is `done`. */
 export async function syncNow(
@@ -1001,7 +1038,10 @@ export async function syncNow(
       })),
     });
   }
-  return { results, nextOffset: (opts.offset ?? 0) + SYNC_BATCH_SIZE };
+  // Advance only as far as the slowest unfinished account got; stored rows it re-sees are skipped cheaply.
+  const pending = results.filter((r: any) => !r.done && !r.error).map((r: any) => r.consumed ?? SYNC_BATCH_SIZE);
+  const step = pending.length ? Math.max(1, Math.min(...pending)) : SYNC_BATCH_SIZE;
+  return { results, nextOffset: (opts.offset ?? 0) + step };
 }
 
 /**
@@ -1035,7 +1075,30 @@ export async function inspectRecentMail(
 
 export async function storedMailDetail(userId: string, provider: string, messageId: string) {
   const row = await mailData.getStoredMail(userId, provider, messageId);
-  return { bodyText: row?.bodyText ?? "", pdfTexts: row?.pdfTexts ?? [] };
+  // Also re-fetched while it holds U+FFFD: bodies decoded with a wrong charset before decodeBytes existed.
+  const garbled = /\uFFFD/.test(`${row?.bodyText ?? ""}${row?.bodyHtml ?? ""}`);
+  if (row && (row.bodyHtml == null || garbled) && provider === "gmail") {
+    // Rows synced before HTML bodies were read: fetch the body once (no attachments) and store it, "" if no HTML part.
+    const fetched = await refetchGmailBody(userId, messageId).catch(() => null);
+    const filled = fetched && { ...fetched, bodyText: fetched.bodyText || (garbled ? "" : row.bodyText) || "" };
+    if (filled) {
+      await mailData.saveMailBody(userId, provider, messageId, filled);
+      return { ...filled, pdfTexts: row.pdfTexts ?? [] };
+    }
+  }
+  return { bodyText: row?.bodyText ?? "", bodyHtml: row?.bodyHtml ?? "", pdfTexts: row?.pdfTexts ?? [] };
+}
+
+async function refetchGmailBody(userId: string, messageId: string) {
+  const account = (await mailData.accountsForUser(userId)).find((a: Doc) => a.provider === "gmail");
+  if (!account) return null;
+  const accessToken = await getValidAccessToken(account);
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return null;
+  const { bodyText, bodyHtml } = extractGmailBody((await res.json()).payload);
+  return { bodyText: bodyText.slice(0, MAX_STORED_BODY), bodyHtml };
 }
 
 /** Called by the scheduled job. Skips accounts already known to need reconnect. */

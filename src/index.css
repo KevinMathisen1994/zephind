@@ -341,6 +341,32 @@
   background-clip: content-box;
 }
 
+/* Always-visible scrollbar for long panels: gutter is reserved and the track is drawn even before scrolling. */
+/* lg and up only: below that the panel isn't height-capped, so an empty track would just waste space. */
+@media (min-width: 1024px) {
+  .scroll-visible {
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+    /* daisyUI sets scrollbar-color on :root and it inherits; any non-auto value makes Chrome skip
+       ::-webkit-scrollbar and use macOS's auto-hiding overlay bar. */
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+  }
+}
+.scroll-visible::-webkit-scrollbar-track {
+  background: var(--bg-page-subtle);
+}
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: #b8ae9d;
+  background-clip: content-box;
+}
+/* Firefox only (-moz-appearance): in Chrome, scrollbar-color overrides ::-webkit-scrollbar and brings back macOS's auto-hiding overlay bar. */
+@supports (-moz-appearance: none) {
+  .scroll-visible {
+    scrollbar-color: #b8ae9d var(--bg-page-subtle);
+  }
+}
+
 /* ─────────────────────────────
    Shared component-level utilities
    ───────────────────────────── */

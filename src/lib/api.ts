@@ -233,13 +233,16 @@ export const api = {
     }),
     syncNow: endpoint({
       method: "POST", key: "mail.sync", path: () => "/api/mail/sync",
-      body: (a) => a, invalidates: ["matching", "listings", "mail.accounts"],
+      body: (a) => a, invalidates: ["matching", "listings", "mail.accounts", "mail.inspect", "mail.inspectDetail"],
     }),
     inspectRecentMail: endpoint({
       method: "POST", key: "mail.inspect", path: () => "/api/mail/inspect", body: (a) => a,
     }),
     inspectMailDetail: endpoint({
       method: "POST", key: "mail.inspectDetail", path: () => "/api/mail/inspect/detail", body: (a) => a,
+    }),
+    savePdfTexts: endpoint({
+      method: "POST", key: "mail.savePdfTexts", path: () => "/api/mail/inspect/pdf-texts", body: (a) => a,
     }),
     matchedEmails: endpoint({ method: "GET", key: "mail.matchedEmails", path: () => "/api/mail/matched-emails" }),
     getAttachmentData: endpoint({

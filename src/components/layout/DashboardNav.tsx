@@ -12,6 +12,7 @@ const navSections = [
       { to: "/orders", label: "物件検索", desc: "条件登録と自動マッチング" },
       { to: "/map", label: "地図分析", desc: "東京広域・水害ハザード" },
       { to: "/saved", label: "保存物件", desc: "検討中のお気に入り" },
+      { to: "/mail", label: "受信メール", desc: "業者メールと抽出物件" },
     ],
   },
   {
