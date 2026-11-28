@@ -966,6 +966,8 @@ export async function inspectRecentMail(
   const out: any[] = [];
   // Bound fetches, not just output: skipped messages still download their PDFs, which blew the edge worker limit (546).
   let budget = limit * 2;
+  // pdf-parse is CPU-heavy; edge workers get ~2s CPU per request.
+  let pdfBudget = 3;
   for (const account of accounts) {
     let accessToken: string;
     try {
@@ -993,6 +995,10 @@ export async function inspectRecentMail(
         const pdfTexts: string[] = [];
         if (rule.accepted) {
           for (const bytes of msg.pdfBuffers || []) {
+            if (pdfBudget-- <= 0) {
+              pdfTexts.push("（PDF未解析: 確認画面の解析上限）");
+              continue;
+            }
             try {
               pdfTexts.push(await pdfToText(bytes));
             } catch (e) {
