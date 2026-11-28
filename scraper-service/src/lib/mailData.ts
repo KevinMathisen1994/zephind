@@ -274,22 +274,77 @@ export async function saveEmailListing(args: {
   return { listingId, matchesCreated };
 }
 
-export async function processedMessageIds(provider: string, messageIds: string[]): Promise<Set<string>> {
-  if (messageIds.length === 0) return new Set();
+/**
+ * id -> whether its content is stored. Filtered rows are left out so a rules
+ * change re-evaluates them; rows without content (pre-0026) get backfilled.
+ */
+export async function processedMessageIds(
+  userId: string,
+  provider: string,
+  messageIds: string[],
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  if (messageIds.length === 0) return out;
   const { data, error } = await db.raw
     .from("mailProcessed")
-    .select("messageId")
+    .select("messageId, verdict")
+    .eq("userId", userId)
     .eq("provider", provider)
     .in("messageId", messageIds);
   if (error) throw new Error(`processedMessageIds: ${error.message}`);
-  return new Set((data ?? []).map((r: any) => r.messageId));
+  for (const r of data ?? []) {
+    if (r.verdict !== "filtered") out.set(r.messageId, r.verdict != null);
+  }
+  return out;
 }
 
-export async function markMessageProcessed(provider: string, messageId: string, userId: string) {
+export interface StoredMail {
+  subject?: string;
+  from?: string;
+  receivedAt?: number;
+  bodyText?: string;
+  attachments?: EmailAttachment[];
+  pdfTexts?: string[];
+  verdict: "listings" | "none" | "filtered";
+  reason?: string | null;
+  engine?: string | null;
+  listings?: any[];
+}
+
+export async function markMessageProcessed(provider: string, messageId: string, userId: string, mail: StoredMail) {
   const { error } = await db.raw
     .from("mailProcessed")
-    .upsert({ provider, messageId, userId, processedAt: Date.now() });
+    .upsert({ provider, messageId, userId, processedAt: Date.now(), ...mail });
   if (error) throw new Error(`markMessageProcessed: ${error.message}`);
+}
+
+const MAIL_LIST_COLUMNS =
+  'provider, messageId, subject, "from", receivedAt, attachments, verdict, reason, engine, listings';
+
+/** The caller's stored mail, newest first, without bodies (those load per message). */
+export async function listStoredMail(userId: string, opts: { limit: number; offset: number; sinceMs: number }) {
+  const { data, error } = await db.raw
+    .from("mailProcessed")
+    .select(MAIL_LIST_COLUMNS)
+    .eq("userId", userId)
+    .not("verdict", "is", null)
+    .gte("receivedAt", opts.sinceMs)
+    .order("receivedAt", { ascending: false })
+    .range(opts.offset, opts.offset + opts.limit - 1);
+  if (error) throw new Error(`listStoredMail: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getStoredMail(userId: string, provider: string, messageId: string) {
+  const { data, error } = await db.raw
+    .from("mailProcessed")
+    .select("bodyText, pdfTexts")
+    .eq("userId", userId)
+    .eq("provider", provider)
+    .eq("messageId", messageId)
+    .maybeSingle();
+  if (error) throw new Error(`getStoredMail: ${error.message}`);
+  return data;
 }
 
 /**
@@ -297,10 +352,11 @@ export async function markMessageProcessed(provider: string, messageId: string, 
  * {messageId}:{n}` pseudo-url saveEmailListing mints. Lets the inspector show
  * what is stored instead of paying a model to re-read mail already processed.
  */
-export async function listingsForMessage(provider: string, messageId: string) {
+export async function listingsForMessage(userId: string, provider: string, messageId: string) {
   const { data, error } = await db.raw
     .from("listings")
     .select("*")
+    .eq("userId", userId)
     .like("url", `email:${provider}:${messageId}:%`);
   if (error) throw new Error(`listingsForMessage: ${error.message}`);
   return data ?? [];

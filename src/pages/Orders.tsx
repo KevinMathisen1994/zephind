@@ -1101,6 +1101,7 @@ export default function OrdersPage() {
   // TEMPORARY: inspector for what the mail sync actually saw. A sync only
   // reports counts, so "物件情報は見つかりませんでした" cannot be told apart from a
   const inspectRecentMail = useAction(api.mailIngest.inspectRecentMail);
+  const inspectMailDetail = useAction(api.mailIngest.inspectMailDetail);
   const getAttachmentData = useAction(api.mailIngest.getAttachmentData);
   const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(
     null,
@@ -1293,27 +1294,44 @@ export default function OrdersPage() {
     return () => window.removeEventListener("message", onMessage);
   }, [queryClient]);
 
-  const handleInspectMail = async (runAi = false) => {
+  const handleInspectMail = async () => {
     setInspecting(true);
     try {
+      // Reads what the sync stored, so no Gmail/PDF work and no 546 risk.
       const rows = (await inspectRecentMail({
-        // 100 in one request hit the edge function's limit (HTTP 546).
-        limit: 20,
+        limit: 500,
         daysBack: 90,
-        matchingOnly: true,
-        // Runs the same extraction a sync performs — one model call per message
-        // the rules could not read — so it is a deliberate click, not automatic.
-        runAi,
       })) as InspectedMail[];
       setInspected(rows);
-      const firstValid = rows.find((r) => !r.filtered && !r.error);
-      setOpenMailId(firstValid?.id ?? rows[0]?.id ?? null);
+      setOpenMailId(null);
     } catch (err) {
       mailError(
         `メールの確認に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setInspecting(false);
+    }
+  };
+
+  // Bodies are not in the list response; load them when a row first opens.
+  const toggleInspectedMail = async (m: InspectedMail) => {
+    if (openMailId === m.id) return setOpenMailId(null);
+    setOpenMailId(m.id);
+    if (m.bodyText !== undefined) return;
+    try {
+      const detail = (await inspectMailDetail({
+        provider: m.provider,
+        messageId: m.id,
+      })) as { bodyText: string; pdfTexts: string[] };
+      setInspected((rows) =>
+        rows?.map((r) =>
+          r.id === m.id && r.provider === m.provider ? { ...r, ...detail } : r,
+        ) ?? rows,
+      );
+    } catch (err) {
+      mailError(
+        `メール本文の取得に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -7432,19 +7450,10 @@ export default function OrdersPage() {
                       同期メールの内容（{displayedMails.length}件）
                     </h3>
                     <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      過去3ヶ月の受信メールから取り込み条件に合致したメールを表示
+                      同期で取り込んだ過去3ヶ月のメールを表示
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => void handleInspectMail(true)}
-                      disabled={inspecting}
-                      title="各メールをAIで実際に解析し、取り込まれる物件情報を表示します（同期と同じ処理・保存はしません）"
-                      className="text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-white shadow-xs hover:border-[var(--brand)] disabled:opacity-50"
-                    >
-                      {inspecting ? "解析中…" : "AIで抽出を確認"}
-                    </button>
                     <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-semibold cursor-pointer select-none bg-white px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] shadow-xs hover:border-[var(--brand)]">
                       <input
                         type="checkbox"
@@ -7477,7 +7486,7 @@ export default function OrdersPage() {
                       <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
                         {filterMatchedOnly
                           ? "「取り込み設定」で設定した必須キーワードや許可送信者などの条件をご確認ください。右上のチェックを外すと除外されたメールも確認できます。"
-                          : "受信トレイにメールが見つかりませんでした。"}
+                          : "保存済みのメールがありません。「今すぐ取り込む」で同期すると表示されます。"}
                       </p>
                     </div>
                   ) : (
@@ -7491,7 +7500,7 @@ export default function OrdersPage() {
                         >
                           <button
                             type="button"
-                            onClick={() => setOpenMailId(open ? null : m.id)}
+                            onClick={() => void toggleInspectedMail(m)}
                             className="w-full text-left px-4 py-3 hover:bg-[var(--bg-page-subtle)] flex items-start gap-3"
                           >
                             <span
@@ -7649,7 +7658,7 @@ export default function OrdersPage() {
                                   本文
                                 </span>
                                 <pre className="mt-1 text-[14px] leading-relaxed whitespace-pre-wrap break-all bg-[var(--bg-page-subtle)] rounded-xl p-3 max-h-72 overflow-y-auto text-[var(--text-secondary)]">
-                                  {m.bodyText || "(本文なし)"}
+                                  {m.bodyText === undefined ? "読み込み中…" : m.bodyText || "(本文なし)"}
                                 </pre>
                               </div>
 

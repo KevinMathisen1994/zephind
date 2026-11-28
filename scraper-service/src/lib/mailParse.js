@@ -466,7 +466,8 @@ export function parseEmailListings(emailText, pdfTexts = []) {
   //    listing lives entirely in an attached マイソク carries none of these
   //    labels in its own text.
   // Together they were misclassifying genuine 売主 introductions as 物件求.
-  const trimmedBody = toHalfWidth(lines.join("\n"));
+  // Quoted reply history ("> ...") is someone else's older text, not this message's intent.
+  const trimmedBody = toHalfWidth(lines.filter((l) => !/^\s*>/.test(l)).join("\n"));
   if (
     WANTED_RE.test(trimmedBody) &&
     !/物件概要|所在地\s*[:：]|売買価格/.test(toHalfWidth(haystack))

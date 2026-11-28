@@ -456,6 +456,7 @@ export interface ExtractionResult {
   engine: "rules" | "gemini" | "groq" | "none" | "stored";
   /** The rules classifier's verdict, kept whatever the engine. */
   reason: string;
+  pdfTexts?: string[];
 }
 
 export async function extractListings(
@@ -474,7 +475,7 @@ export async function extractListings(
   const parsed = parseEmailListings(emailText, pdfTexts);
   if (parsed.listings.length > 0) {
     console.log(`[MailIngest] Parsed ${parsed.listings.length} listing(s) without the LLM`);
-    return { listings: parsed.listings, engine: "rules", reason: parsed.reason };
+    return { listings: parsed.listings, engine: "rules", reason: parsed.reason, pdfTexts };
   }
 
   // Gemini first: always when there is a PDF (the needsLlm gate is for text-only
@@ -486,7 +487,7 @@ export async function extractListings(
       console.log(`[MailIngest] Gemini read ${pdfBuffers?.length ?? 0} PDF(s): ${fromPdf.length} listing(s)`);
       // [] is Gemini's answer, not a failure, so it is not second-guessed by
       // re-running the text-only path over the same unreadable text.
-      return { listings: fromPdf, engine: fromPdf.length > 0 ? "gemini" : "none", reason: parsed.reason };
+      return { listings: fromPdf, engine: fromPdf.length > 0 ? "gemini" : "none", reason: parsed.reason, pdfTexts };
     } catch (e) {
       console.error("[MailIngest] Gemini extraction failed, falling back:", e);
     }
@@ -494,11 +495,11 @@ export async function extractListings(
 
   if (!parsed.needsLlm) {
     console.log(`[MailIngest] Skipped (${parsed.reason})`);
-    return { listings: [], engine: "none", reason: parsed.reason };
+    return { listings: [], engine: "none", reason: parsed.reason, pdfTexts };
   }
   await sleep(1500);
   const fromText = await extractListingsWithLlm(emailText, pdfTexts);
-  return { listings: fromText, engine: fromText.length > 0 ? "groq" : "none", reason: parsed.reason };
+  return { listings: fromText, engine: fromText.length > 0 ? "groq" : "none", reason: parsed.reason, pdfTexts };
 }
 
 /**
@@ -830,30 +831,70 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
   let filteredOut = 0;
   const messageErrors: string[] = [];
   const subjectsSeen: string[] = [];
-  const processed = await mailData.processedMessageIds(account.provider, ids);
-  const alreadyProcessed = processed.size;
+  const processed = await mailData.processedMessageIds(account.userId, account.provider, ids);
+  const alreadyProcessed = [...processed.values()].filter(Boolean).length;
 
   for (const id of ids) {
-    if (processed.has(id)) continue;
+    const hasContent = processed.get(id);
+    if (hasContent) continue;
     try {
       const msg =
         account.provider === "gmail"
           ? await fetchGmailMessage(accessToken, id)
           : await fetchOutlookMessage(accessToken, id);
       subjectsSeen.push(msg.subject || "(件名なし)");
+      const header = {
+        subject: msg.subject,
+        from: msg.from,
+        receivedAt: msg.receivedAt,
+        bodyText: (msg.bodyText || "").slice(0, MAX_STORED_BODY),
+        attachments: (msg.attachments || []).map((a) => ({
+          id: a.id || "",
+          filename: a.filename || "attachment",
+          mimeType: a.mimeType || "",
+          size: a.size || 0,
+        })),
+      };
 
       const rule = applyIngestRules(msg, ingestSettings);
       if (!rule.accepted) {
         filteredOut++;
         console.log(`[MailIngest] 設定により除外: ${rule.reason}`);
+        // Stored as 'filtered', which processedMessageIds ignores, so a settings change still reaches it.
+        await mailData.markMessageProcessed(account.provider, id, account.userId, {
+          ...header, verdict: "filtered", reason: rule.reason,
+        });
+        continue;
+      }
+
+      // Processed before content was stored: fill it in from what was saved, without paying the AI again.
+      if (hasContent === false) {
+        const stored = await mailData.listingsForMessage(account.userId, account.provider, id);
+        await mailData.markMessageProcessed(account.provider, id, account.userId, {
+          ...header,
+          pdfTexts: await pdfTextsOf(msg.pdfBuffers),
+          verdict: stored.length > 0 ? "listings" : "none",
+          engine: "stored",
+          // The listing rows already carry the body; no need to store it twice.
+          listings: stored.map(({ emailBody, emailAttachments, ...r }: any) => r),
+        });
         continue;
       }
 
       const emailText = `件名: ${msg.subject}\n差出人: ${msg.from}\n\n${msg.bodyText}`;
-      const { listings: extracted } = await extractListings(emailText, msg.pdfBuffers);
-      // Not marked when rules filtered it out or extraction threw, so a settings change or retry still reaches it.
+      const result = await extractListings(emailText, msg.pdfBuffers);
+      const extracted = result.listings;
+      const stored: mailData.StoredMail = {
+        ...header,
+        pdfTexts: (result.pdfTexts ?? []).map((t) => t.slice(0, MAX_STORED_PDF_TEXT)),
+        verdict: extracted.length > 0 ? "listings" : "none",
+        reason: result.reason,
+        engine: result.engine,
+        listings: extracted,
+      };
+      // Not marked when extraction threw, so a retry still reaches it.
       if (extracted.length === 0) {
-        await mailData.markMessageProcessed(account.provider, id, account.userId);
+        await mailData.markMessageProcessed(account.provider, id, account.userId, stored);
         continue;
       }
       messagesWithListings++;
@@ -883,7 +924,7 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
         });
         listingsFound++;
       }
-      await mailData.markMessageProcessed(account.provider, id, account.userId);
+      await mailData.markMessageProcessed(account.provider, id, account.userId, stored);
     } catch (e: any) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[MailIngest] Failed to process message ${id}:`, e);
@@ -927,6 +968,20 @@ export async function syncOneAccount(account: Doc, options: any = {}) {
 }
 
 const SYNC_BATCH_SIZE = 10;
+const MAX_STORED_BODY = 20000;
+const MAX_STORED_PDF_TEXT = 20000;
+
+async function pdfTextsOf(buffers: Buffer[] | undefined): Promise<string[]> {
+  const out: string[] = [];
+  for (const b of buffers || []) {
+    try {
+      out.push((await pdfToText(b)).slice(0, MAX_STORED_PDF_TEXT));
+    } catch {
+      out.push("");
+    }
+  }
+  return out;
+}
 
 /** One batch per account per call; the client repeats with `nextOffset` until every result is `done`. */
 export async function syncNow(
@@ -949,111 +1004,38 @@ export async function syncNow(
   return { results, nextOffset: (opts.offset ?? 0) + SYNC_BATCH_SIZE };
 }
 
+/**
+ * The caller's mail as the sync stored it, newest first. Reads the DB only, so
+ * it is cheap; bodies and PDF text come from storedMailDetail when a row opens.
+ */
 export async function inspectRecentMail(
   userId: string,
-  opts: { limit?: number; matchingOnly?: boolean; daysBack?: number; runAi?: boolean } = {},
+  opts: { limit?: number; offset?: number; daysBack?: number } = {},
 ) {
-  const limit = opts.limit ?? 50;
-  const matchingOnly = opts.matchingOnly ?? true;
-  const daysBack = opts.daysBack ?? 90;
-  // Opt-in: this is the same extraction a sync performs, so it costs one model
-  // call per message that the rules could not read. Off by default keeps the
-  // inspector free to open.
-  const runAi = opts.runAi ?? false;
-  const accounts = await mailData.accountsForUser(userId);
-  const ingestSettings = await mailData.ingestSettingsForUser(userId);
+  const limit = Math.min(Math.max(Number(opts.limit) || 200, 1), 500);
+  const offset = Math.max(Number(opts.offset) || 0, 0);
+  const daysBack = Number(opts.daysBack) || 90;
+  const rows = await mailData.listStoredMail(userId, {
+    limit, offset, sinceMs: Date.now() - daysBack * 86_400_000,
+  });
+  return rows.map((r: any) => ({
+    provider: r.provider,
+    id: r.messageId,
+    subject: r.subject,
+    from: r.from,
+    receivedAt: r.receivedAt,
+    attachments: r.attachments ?? [],
+    filtered: r.verdict === "filtered",
+    filterReason: r.verdict === "filtered" ? r.reason : null,
+    listings: r.listings ?? [],
+    reason: r.reason,
+    engine: r.engine ?? undefined,
+  }));
+}
 
-  const out: any[] = [];
-  // Bound fetches, not just output: skipped messages still download their PDFs, which blew the edge worker limit (546).
-  let budget = limit * 2;
-  // pdf-parse is CPU-heavy; edge workers get ~2s CPU per request.
-  let pdfBudget = 3;
-  for (const account of accounts) {
-    let accessToken: string;
-    try {
-      accessToken = await getValidAccessToken(account);
-    } catch {
-      out.push({ provider: account.provider, error: "REAUTH_REQUIRED" });
-      continue;
-    }
-
-    const { ids } = await listNewMessageIds(account.provider, accessToken, null, {
-      daysBack, maxTotal: 500, settings: ingestSettings,
-    });
-
-    for (const id of ids) {
-      if (out.length >= limit || budget-- <= 0) break;
-      try {
-        const msg =
-          account.provider === "gmail"
-            ? await fetchGmailMessage(accessToken, id)
-            : await fetchOutlookMessage(accessToken, id);
-
-        const rule = applyIngestRules(msg, ingestSettings);
-        if (matchingOnly && !rule.accepted) continue;
-
-        const pdfTexts: string[] = [];
-        if (rule.accepted) {
-          for (const bytes of msg.pdfBuffers || []) {
-            if (pdfBudget-- <= 0) {
-              pdfTexts.push("（PDF未解析: 確認画面の解析上限）");
-              continue;
-            }
-            try {
-              pdfTexts.push(await pdfToText(bytes));
-            } catch (e) {
-              pdfTexts.push(`（PDF読み取り失敗: ${e instanceof Error ? e.message : String(e)}）`);
-            }
-          }
-        }
-
-        const emailText = `件名: ${msg.subject}\n差出人: ${msg.from}\n\n${msg.bodyText}`;
-        const parsed = parseEmailListings(emailText, pdfTexts);
-
-        // What a real sync would store, rather than only what the rules alone
-        // could read. Writes nothing.
-        let extracted: ExtractionResult | null = null;
-        if (runAi && rule.accepted) {
-          try {
-            // Already ingested? Show the stored rows rather than paying a model
-            // to re-read a message the sync has already processed.
-            const stored = await mailData.listingsForMessage(account.provider, id);
-            extracted = stored.length > 0
-              ? { listings: stored, engine: "stored", reason: parsed.reason }
-              : await extractListings(emailText, msg.pdfBuffers);
-          } catch (e) {
-            extracted = {
-              listings: [],
-              engine: "none",
-              reason: `抽出に失敗: ${e instanceof Error ? e.message : String(e)}`,
-            };
-          }
-        }
-
-        out.push({
-          provider: account.provider,
-          id,
-          subject: msg.subject,
-          from: msg.from,
-          receivedAt: msg.receivedAt,
-          bodyText: (msg.bodyText || "").slice(0, 8000),
-          attachments: msg.attachments || [],
-          pdfTexts: pdfTexts.map((t) => t.slice(0, 4000)),
-          filtered: !rule.accepted,
-          filterReason: rule.reason,
-          listings: extracted ? extracted.listings : rule.accepted ? parsed.listings : [],
-          needsLlm: rule.accepted ? parsed.needsLlm : false,
-          reason: rule.accepted ? parsed.reason : rule.reason,
-          // Absent unless the AI pass ran, so the UI can tell "rules found
-          // nothing" apart from "nothing found it".
-          engine: extracted?.engine,
-        });
-      } catch (e) {
-        out.push({ provider: account.provider, id, error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-  }
-  return out;
+export async function storedMailDetail(userId: string, provider: string, messageId: string) {
+  const row = await mailData.getStoredMail(userId, provider, messageId);
+  return { bodyText: row?.bodyText ?? "", pdfTexts: row?.pdfTexts ?? [] };
 }
 
 /** Called by the scheduled job. Skips accounts already known to need reconnect. */

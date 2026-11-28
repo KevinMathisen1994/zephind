@@ -8,7 +8,7 @@ import { requireOwned, requireUserId } from "../auth/authz";
 import { route } from "./handler";
 import { PROVIDER_LABELS, cleanList, ingestSettingsForUser } from "../lib/mailData";
 import {
-  getAttachmentData, getEmailDetailsForListing, inspectRecentMail, startOAuth, syncNow,
+  getAttachmentData, getEmailDetailsForListing, inspectRecentMail, startOAuth, storedMailDetail, syncNow,
 } from "../services/mailIngest";
 import { MAIL_INGEST_SETTING_FIELDS, pick } from "./fields";
 
@@ -136,10 +136,16 @@ mailRouter.post("/inspect", route(async (req) => {
   const userId = requireUserId(req);
   return inspectRecentMail(userId, {
     limit: req.body?.limit,
-    matchingOnly: req.body?.matchingOnly,
+    offset: req.body?.offset,
     daysBack: req.body?.daysBack,
-    runAi: req.body?.runAi,
   });
+}));
+
+mailRouter.post("/inspect/detail", route(async (req) => {
+  const userId = requireUserId(req);
+  const { provider, messageId } = req.body ?? {};
+  if (!provider || !messageId) throw new Error("provider and messageId are required");
+  return storedMailDetail(userId, String(provider), String(messageId));
 }));
 
 mailRouter.post("/attachment", route(async (req) => {
