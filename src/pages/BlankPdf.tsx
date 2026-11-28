@@ -6,7 +6,7 @@ import { useApiMutation, useApiQuery } from "../hooks/useApi";
 import { api } from "../lib/api";
 import {
   type Annotation, type PdfDoc, FONTS, FONTS_CSS_URL, LINE_HEIGHT, OUTLINE_WIDTH, fontCss,
-  type ImageDrop, IMAGE_MIME, type PlacedSignature, type SavedImage, exportPdf, fileToSavedImage, findTextBoxes, loadPdf, pageImagesForAi, renderPage, runsOf,
+  type Drop, type ImageDrop, IMAGE_MIME, type ItemTemplate, templateAnns, type PlacedSignature, type SavedImage, exportPdf, fileToSavedImage, findTextBoxes, loadPdf, pageImagesForAi, renderPage, runsOf,
 } from "../lib/pdfBlank";
 import {
   type Run, type RunStyle, clearRunStyle, getSelectionOffsets, normalizeRuns, plainText, readRuns, setSelectionOffsets, styleRange, writeRuns,
@@ -20,7 +20,8 @@ type Tool = "select" | "box" | "outline" | "text";
 interface LoadedPdf { name: string; doc: PdfDoc; widths: number[] }
 // `recorded` is set once the undo snapshot for this drag exists, so a plain click adds no history.
 // Resize modes name the edges being dragged (n/s/e/w, two for a corner); the others stay fixed.
-interface Drag { id: string; mode: "move" | Handle; startX: number; startY: number; orig: Annotation; recorded: boolean }
+// autoW: a text box without a set width, which stays auto-width when scaled from a corner. members: everything a move drags along.
+interface Drag { id: string; mode: "move" | Handle; startX: number; startY: number; orig: Annotation; recorded: boolean; autoW?: boolean; members?: Annotation[] }
 
 type Handle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 const HANDLES: { c: Handle; cls: string }[] = [
@@ -61,6 +62,17 @@ const LAYER_ITEMS: { to: Restack; label: string }[] = [
   { to: "back", label: "最背面へ移動" },
 ];
 
+/** a plus the items grouped with it on the same page. */
+const groupOf = (list: Annotation[], a: Annotation) => (a.group ? list.filter((x) => x.group === a.group && x.pageIndex === a.pageIndex) : [a]);
+
+/** Deleting one item of a group deletes the whole group. */
+const removeWithGroup = (list: Annotation[], id: string | null) => {
+  const a = list.find((x) => x.id === id);
+  if (!a) return list;
+  const gone = new Set(groupOf(list, a).map((x) => x.id));
+  return list.filter((x) => !gone.has(x.id));
+};
+
 // Toolbar buttons must not take focus, or the open text editor closes and loses its selection.
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
@@ -100,6 +112,7 @@ export default function BlankPdfPage() {
   const images = useApiQuery(api.blankPdf.images) as SavedImage[] | undefined;
   const addImage = useApiMutation(api.blankPdf.addImage);
   const removeImage = useApiMutation(api.blankPdf.removeImage);
+  const addItem = useApiMutation(api.blankPdf.addItem);
   const [imgOpen, setImgOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const imgMenuRef = useRef<HTMLDivElement>(null);
@@ -113,6 +126,31 @@ export default function BlankPdfPage() {
     return () => document.removeEventListener("pointerdown", close);
   }, [imgOpen]);
 
+  // Right-click → 保存: the item with all its styling, minus its place on this page.
+  const saveItem = async (id: string) => {
+    const a = anns.find((x) => x.id === id);
+    if (!a || !pdf) return;
+    const members = groupOf(anns, a);
+    const named = members.find((m) => m.text?.trim()) ?? a;
+    const name = window.prompt("保存する名前", (named.text ?? "").split("\n")[0].trim().slice(0, 40) || a.label || "アイテム")?.trim();
+    if (!name) return;
+    const vp = (await pdf.doc.getPage(a.pageIndex + 1)).getViewport({ scale: 1 });
+    const ox = Math.min(...members.map((m) => m.x)), oy = Math.min(...members.map((m) => m.y));
+    const item: ItemTemplate = {
+      aspect: vp.height / vp.width,
+      anns: members.map((m) => {
+        const c: Partial<Annotation> = { ...m, x: m.x - ox, y: m.y - oy };
+        for (const k of ["id", "pageIndex", "group"] as const) delete c[k];
+        return c as Omit<Annotation, "id" | "pageIndex" | "group">;
+      }),
+    };
+    try {
+      await addItem({ name, item });
+      setMessage(`「${name}」を保存しました（社名ひな形メニューから配置できます）`);
+    } catch (e) {
+      setMessage(`保存に失敗しました: ${(e as Error).message}`);
+    }
+  };
   const uploadImages = async (files: FileList | null) => {
     if (!files?.length) return;
     setUploading(true);
@@ -186,7 +224,8 @@ export default function BlankPdfPage() {
       id: crypto.randomUUID(), pageIndex: a.pageIndex, kind: "image", src: logoPng(), keepRatio: true, label: "ロゴ", color: "",
       x: a.x + r.logo.x * kx, y: a.y + r.logo.y * ky, w: r.logo.size * kx, h: r.logo.size * ky,
     }] : [];
-    commit((prev) => prev.flatMap((x) => (x.id === id ? [...logo, text] : [x])));
+    const group = newId();
+    commit((prev) => prev.flatMap((x) => (x.id === id ? [...logo, text].map((m) => ({ ...m, group: logo.length ? group : undefined })) : [x])));
     setSelectedId(text.id);
     setEditingId(text.id);
   };
@@ -332,9 +371,13 @@ export default function BlankPdfPage() {
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         if (!e.repeat) snapshot();
-        setAnns((prev) => prev.map((a) => (a.id === selectedId ? { ...a, x: a.x + dx, y: a.y + dy } : a)));
+        setAnns((prev) => {
+          const sel = prev.find((a) => a.id === selectedId);
+          const ids = new Set(sel ? groupOf(prev, sel).map((a) => a.id) : []);
+          return prev.map((a) => (ids.has(a.id) ? { ...a, x: a.x + dx, y: a.y + dy } : a));
+        });
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        commit((prev) => prev.filter((a) => a.id !== selectedId));
+        commit((prev) => removeWithGroup(prev, selectedId));
         setSelectedId(null);
       }
     };
@@ -484,13 +527,13 @@ export default function BlankPdfPage() {
                               }}
                               className="h-20 w-full cursor-grab rounded-md border border-[var(--border-subtle)] bg-[#f7f6f3] object-contain p-1"
                             />
-                            <button
+                            {img.mine !== false && <button
                               aria-label={`${img.name}を削除`}
                               onClick={() => { if (window.confirm(`「${img.name}」を削除しますか？`)) void removeImage({ id: img._id }); }}
                               className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex"
                             >
                               <X className="h-3 w-3" />
-                            </button>
+                            </button>}
                           </div>
                         ))}
                       </div>
@@ -580,7 +623,7 @@ export default function BlankPdfPage() {
                 <Divider />
                 <IconButton
                   label="削除 (Delete)" disabled={!selected}
-                  onClick={() => { commit((prev) => prev.filter((a) => a.id !== selectedId)); setSelectedId(null); }}
+                  onClick={() => { commit((prev) => removeWithGroup(prev, selectedId)); setSelectedId(null); }}
                 >
                   <Trash2 className="h-4 w-4" />
                 </IconButton>
@@ -619,7 +662,24 @@ export default function BlankPdfPage() {
                 onMenu={setMenu}
                 onUngroupSignature={(id) => void ungroupSignature(id)}
                 onSignatureResize={(id) => void reflowSignature(id)}
-                onDropImage={(img, x, y, pageAspect) => {
+                onDropImage={(drop, x, y, pageAspect) => {
+                  if ("item" in drop) {
+                    // Heights are page-height fractions, so they are converted to this page's shape.
+                    // The group's top-left lands at the pointer.
+                    const k = drop.item.aspect / pageAspect;
+                    const members = templateAnns(drop.item);
+                    const group = members.length > 1 ? newId() : undefined;
+                    const placed: Annotation[] = members.map((t) => ({
+                      ...t, id: newId(), pageIndex: i, group, x: x + t.x, y: y + t.y * k, h: t.h * k,
+                      signature: t.signature && { ...t.signature, ...(t.signature.sy && { sy: t.signature.sy * k }) },
+                    }));
+                    commit((prev) => [...prev, ...placed]);
+                    setSelectedId((placed.find((p) => p.kind === "text") ?? placed[0]).id);
+                    setTool("select");
+                    setImgOpen(false);
+                    return;
+                  }
+                  let img = drop;
                   // Signatures land at a standard text size; other images at a share of the page width.
                   const w = img.signature ? (img.w * SIGNATURE_PT_PER_PX) / widthPt : img.width;
                   const h = (w * img.h) / img.w / pageAspect;
@@ -645,6 +705,14 @@ export default function BlankPdfPage() {
                 style={{ left: menu.x, top: menu.y }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
+                <button
+                  role="menuitem"
+                  className="block w-full px-3 py-1.5 text-left hover:bg-black/5"
+                  onClick={() => { void saveItem(menu.id); setMenu(null); }}
+                >
+                  保存
+                </button>
+                <div className="my-1 h-px bg-[var(--border-subtle)]" />
                 {LAYER_ITEMS.map(({ to, label }) => (
                   <button
                     key={to} role="menuitem"
@@ -699,7 +767,7 @@ function PageView(props: {
   onEditorEl: (el: HTMLDivElement | null) => void;
   onSignatureResize: (id: string) => void;
   /** pageAspect is height / width, to keep the image's proportions in page fractions. */
-  onDropImage: (img: ImageDrop, x: number, y: number, pageAspect: number) => void;
+  onDropImage: (drop: Drop, x: number, y: number, pageAspect: number) => void;
 }) {
   const { doc, zoom, pageIndex, anns, tool, selectedId, editingId, onSelect, onEdit, onCreate, onDragStart, patch, onRemove, onMenu, onUngroupSignature, onEditorEl, onSignatureResize, onDropImage } = props;
   const canvasBoxRef = useRef<HTMLDivElement>(null);
@@ -729,7 +797,7 @@ function PageView(props: {
     e.stopPropagation();
     overlayRef.current!.setPointerCapture(e.pointerId);
     const p = point(e);
-    drag.current = { id: a.id, mode, startX: p.x, startY: p.y, orig: a, recorded };
+    drag.current = { id: a.id, mode, startX: p.x, startY: p.y, orig: a, recorded, members: mode === "move" ? groupOf(anns, a) : undefined };
   };
 
   const onDown = (e: React.PointerEvent) => {
@@ -752,7 +820,18 @@ function PageView(props: {
     const p = point(e);
     const dx = p.x - d.startX, dy = p.y - d.startY;
     if (d.mode === "move") {
-      patch(d.id, { x: d.orig.x + dx, y: d.orig.y + dy });
+      for (const m of d.members ?? [d.orig]) patch(m.id, { x: m.x + dx, y: m.y + dy });
+    } else if (d.orig.kind === "text" && d.mode.length === 2) {
+      // Corner drag on text scales it, font sizes included; the opposite corner stays put. orig w/h are the rendered size.
+      const { x, y, w, h } = d.orig;
+      const f = Math.max(0.2, (w + (d.mode.includes("w") ? -dx : dx)) / w);
+      patch(d.id, {
+        fontSize: (d.orig.fontSize ?? 0.015) * f,
+        runs: d.orig.runs?.map((r) => (r.size === undefined ? r : { ...r, size: r.size * f })),
+        w: d.autoW ? 0 : w * f,
+        x: d.mode.includes("w") ? x + w - w * f : x,
+        y: d.mode.includes("n") ? y + h - h * f : y,
+      });
     } else if (d.orig.kind === "image" && d.mode.length === 2) {
       // Corner drag on an image keeps proportions: the opposite corner stays put.
       const { x, y, w, h } = d.orig;
@@ -802,7 +881,7 @@ function PageView(props: {
           e.preventDefault();
           const r = overlayRef.current!.getBoundingClientRect();
           const p = point(e);
-          onDropImage(JSON.parse(raw) as ImageDrop, p.x, p.y, r.height / r.width);
+          onDropImage(JSON.parse(raw) as Drop, p.x, p.y, r.height / r.width);
         }}
       >
         {anns.map((a) => {
@@ -867,64 +946,74 @@ function PageView(props: {
             );
           }
           const editing = a.id === editingId;
+          // Outer box: position, outline and handles. Inner: the text, so handles stay outside the editable content and show while typing.
           return (
             <div
-              // Remount on edit so React never reconciles children the user typed into.
-              key={`${a.id}-${editing}`} {...common}
-              ref={(el) => {
-                if (!editing) return;
-                onEditorEl(el);
-                if (!el || el.dataset.init) return;
-                el.dataset.init = "1";
-                writeRuns(el, runsOf(a));
-                // Deferred: focusing inside pointerdown is undone by the click's own focus change, which blurs and deletes the new empty text.
-                setTimeout(() => el.focus());
-              }}
-              contentEditable={editing}
-              suppressContentEditableWarning
-              // Saved per keystroke: leaving edit mode can unmount this element before blur fires.
-              onInput={(e) => {
-                const runs = readRuns(e.currentTarget);
-                patch(a.id, { runs, text: plainText(runs) });
-              }}
-              onKeyDown={(e) => {
-                // <br> instead of the browser's <div> per line, so lines map 1:1 to "\n".
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  if (!document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n");
-                }
-              }}
-              onPaste={(e) => {
-                // Plain text only: pasted HTML would bring fonts and colors the export cannot draw.
-                e.preventDefault();
-                document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
-              }}
-              onBlur={() => onEdit(null)}
+              key={a.id} {...common}
               className={`absolute min-w-[1em] ${editing ? "cursor-text" : "cursor-move"} ${ring}`}
-              style={{
-                left: `${a.x * 100}%`, top: `${a.y * 100}%`, color: a.color, textAlign: a.align ?? "left",
-                // A width is set once a side handle is dragged; then it wraps per character like the export (layoutRuns).
-                ...(a.w > 0 ? { width: `${a.w * 100}%`, whiteSpace: "pre-wrap", wordBreak: "break-all" } : { whiteSpace: "pre" }),
-                fontSize: `${(a.fontSize ?? 0.015) * 100}cqw`, lineHeight: LINE_HEIGHT,
-                fontFamily: fontCss(a.font), fontWeight: a.bold ? 700 : 400,
-              }}
+              style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, ...(a.w > 0 && { width: `${a.w * 100}%` }) }}
             >
-              {editing ? null : runsOf(a).map((r, i) => (
-                <span key={i} style={{
-                  ...(r.size !== undefined && { fontSize: `${r.size * 100}cqw` }),
-                  ...(r.bold !== undefined && { fontWeight: r.bold ? 700 : 400 }),
-                  ...(r.color !== undefined && { color: r.color }),
-                }}>{r.text}</span>
-              ))}
-              {isSel && !editing && TEXT_HANDLES.map(({ c, cls }) => (
+              <div
+                // Remount on edit so React never reconciles children the user typed into.
+                key={String(editing)}
+                ref={(el) => {
+                  if (!editing) return;
+                  onEditorEl(el);
+                  if (!el || el.dataset.init) return;
+                  el.dataset.init = "1";
+                  writeRuns(el, runsOf(a));
+                  // Deferred: focusing inside pointerdown is undone by the click's own focus change, which blurs and deletes the new empty text.
+                  setTimeout(() => el.focus());
+                }}
+                contentEditable={editing}
+                suppressContentEditableWarning
+                // Saved per keystroke: leaving edit mode can unmount this element before blur fires.
+                onInput={(e) => {
+                  const runs = readRuns(e.currentTarget);
+                  patch(a.id, { runs, text: plainText(runs) });
+                }}
+                onKeyDown={(e) => {
+                  // <br> instead of the browser's <div> per line, so lines map 1:1 to "\n".
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (!document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n");
+                  }
+                }}
+                onPaste={(e) => {
+                  // Plain text only: pasted HTML would bring fonts and colors the export cannot draw.
+                  e.preventDefault();
+                  document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+                }}
+                onBlur={() => onEdit(null)}
+                className="outline-none"
+                style={{
+                  color: a.color, textAlign: a.align ?? "left",
+                  // A width is set once a side handle is dragged; then it wraps per character like the export (layoutRuns).
+                  ...(a.w > 0 ? { whiteSpace: "pre-wrap", wordBreak: "break-all" } : { whiteSpace: "pre" }),
+                  fontSize: `${(a.fontSize ?? 0.015) * 100}cqw`, lineHeight: LINE_HEIGHT,
+                  fontFamily: fontCss(a.font), fontWeight: a.bold ? 700 : 400,
+                }}
+              >
+                {editing ? null : runsOf(a).map((r, i) => (
+                  <span key={i} style={{
+                    ...(r.size !== undefined && { fontSize: `${r.size * 100}cqw` }),
+                    ...(r.bold !== undefined && { fontWeight: r.bold ? 700 : 400 }),
+                    ...(r.color !== undefined && { color: r.color }),
+                  }}>{r.text}</span>
+                ))}
+              </div>
+              {isSel && SIGNATURE_HANDLES.map(({ c, cls }) => (
                 <div
                   key={c}
-                  contentEditable={false}
                   className={`absolute h-3 w-3 rounded-sm border border-white bg-[var(--brand)] ${cls}`}
+                  // Side handles keep the editor open; a corner changes run sizes, so it ends editing (via blur) to redraw them.
+                  onMouseDown={c.length === 1 ? keepFocus : undefined}
                   onPointerDown={(e) => {
-                    // Auto-width text has w = 0, so resizing starts from its rendered width.
-                    const w = a.w || e.currentTarget.parentElement!.offsetWidth / overlayRef.current!.offsetWidth;
-                    startDrag(e, { ...a, w }, c);
+                    const box = e.currentTarget.parentElement!, page = overlayRef.current!;
+                    // Auto-width text has w = 0, so resizing starts from its rendered size.
+                    const w = a.w || box.offsetWidth / page.offsetWidth;
+                    startDrag(e, { ...a, w, ...(c.length === 2 && { h: box.offsetHeight / page.offsetHeight }) }, c);
+                    drag.current!.autoW = !a.w;
                   }}
                 />
               ))}

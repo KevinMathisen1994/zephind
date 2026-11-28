@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseDetection, parseImage, parseSignature } from "./blankPdf";
+import { parseDetection, parseImage, parseItem, parseSignature } from "./blankPdf";
 
 const r = parseDetection(
   {
@@ -33,3 +33,11 @@ assert.throws(() => parseSignature({ fields: { companyName: "a", smallScale: 5 }
 assert.throws(() => parseSignature({ fields: { companyName: "x".repeat(101) } }));
 assert.throws(() => parseSignature({ fields: { companyName: "a", tel: 3 } }));
 console.log("ok");
+
+const text = { kind: "text", x: 0.05, y: 0, w: 0, h: 0, runs: [{ text: "株式会社サンプル", bold: true }] };
+const item = { aspect: 1.41, anns: [{ kind: "image", x: 0, y: 0, w: 0.03, h: 0.02, src: "data:image/png;base64,iVBORw0KGgo=" }, text] };
+assert.deepEqual(parseItem({ name: " 帯 ", item }), { name: "帯", item });
+assert.throws(() => parseItem({ name: "x", item: { ...item, anns: [{ ...text, kind: "script" }] } }), /kind/);
+assert.throws(() => parseItem({ name: "x", item: { ...item, anns: [{ ...text, kind: "image", src: "javascript:alert(1)" }] } }), /src/);
+assert.throws(() => parseItem({ name: "x", item: { ...item, anns: [] } }), /anns/);
+assert.throws(() => parseItem({ name: "", item }), /name/);

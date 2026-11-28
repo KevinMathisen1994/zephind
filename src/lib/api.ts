@@ -273,6 +273,15 @@ export const api = {
       method: "DELETE", key: "blankPdf.removeImage", path: (a) => `/api/blank-pdf/images/${id(a)}`,
       invalidates: ["blankPdf.images"],
     }),
+    items: endpoint({ method: "GET", key: "blankPdf.items", path: () => "/api/blank-pdf/items" }),
+    addItem: endpoint({
+      method: "POST", key: "blankPdf.addItem", path: () => "/api/blank-pdf/items",
+      body: (a) => a, invalidates: ["blankPdf.items"],
+    }),
+    removeItem: endpoint({
+      method: "DELETE", key: "blankPdf.removeItem", path: (a) => `/api/blank-pdf/items/${id(a)}`,
+      invalidates: ["blankPdf.items"],
+    }),
     signatures: endpoint({ method: "GET", key: "blankPdf.signatures", path: () => "/api/blank-pdf/signatures" }),
     addSignature: endpoint({
       method: "POST", key: "blankPdf.addSignature", path: () => "/api/blank-pdf/signatures",

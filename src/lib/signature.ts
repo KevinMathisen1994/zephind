@@ -16,7 +16,7 @@ export interface SignatureFields {
   bigScale?: number;
   smallScale?: number;
 }
-export interface SavedSignature { _id: string; name: string; fields: SignatureFields }
+export interface SavedSignature { _id: string; name: string; fields: SignatureFields; /** false for another user's shared signature. */ mine?: boolean }
 
 export type SignatureKey = "companyName" | "address" | "license" | "tel" | "fax" | "dealType";
 /** Per-line overrides set by clicking a line on the page. */

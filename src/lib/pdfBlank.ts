@@ -39,6 +39,8 @@ export interface Annotation {
   /** Image that must keep its proportions (signatures): only corner handles. */
   keepRatio?: boolean;
   signature?: PlacedSignature;
+  /** Items with the same group move and save together (a split signature's text and logo). */
+  group?: string;
   /** Border only, no fill. */
   outline?: boolean;
   /** Id from FONTS. */
@@ -217,7 +219,19 @@ async function loadImage(src: string) {
 export const IMAGE_MIME = "application/x-zephind-image";
 export interface ImageDrop { src: string; w: number; h: number; name: string; width: number; keepRatio?: boolean; signature?: PlacedSignature }
 
-export interface SavedImage { _id: string; name: string; src: string; w: number; h: number }
+/**
+ * Placed items saved for reuse (right-click → 保存): one item or a whole group, positions relative to the group's top-left.
+ * aspect is the page's height/width, to convert heights onto another page.
+ */
+type LegacyTemplate = Omit<Annotation, "id" | "pageIndex" | "x" | "y"> & { aspect: number };
+export type ItemTemplate = { aspect: number; anns: Omit<Annotation, "id" | "pageIndex" | "group">[] } | LegacyTemplate;
+/** Saved before groups existed: one item without a position. */
+export const templateAnns = (t: ItemTemplate) => ("anns" in t ? t.anns : [{ ...t, x: 0, y: 0 }]);
+export interface SavedItem { _id: string; name: string; item: ItemTemplate }
+/** Everything that can be dragged onto a page. */
+export type Drop = ImageDrop | { item: ItemTemplate; name: string };
+
+export interface SavedImage { _id: string; name: string; src: string; w: number; h: number; /** false for another user's shared image. */ mine?: boolean }
 const IMAGE_MAX_PX = 1200;
 
 /** Downscales so a logo stays a small row in Supabase; JPEG stays JPEG, everything else becomes PNG to keep transparency. */

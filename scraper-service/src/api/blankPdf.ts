@@ -119,7 +119,17 @@ export function parseImage(body: any) {
   return { name: name.trim(), src, w, h };
 }
 
-blankPdfRouter.get("/images", route(async (req) => listOwned(req, "pdfImages")));
+/** The caller's rows plus rows shared with everyone; `mine` tells the UI whether edit/delete is allowed. */
+async function listVisible(req: Request, table: string) {
+  const userId = requireUserId(req);
+  const [own, shared] = await Promise.all([listOwned(req, table), db.list(table, { where: { shared: true } })]);
+  return [...own, ...shared.filter((d) => d.userId !== userId)]
+    .sort((a, b) => Number(b._creationTime) - Number(a._creationTime))
+    // Other users' ids are not sent to the browser.
+    .map(({ userId: owner, ...d }) => ({ ...d, mine: owner === userId }));
+}
+
+blankPdfRouter.get("/images", route(async (req) => listVisible(req, "pdfImages")));
 
 blankPdfRouter.post("/images", route(async (req) => {
   const userId = requireUserId(req);
@@ -130,6 +140,34 @@ blankPdfRouter.post("/images", route(async (req) => {
 blankPdfRouter.delete("/images/:id", route(async (req) => {
   await requireOwned(req, "pdfImages", req.params.id, "画像");
   await db.delete("pdfImages", req.params.id);
+  return { ok: true };
+}));
+
+/** Checks an item saved from the editor; returns the row fields or throws 400. The browser renders it, so only shape and size are checked. */
+export function parseItem(body: any) {
+  const { name, item } = body ?? {};
+  if (typeof name !== "string" || !name.trim() || name.length > 200) throw new HttpError(400, "name is required");
+  if (!item || typeof item !== "object" || !(typeof item.aspect === "number" && item.aspect > 0 && item.aspect <= 10)) throw new HttpError(400, "item.aspect is required");
+  if (!Array.isArray(item.anns) || item.anns.length < 1 || item.anns.length > 20) throw new HttpError(400, "item.anns must hold 1-20 items");
+  for (const a of item.anns) {
+    if (!a || !["box", "text", "image"].includes(a.kind)) throw new HttpError(400, "item kind must be box, text or image");
+    if (![a.x, a.y, a.w, a.h].every((n) => typeof n === "number" && n >= 0 && n <= 10)) throw new HttpError(400, "item positions must be page fractions");
+    if (a.src !== undefined && (typeof a.src !== "string" || !DATA_URL.test(a.src))) throw new HttpError(400, "item src must be a PNG or JPEG data URL");
+  }
+  if (JSON.stringify(item).length > MAX_IMAGE_CHARS + 100_000) throw new HttpError(400, "item is too large");
+  return { name: name.trim(), item };
+}
+
+blankPdfRouter.get("/items", route(async (req) => listOwned(req, "pdfItems")));
+
+blankPdfRouter.post("/items", route(async (req) => {
+  const userId = requireUserId(req);
+  return { id: await db.insert("pdfItems", { ...parseItem(req.body), userId }) };
+}));
+
+blankPdfRouter.delete("/items/:id", route(async (req) => {
+  await requireOwned(req, "pdfItems", req.params.id, "アイテム");
+  await db.delete("pdfItems", req.params.id);
   return { ok: true };
 }));
 
@@ -157,7 +195,7 @@ export function parseSignature(body: any) {
   return { name: fields.companyName as string, fields };
 }
 
-blankPdfRouter.get("/signatures", route(async (req) => listOwned(req, "pdfSignatures")));
+blankPdfRouter.get("/signatures", route(async (req) => listVisible(req, "pdfSignatures")));
 
 blankPdfRouter.post("/signatures", route(async (req) => {
   const userId = requireUserId(req);
