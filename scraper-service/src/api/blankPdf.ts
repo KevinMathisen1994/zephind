@@ -203,7 +203,10 @@ blankPdfRouter.post("/signatures", route(async (req) => {
 }));
 
 blankPdfRouter.put("/signatures/:id", route(async (req) => {
-  await requireOwned(req, "pdfSignatures", req.params.id, "署名");
+  const userId = requireUserId(req);
+  const doc = await db.get("pdfSignatures", req.params.id);
+  // Shared templates are team-wide, so anyone may edit them; deleting stays with the owner.
+  if (!doc || (doc.userId !== userId && !doc.shared)) throw new HttpError(404, "署名 が見つかりません");
   await db.patch("pdfSignatures", req.params.id, parseSignature(req.body));
   return { ok: true };
 }));
