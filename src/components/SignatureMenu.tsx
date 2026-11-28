@@ -14,6 +14,7 @@ type Rendered = RenderedSignature;
 const SIGNATURE_WIDTH = 0.6; // dropped signatures start at 60% of page width, like a 帯
 // Preview px per signature PNG px; 2段 at 100% fits the modal.
 const PREVIEW_SCALE = 0.35;
+const MENU_WIDTH = 384; // w-96
 const EMPTY: SignatureFields = { companyName: "", address: "", license: "", tel: "", fax: "", dealType: "媒介", showLogo: true, layout: "stacked" };
 const LAYOUTS = [
   { value: "stacked", label: "3段", hint: "住所 / 会社名（大）・TEL / 免許番号" },
@@ -36,6 +37,7 @@ export function SignatureMenu() {
   const items = useApiQuery(api.blankPdf.items) as SavedItem[] | undefined;
   const removeItem = useApiMutation(api.blankPdf.removeItem);
   const [open, setOpen] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
   const [editing, setEditing] = useState<SavedSignature | "new" | null>(null);
   const [previews, setPreviews] = useState<Record<string, Rendered>>({});
   const ref = useRef<HTMLDivElement>(null);
@@ -61,7 +63,12 @@ export function SignatureMenu() {
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          // Open toward whichever side has room: the toolbar wraps, so the button can be at either edge.
+          const r = ref.current?.getBoundingClientRect();
+          setAlignRight(!!r && r.left + MENU_WIDTH > window.innerWidth - 16);
+          setOpen((o) => !o);
+        }}
         aria-expanded={open}
         className="flex h-9 items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 hover:bg-black/5"
       >
@@ -70,7 +77,7 @@ export function SignatureMenu() {
         <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-96 rounded-xl border border-[var(--border-subtle)] bg-white p-3 shadow-lg">
+        <div className={`absolute ${alignRight ? "right-0" : "left-0"} top-full z-20 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border-subtle)] bg-white p-3 shadow-lg`}>
           <p className="mb-2 text-[12px] text-[var(--text-muted)]">ページへドラッグして配置</p>
           {signatures === undefined ? (
             <Loader2 className="mx-auto my-4 h-5 w-5 animate-spin text-[var(--text-muted)]" />
@@ -106,7 +113,7 @@ export function SignatureMenu() {
                         </div>
                       )}
                     </div>
-                    {s.mine !== false && <div className="absolute right-1.5 top-1.5 hidden gap-1 group-hover:flex">
+                    <div className="absolute right-1.5 top-1.5 hidden gap-1 group-hover:flex">
                       <button
                         aria-label={`${s.name}を編集`}
                         onClick={() => { setEditing(s); setOpen(false); }}
@@ -114,14 +121,15 @@ export function SignatureMenu() {
                       >
                         <Pencil className="h-3 w-3" />
                       </button>
-                      <button
+                      {/* Shared templates can be edited by anyone, but only deleted by their owner. */}
+                      {s.mine !== false && <button
                         aria-label={`${s.name}を削除`}
                         onClick={() => { if (window.confirm(`社名ひな形 ${i + 1}「${s.name}」を削除しますか？`)) void removeSignature({ id: s._id }); }}
                         className="flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white"
                       >
                         <X className="h-3 w-3" />
-                      </button>
-                    </div>}
+                      </button>}
+                    </div>
                   </div>
                 );
               })}
@@ -131,7 +139,7 @@ export function SignatureMenu() {
             <>
               <p className="mb-1 mt-3 text-[12px] font-bold text-[var(--text-secondary)]">保存したアイテム</p>
               <div className="max-h-48 space-y-1 overflow-y-auto">
-                {items.map((it) => (
+                {items.map((it, i) => (
                   <div
                     key={it._id} draggable title={it.name}
                     onDragStart={(e) => {
@@ -141,13 +149,16 @@ export function SignatureMenu() {
                     }}
                     className="group flex h-10 cursor-grab items-center gap-2 rounded-md border border-[var(--border-subtle)] px-2 hover:bg-black/5"
                   >
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[11px] font-bold text-white">
+                      {(signatures?.length ?? 0) + i + 1}
+                    </span>
                     {templateAnns(it.item).find((a) => a.src)
                       ? <img src={templateAnns(it.item).find((a) => a.src)!.src} alt="" className="h-7 w-10 shrink-0 object-contain" />
                       : <Type className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />}
                     <span className="min-w-0 flex-1 truncate">{it.name}</span>
                     <button
                       aria-label={`${it.name}を削除`}
-                      onClick={() => { if (window.confirm(`「${it.name}」を削除しますか？`)) void removeItem({ id: it._id }); }}
+                      onClick={() => { if (window.confirm(`保存したアイテム ${(signatures?.length ?? 0) + i + 1}「${it.name}」を削除しますか？`)) void removeItem({ id: it._id }); }}
                       className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex"
                     >
                       <X className="h-3 w-3" />
@@ -203,14 +214,15 @@ function SignatureEditor({ initial, onClose }: { initial: SavedSignature | null;
   // Portal: a transformed ancestor on the page would make "fixed" relative to it instead of the viewport.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div role="dialog" aria-label="署名の編集" className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+      <div role="dialog" aria-label="署名の編集" className="flex max-h-full w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
           <h2 className="text-[16px] font-bold">{initial ? "署名を編集" : "新しい署名"}</h2>
           <button onClick={onClose} aria-label="閉じる" className="rounded-full p-1 text-[var(--text-muted)] hover:bg-black/5">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="space-y-4 p-5">
+        {/* Only the form scrolls; header and save buttons stay visible on a short window. */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           <div>
             <span className="mb-1 block text-[12px] font-bold text-[var(--text-secondary)]">レイアウト</span>
             <div className="grid grid-cols-2 gap-2">
